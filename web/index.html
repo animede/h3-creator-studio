@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3-creator-studio</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>h3-creator-studio</h1>
+  <div class="gauges">
+    <div class="gauge" id="g-vram"><span class="g-label">VRAM</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+    <div class="gauge" id="g-shared" hidden><span class="g-label">共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+    <div class="gauge" id="g-ram"><span class="g-label">CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+  </div>
+</header>
+<div id="warning" class="warning" hidden></div>
+
+<section class="panel" id="parts">
+  <h2 id="parts-head" role="button" tabindex="0" aria-expanded="true"><span class="caret">▾</span> 部品 <span id="parts-summary" class="summary"></span></h2>
+  <div id="parts-body">
+    <div id="rows"></div>
+    <div id="opline" class="opline"></div>
+  </div>
+</section>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="image" role="tab">画像</button>
+  <button class="tab" data-tab="video" role="tab">動画</button>
+  <button class="tab" data-tab="music" role="tab">音楽</button>
+</nav>
+
+<main class="workspace" id="workspace">
+  <section class="panel ops" id="ops" aria-label="操作">
+    <h2>操作</h2>
+    <div class="tabpanel" id="tab-image">
+      <label class="fld"><span class="fl">プロンプト</span>
+        <textarea id="im-prompt" rows="5" maxlength="8000" placeholder="作りたい画像を日本語や英語で書きます"></textarea></label>
+      <div class="enh"><button id="im-enh" type="button" title="H3-Image の公式ルールで、短い指示を詳しいプロンプトに書き直します(管理役の LLM を使います)">プロンプト強化</button>
+        <a href="#" id="im-enh-undo" hidden>元に戻す</a><span class="note" id="im-enh-note"></span></div>
+      <div class="fld"><span class="fl">サイズ</span>
+        <div class="inline">
+          <select id="im-size">
+            <option value="1024x1024">1024×1024</option><option value="1344x768">1344×768</option>
+            <option value="768x1344">768×1344</option><option value="1536x1536">1536×1536</option>
+            <option value="2048x2048">2048×2048</option><option value="custom">自由入力</option>
+          </select>
+          <input id="im-w" type="number" min="256" max="4096" step="32" value="1024" aria-label="幅">
+          <span>×</span>
+          <input id="im-h" type="number" min="256" max="4096" step="32" value="1024" aria-label="高さ">
+        </div>
+        <span class="note">32 の倍数に丸めます(256〜4096)。VRAM が少ないときは小さめに</span></div>
+      <div class="fld two">
+        <label><span class="fl">ステップ数</span>
+          <select id="im-steps"><option value="">サーバ既定</option><option value="2">2</option><option value="3">3</option><option value="6">6</option></select></label>
+        <div><span class="fl">シード</span>
+          <div class="inline"><input id="im-seed" type="number" min="0" placeholder="例: 12345" disabled>
+            <label class="chk"><input id="im-random" type="checkbox" checked>ランダム</label></div></div>
+      </div>
+      <div class="fld"><span class="fl">参照画像 <span id="im-mode" class="modetag"></span></span>
+        <div class="refs" id="im-refs" aria-label="参照画像のドロップ欄">
+          <div class="refs-list" id="im-refs-list"></div>
+          <div class="refs-empty" id="im-refs-empty">ここに画像をドロップ<br><small>PC のファイル、または右のギャラリー・履歴から</small></div>
+          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+        </div>
+        <span class="note" id="im-refs-note">最大 16 枚。プロンプトでは &lt;Picture 1&gt; のように番号で指せます</span></div>
+      <div class="msg" id="im-msg" hidden></div>
+      <div class="actions"><button id="im-go" class="primary">生成</button><button id="im-stop" disabled>中止</button></div>
+    </div>
+    <div class="tabpanel" id="tab-video" hidden>
+      <div class="seg" id="vd-modes" role="group" aria-label="作り方">
+        <button data-mode="t2va" class="active">テキストから</button><button data-mode="fl2va">先頭フレームから</button>
+        <button data-mode="ref2va">参照から</button><button data-mode="still">静止画</button>
+      </div>
+      <label class="fld"><span class="fl">プロンプト <span id="vd-mode-tag" class="modetag"></span></span>
+        <textarea id="vd-prompt" rows="5" maxlength="8000" placeholder="作りたい動画の場面・動き・セリフ・音を、日本語や英語で書きます"></textarea></label>
+      <div class="enh"><button id="vd-enh" type="button" title="MiniMax 公式のプロンプトの書き方に沿って書き直します(管理役の LLM を使います)">プロンプト強化</button>
+        <a href="#" id="vd-enh-undo" hidden>元に戻す</a><span class="note" id="vd-enh-note"></span></div>
+      <div class="fld"><span class="fl">解像度</span>
+        <select id="vd-res">
+          <option value="768x768">768×768</option><option value="1344x768">1344×768</option><option value="768x1344">768×1344</option>
+          <option value="512x512">512×512</option><option value="768x512">768×512</option><option value="512x768">512×768</option>
+        </select>
+        <span class="note">ネイティブは短辺 768。6GB のカードは 512²〜768×512 が現実的</span></div>
+      <div class="fld" id="vd-secs-fld"><span class="fl">長さ <b id="vd-secs-val">5 秒</b></span>
+        <input id="vd-secs" type="range" min="5" max="15" step="1" value="5">
+        <label class="chk" id="vd-match-fld" hidden><input id="vd-match" type="checkbox">音声の長さに合わせる</label></div>
+      <div class="fld"><span class="fl">シード</span>
+        <div class="inline"><input id="vd-seed" type="number" min="0" placeholder="例: 12345" disabled>
+          <label class="chk"><input id="vd-random" type="checkbox" checked>ランダム</label></div></div>
+      <div class="fld two" id="vd-frames" hidden>
+        <div><span class="fl">先頭フレーム</span>
+          <div class="refs frame" id="vd-first"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
+        <div><span class="fl">最後のフレーム(任意)</span>
+          <div class="refs frame" id="vd-last"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
+      </div>
+      <div class="fld" id="vd-refs-fld" hidden><span class="fl" id="vd-refs-label">参照(画像・動画・音声、順番に意味があります)</span>
+        <div class="refs" id="vd-refs" aria-label="参照のドロップ欄">
+          <div class="refs-list" id="vd-refs-list"></div>
+          <div class="refs-empty" id="vd-refs-empty">ここに画像・動画・音声をドロップ<br><small>PC のファイル、または右のギャラリー・履歴から</small></div>
+          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+        </div>
+        <span class="note" id="vd-refs-count"></span>
+        <label class="chk" id="vd-vocal-fld" hidden><input id="vd-vocal" type="checkbox">Vocal Lock(参照の音声に口を合わせる)</label></div>
+      <details class="tts" id="vd-tts">
+        <summary>音声を作る(読み上げ)</summary>
+        <div class="tts-body">
+          <textarea id="vd-tts-text" rows="3" maxlength="2000" placeholder="読み上げる文"></textarea>
+          <div class="inline"><select id="vd-tts-speaker" aria-label="話者"><option value="">話者を読み込み中…</option></select>
+            <label class="chk">話速 <input id="vd-tts-speed" type="range" min="0.5" max="2" step="0.1" value="1"><span id="vd-tts-speed-val">1.0</span></label></div>
+          <div class="inline"><button id="vd-tts-go">音声を作る</button><span class="note" id="vd-tts-note"></span></div>
+          <audio id="vd-tts-audio" controls hidden></audio>
+        </div>
+      </details>
+      <div class="msg" id="vd-msg" hidden></div>
+      <div class="actions"><button id="vd-go" class="primary">生成</button><button id="vd-stop" disabled>中止</button></div>
+    </div>
+    <div class="tabpanel" id="tab-music" hidden>
+      <div class="fld"><span class="fl">ジャンル</span>
+        <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル"></div></div>
+      <label class="fld"><span class="fl">テーマ <small>(空ならおまかせ)</small></span>
+        <input id="mu-theme" type="text" maxlength="200" placeholder="例: 夜行バスの窓から見える朝焼け"></label>
+      <label class="fld"><span class="fl">歌詞 <small>(空なら AI 作詞。[Verse] [Chorus] などのタグが使えます)</small></span>
+        <textarea id="mu-lyrics" rows="6" maxlength="6000" placeholder="自分の歌詞を使うときだけ書きます"></textarea></label>
+      <div class="fld two">
+        <label><span class="fl">歌の言語</span>
+          <select id="mu-lang"><option value="Japanese">日本語</option><option value="English">English</option>
+            <option value="Korean">韓国語</option><option value="Chinese">中国語</option></select></label>
+        <label><span class="fl">長さ</span>
+          <select id="mu-dur"><option value="-1">自動</option><option value="30">30 秒</option><option value="60">60 秒</option>
+            <option value="90">90 秒</option><option value="120">120 秒</option><option value="180">180 秒</option><option value="240">240 秒</option></select></label>
+      </div>
+      <div class="fld two">
+        <label><span class="fl">ムード <small>(任意)</small></span>
+          <select id="mu-mood"><option value="">おまかせ</option><option value="bright and happy">明るい</option>
+            <option value="bittersweet and sad">切ない</option><option value="intense and powerful">激しい</option>
+            <option value="calm and gentle">穏やか</option><option value="mysterious and fantastical">神秘的</option>
+            <option value="romantic and tender">ロマンチック</option><option value="playful and fun">楽しい</option>
+            <option value="melancholic and dark">メランコリック</option><option value="epic and grand">壮大</option>
+            <option value="cool and stylish">クール</option></select></label>
+        <label><span class="fl">ボーカル <small>(任意)</small></span>
+          <select id="mu-vocal"><option value="">おまかせ</option><option value="female vocal">女性</option><option value="male vocal">男性</option>
+            <option value="powerful vocal">力強い</option><option value="breathy whisper vocal">ウィスパー</option>
+            <option value="falsetto vocal">ファルセット</option><option value="vocal harmonies">ハーモニー</option></select></label>
+      </div>
+      <label class="chk fld"><input id="mu-inst" type="checkbox">インスト(歌なし)</label>
+      <div class="msg" id="mu-msg" hidden></div>
+      <div class="actions"><button id="mu-go" class="primary">生成</button><button id="mu-stop" disabled>中止</button></div>
+      <div class="plan" id="mu-plan" hidden>
+        <div class="plan-head">AI が作ったプラン</div>
+        <div class="plan-theme" id="mu-plan-theme"></div>
+        <div class="plan-cap" id="mu-plan-cap"></div>
+        <pre class="plan-lyrics" id="mu-plan-lyrics"></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel output" id="output" aria-label="生成物">
+    <h2>生成物</h2>
+    <div class="progress" id="progress" hidden>
+      <div class="pbar"><i></i></div>
+      <div class="pmsg" id="pmsg"></div>
+      <ul class="psteps" id="psteps"></ul>
+      <pre class="plog" id="plog" hidden></pre>
+    </div>
+    <div class="viewer" id="viewer"><div class="placeholder">まだ生成物がありません</div></div>
+    <div class="vmeta" id="vmeta" hidden>
+      <span class="vname" id="vname"></span><span class="vinfo" id="vinfo"></span>
+      <span class="vbtns"><a id="vsave" class="btn" download>保存</a><span id="vacts"></span></span>
+    </div>
+  </section>
+
+  <section class="panel history" id="history" aria-label="履歴">
+    <div class="phead"><h2>履歴</h2><button id="to-gallery">ギャラリー</button></div>
+    <div class="thumbs" id="hist-grid"></div>
+  </section>
+
+  <section class="panel gallery" id="gallery" aria-label="ギャラリー" hidden>
+    <div class="phead"><h2>ギャラリー</h2>
+      <div class="chips" id="g-chips">
+        <button class="chip active" data-kind="all">全て</button><button class="chip" data-kind="image">画像</button>
+        <button class="chip" data-kind="video">動画</button><button class="chip" data-kind="audio">音楽</button>
+      </div>
+      <button id="from-gallery">戻る</button>
+    </div>
+    <div class="thumbs big" id="gal-grid"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+<script src="gallery.js"></script>
+<script src="dnd.js"></script>
+<script src="jobs.js"></script>
+<script src="image.js"></script>
+<script src="video.js"></script>
+<script src="music.js"></script>
+</body>
+</html>

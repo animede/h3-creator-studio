@@ -1,0 +1,39 @@
+# この PC 用の上書き。このファイルを studio.local.toml という名前でコピーして、必要な所だけ残します
+# (studio.local.toml は git の管理外です)。studio.toml と同じ形式で、書いた項目だけが上書きされます。
+#
+# 既に minimax-h3 などを別の場所に入れているときは、その部品の dir を書きます。
+# 書いた部品は、setup が取り込みもモデル取得も飛ばします(その場所をそのまま使います)。
+# パスは '...'(シングルクォート)で囲むと、Windows の \ をそのまま書けます。
+
+# --- Windows の例 ---
+# [components.h3]
+# dir = 'C:\AI\minimax-h3'
+# [components.h3image]
+# dir = 'C:\AI\minimax-h3-image-server'
+# [components.ace]
+# dir = 'C:\AI\ACE-Step-1.5-fast'
+# [components.aivis]
+# dir = 'C:\AI\AivisSpeech-Engine'      # run.exe があるフォルダ(配布版を展開したもの)
+
+# --- Linux の例 ---
+# [components.h3]
+# dir = "/home/you/minimax-h3"
+# [components.h3image]
+# dir = "/home/you/minimax-h3-image-server"
+# [components.ace]
+# dir = "/home/you/ACE-Step-1.5-fast"
+# [components.aivis]
+# dir = "/home/you/AivisSpeech-Engine"   # run があるフォルダ(Linux-x64 の 1 つ上でもよい)
+
+# --- そのほかの上書き ---
+# port = 8700                    # 管理役のポート
+# components_dir = "D:/studio-components"   # 部品を取り込む場所を変える
+#
+# [components.h3]
+# enabled = false                # この部品を使わない
+# port = 8612                    # 部品のポートを変える(競合したとき)
+# [components.h3.env]
+# H3_VRAM_LIMIT_GB = "8"         # 部品に渡す環境変数
+#
+# [llm]
+# gpu = "off"                    # 同梱 LLM を CPU だけで動かす("auto" / "off" / "all" / 層数)

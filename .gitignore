@@ -1,0 +1,14 @@
+# 取り込んだ部品(それぞれ独立した git リポジトリ)
+components/
+# 生成物と台帳、ログ
+outputs/
+logs/
+# 環境と設定(個人のパスが入る)
+.venv/
+venv/
+studio.local.toml
+__pycache__/
+*.pyc
+# 配布版などのダウンロード途中のアーカイブ
+*.7z*
+_download/

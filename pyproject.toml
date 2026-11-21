@@ -1,0 +1,18 @@
+[project]
+name = "h3-creator-studio"
+version = "0.1.0"
+description = "MiniMax-H3 / H3-Image / ACE-Step / AivisSpeech を 1 つの画面から使う制作スタジオ(管理役)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "psutil",
+    "pillow",
+    "python-multipart",
+    "huggingface_hub",
+    "tomli; python_version < '3.11'",
+]
+
+[tool.setuptools]
+packages = ["studio"]

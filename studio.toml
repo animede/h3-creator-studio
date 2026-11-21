@@ -1,0 +1,38 @@
+# h3-creator-studio の既定設定(リポジトリに含める)。
+# 個人の設定は studio.local.toml(git 管理外)に同じ形式で書くと、こちらを上書きする。
+
+host = "127.0.0.1"
+port = 8700
+components_dir = "components"   # 部品を置くフォルダ(リポジトリ直下からの相対)
+
+# 各部品: repo = components_dir 内のフォルダ名、dir = 場所を直接指定(絶対パス可)、
+#         port = 待ち受けポート、enabled = false で無効化、env = 追加の環境変数
+[components.h3]
+repo = "minimax-h3"
+port = 8611
+enabled = true
+
+[components.h3image]
+repo = "minimax-h3-image-server"
+port = 8633
+enabled = true
+
+[components.ace]
+repo = "ACE-Step-1.5-fast"
+port = 8001
+enabled = true
+
+[components.aivis]
+repo = "AivisSpeech-Engine"
+port = 10101
+enabled = true
+
+# 管理役が持つ LLM(プロンプト強化・作詞)。llama.cpp の llama-server で Gemma 4 E4B を動かす。
+# gpu = "auto"(空き VRAM に入る分だけ GPU、残りは CPU)/ "off"(CPU のみ)/ "all" / 層数
+# gguf・llama_server を書くと、取得せずにそのファイルを使う。tools_dir は取得先(リポジトリ直下からの相対)。
+[llm]
+port = 8701
+gpu = "auto"
+gguf = ""
+llama_server = ""
+tools_dir = "components/llm"

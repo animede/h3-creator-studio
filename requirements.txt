@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+psutil
+pillow
+python-multipart
+huggingface_hub
+tomli; python_version < "3.11"
+py7zr
+multivolumefile
