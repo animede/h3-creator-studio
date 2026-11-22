@@ -3,7 +3,7 @@
   const MAX = { image: 9, video: 3, audio: 3 };
   const KIND = { image: "画像", video: "動画", audio: "音声" };
   const ICON = { video: "▶", audio: "🔊" };
-  const TAG = { t2va: "テキストから動画", fl2va: "先頭フレームから動画", ref2va: "参照から動画" };
+  const TAG = { t2va: "T2VA: テキストから動画", fl2va: "FL2VA: 最初・最後のフレームから動画", ref2va: "Ref2VA: 参照から動画" };
   const refs = [];                  // 参照(生成物のレコード)。順番が意味を持つ
   const frames = { first: null, last: null };
   let mode = "t2va";
@@ -35,7 +35,7 @@
     vd("frames").hidden = mode !== "fl2va";
     vd("refs-fld").hidden = !hasRefs();
     vd("refs-label").textContent = mode === "still" ? "参照(任意。あれば参照から静止画、なければテキストから)" : "参照(画像・動画・音声、順番に意味があります)";
-    vd("mode-tag").textContent = mode === "still" ? (refs.length ? "参照から静止画" : "テキストから静止画") : TAG[mode];
+    vd("mode-tag").textContent = mode === "still" ? (refs.length ? "Ref2I: 参照から静止画" : "T2I: テキストから静止画") : TAG[mode];
     vd("secs-fld").hidden = mode === "still";
     vd("enh").disabled = mode === "still";       // 動画向けの強化なので、静止画では使わない(画像タブの強化を使う)
     vd("enh").title = mode === "still" ? "静止画のプロンプトは、画像タブの「プロンプト強化」で書き直せます" : "MiniMax 公式のプロンプトの書き方に沿って書き直します(管理役の LLM を使います)";
@@ -161,7 +161,7 @@
 
   // 生成物ビューアのボタン
   studio.actions.video = (item) => [
-    ...(item.kind === "image" ? [{ label: "先頭フレームに使う", run: () => { setTab("video"); setMode("fl2va"); setFrame("first", item); } }] : []),
+    ...(item.kind === "image" ? [{ label: "最初のフレームに使う", run: () => { setTab("video"); setMode("fl2va"); setFrame("first", item); } }] : []),
     { label: "参照に使う", run: () => { setTab("video"); if (!hasRefs()) setMode("ref2va"); addRef(item); } },
   ];
 
@@ -242,7 +242,7 @@
       params.seconds = +vd("secs").value;
       if (mode === "t2va") kind = "h3.t2va";
       else if (mode === "fl2va") {
-        if (!frames.first && !frames.last) { showMsg("先頭フレームか最後のフレームの画像を入れてください"); return; }
+        if (!frames.first && !frames.last) { showMsg("最初のフレームか最後のフレームの画像を入れてください"); return; }
         kind = "h3.fl2va";
         params.first_image = frames.first ? frames.first.id : null;
         params.last_image = frames.last ? frames.last.id : null;

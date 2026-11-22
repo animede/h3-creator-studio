@@ -35,6 +35,9 @@
   <section class="panel ops" id="ops" aria-label="操作">
     <h2>操作</h2>
     <div class="tabpanel" id="tab-image">
+      <div class="seg" id="im-modes" role="group" aria-label="作り方">
+        <button data-mode="t2i" class="active"><b>T2I</b><small>テキストから</small></button><button data-mode="edit"><b>edit</b><small>参照画像で編集</small></button>
+      </div>
       <label class="fld"><span class="fl">プロンプト</span>
         <textarea id="im-prompt" rows="5" maxlength="8000" placeholder="作りたい画像を日本語や英語で書きます"></textarea></label>
       <div class="enh"><button id="im-enh" type="button" title="H3-Image の公式ルールで、短い指示を詳しいプロンプトに書き直します(管理役の LLM を使います)">プロンプト強化</button>
@@ -58,7 +61,7 @@
           <div class="inline"><input id="im-seed" type="number" min="0" placeholder="例: 12345" disabled>
             <label class="chk"><input id="im-random" type="checkbox" checked>ランダム</label></div></div>
       </div>
-      <div class="fld"><span class="fl">参照画像 <span id="im-mode" class="modetag"></span></span>
+      <div class="fld" id="im-refs-fld"><span class="fl">参照画像 <span id="im-mode" class="modetag"></span></span>
         <div class="refs" id="im-refs" aria-label="参照画像のドロップ欄">
           <div class="refs-list" id="im-refs-list"></div>
           <div class="refs-empty" id="im-refs-empty">ここに画像をドロップ<br><small>PC のファイル、または右のギャラリー・履歴から</small></div>
@@ -70,8 +73,8 @@
     </div>
     <div class="tabpanel" id="tab-video" hidden>
       <div class="seg" id="vd-modes" role="group" aria-label="作り方">
-        <button data-mode="t2va" class="active">テキストから</button><button data-mode="fl2va">先頭フレームから</button>
-        <button data-mode="ref2va">参照から</button><button data-mode="still">静止画</button>
+        <button data-mode="t2va" class="active"><b>T2VA</b><small>テキストから</small></button><button data-mode="fl2va"><b>FL2VA</b><small>最初・最後のフレームから</small></button>
+        <button data-mode="ref2va"><b>Ref2VA</b><small>参照から</small></button><button data-mode="still"><b>T2I / Ref2I</b><small>静止画</small></button>
       </div>
       <label class="fld"><span class="fl">プロンプト <span id="vd-mode-tag" class="modetag"></span></span>
         <textarea id="vd-prompt" rows="5" maxlength="8000" placeholder="作りたい動画の場面・動き・セリフ・音を、日本語や英語で書きます"></textarea></label>
@@ -90,9 +93,9 @@
         <div class="inline"><input id="vd-seed" type="number" min="0" placeholder="例: 12345" disabled>
           <label class="chk"><input id="vd-random" type="checkbox" checked>ランダム</label></div></div>
       <div class="fld two" id="vd-frames" hidden>
-        <div><span class="fl">先頭フレーム</span>
+        <div><span class="fl">最初のフレーム(どちらか一方だけでも可)</span>
           <div class="refs frame" id="vd-first"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
-        <div><span class="fl">最後のフレーム(任意)</span>
+        <div><span class="fl">最後のフレーム</span>
           <div class="refs frame" id="vd-last"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
       </div>
       <div class="fld" id="vd-refs-fld" hidden><span class="fl" id="vd-refs-label">参照(画像・動画・音声、順番に意味があります)</span>
@@ -117,38 +120,85 @@
       <div class="actions"><button id="vd-go" class="primary">生成</button><button id="vd-stop" disabled>中止</button></div>
     </div>
     <div class="tabpanel" id="tab-music" hidden>
-      <div class="fld"><span class="fl">ジャンル</span>
-        <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル"></div></div>
-      <label class="fld"><span class="fl">テーマ <small>(空ならおまかせ)</small></span>
-        <input id="mu-theme" type="text" maxlength="200" placeholder="例: 夜行バスの窓から見える朝焼け"></label>
-      <label class="fld"><span class="fl">歌詞 <small>(空なら AI 作詞。[Verse] [Chorus] などのタグが使えます)</small></span>
-        <textarea id="mu-lyrics" rows="6" maxlength="6000" placeholder="自分の歌詞を使うときだけ書きます"></textarea></label>
+      <div class="seg" id="mu-modes" role="group" aria-label="作り方">
+        <button data-mode="simple" class="active">簡単(ジャンルから)</button><button data-mode="omakase">✨ おまかせ(一言から)</button>
+      </div>
+      <div id="mu-omakase-box" hidden>
+        <label class="fld"><span class="fl">どんな曲?</span>
+          <input id="mu-query" type="text" maxlength="300" placeholder="例: 雨の夜に聴く切ないバラード"></label>
+        <span class="note omk-note">ACE-Step の LM が、キャプション・歌詞・BPM・調まで決めます(管理役の LLM は使いません)</span>
+      </div>
+      <div id="mu-simple-box">
+        <div class="fld"><span class="fl">ジャンル</span>
+          <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル"></div></div>
+      </div>
       <div class="fld two">
         <label><span class="fl">歌の言語</span>
           <select id="mu-lang"><option value="Japanese">日本語</option><option value="English">English</option>
-            <option value="Korean">韓国語</option><option value="Chinese">中国語</option></select></label>
-        <label><span class="fl">長さ</span>
+            <option value="Chinese">中文</option><option value="Korean">한국어</option><option value="Spanish">Español</option>
+            <option value="French">Français</option><option value="German">Deutsch</option><option value="Italian">Italiano</option>
+            <option value="Portuguese">Português</option><option value="Russian">Русский</option></select></label>
+        <label><span class="fl">曲長</span>
           <select id="mu-dur"><option value="-1">自動</option><option value="30">30 秒</option><option value="60">60 秒</option>
             <option value="90">90 秒</option><option value="120">120 秒</option><option value="180">180 秒</option><option value="240">240 秒</option></select></label>
       </div>
-      <div class="fld two">
-        <label><span class="fl">ムード <small>(任意)</small></span>
-          <select id="mu-mood"><option value="">おまかせ</option><option value="bright and happy">明るい</option>
-            <option value="bittersweet and sad">切ない</option><option value="intense and powerful">激しい</option>
-            <option value="calm and gentle">穏やか</option><option value="mysterious and fantastical">神秘的</option>
-            <option value="romantic and tender">ロマンチック</option><option value="playful and fun">楽しい</option>
-            <option value="melancholic and dark">メランコリック</option><option value="epic and grand">壮大</option>
-            <option value="cool and stylish">クール</option></select></label>
-        <label><span class="fl">ボーカル <small>(任意)</small></span>
-          <select id="mu-vocal"><option value="">おまかせ</option><option value="female vocal">女性</option><option value="male vocal">男性</option>
-            <option value="powerful vocal">力強い</option><option value="breathy whisper vocal">ウィスパー</option>
-            <option value="falsetto vocal">ファルセット</option><option value="vocal harmonies">ハーモニー</option></select></label>
+      <label class="chk fld"><input id="mu-inst" type="checkbox">楽器のみ(歌なし)</label>
+      <div id="mu-simple-box2">
+        <div class="fld"><div class="lhead"><span class="fl">テーマ / シナリオ <small>(空ならおまかせ)</small></span>
+          <span class="mk"><button id="mu-theme-go" type="button" class="mini" title="ジャンルから、曲のテーマを AI が考えます">✨ テーマを作る</button>
+            <button id="mu-theme-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
+          <textarea id="mu-theme" class="sm" rows="2" maxlength="200" placeholder="例: 夜行バスの窓から見える朝焼け"></textarea></div>
+        <div class="fld"><div class="lhead"><span class="fl">歌詞 <small>(空なら AI 作詞。[Verse] [Chorus] などのタグが使えます)</small></span>
+          <span class="mk"><button id="mu-lyrics-go" type="button" class="mini" title="テーマとジャンルから AI が作詞します(テーマが空ならテーマも作ります)">✍️ 作詞する</button>
+            <button id="mu-lyrics-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
+          <textarea id="mu-lyrics" rows="6" maxlength="6000" placeholder="自分の歌詞を使うときだけ書きます"></textarea>
+          <span class="note" id="mu-lyrics-note"></span></div>
+        <div class="fld"><div class="lhead"><span class="fl">キャプション <small>(音の説明。英語)</small></span>
+          <span class="mk"><button id="mu-caption-go" type="button" class="mini" title="テーマ・歌詞・ムード・ボーカルから、AI がキャプションを書きます">🎵 キャプションを作る</button>
+            <button id="mu-caption-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
+          <textarea id="mu-caption" class="sm" rows="3" maxlength="1000" placeholder="空なら、生成のときに AI が作ります"></textarea>
+          <label class="chk"><input id="mu-caption-auto" type="checkbox" checked>キャプション自動(空なら生成時に AI が作る)</label></div>
+        <div class="fld"><span class="fl">ムード <small>(任意。もう一度押すと外れます)</small></span>
+          <div class="chips wrap" id="mu-moods" role="group" aria-label="ムード"></div></div>
+        <div class="fld"><span class="fl">ボーカル <small>(任意)</small></span>
+          <div class="chips wrap" id="mu-vocals" role="group" aria-label="ボーカル"></div></div>
       </div>
-      <label class="chk fld"><input id="mu-inst" type="checkbox">インスト(歌なし)</label>
+      <details class="adv" id="mu-adv">
+        <summary>詳細</summary>
+        <div class="adv-body">
+          <div class="fld"><span class="fl">モデル</span>
+            <select id="mu-model"><option value="">ACE の既定</option></select>
+            <span class="note" id="mu-model-note">選んだモデルが読み込まれていなければ、生成の前に自動で読み込みます(数十秒)</span></div>
+          <div class="fld two">
+            <label><span class="fl">STEP</span>
+              <select id="mu-steps"><option value="8" selected>8 (Turbo)</option><option value="20">20 (高速)</option><option value="50">50 (標準)</option>
+                <option value="80">80 (高品質)</option><option value="100">100 (最高品質)</option></select></label>
+            <label><span class="fl">曲数</span>
+              <select id="mu-batch"><option value="1">1 曲</option><option value="2">2 曲</option><option value="4">4 曲</option></select></label>
+          </div>
+          <label class="chk fld"><input id="mu-thinking" type="checkbox" checked>Thinking(ACE-Step の LM で高品質に作る)</label>
+          <div class="fld"><span class="fl">シード</span>
+            <div class="inline"><input id="mu-seed" type="number" min="0" placeholder="例: 12345" disabled>
+              <label class="chk"><input id="mu-random" type="checkbox" checked>ランダム</label></div>
+            <button id="mu-lastseed" type="button" class="mini" disabled title="前回の曲と同じシードを使うので、歌詞やキャプションだけ変えても同じ骨格で作り直せます">同じ骨格で作り直す(前回のシードを使う)</button></div>
+          <label class="fld"><span class="fl">ネガティブプロンプト <small>(避けたい音。空なら下の既定)</small></span>
+            <input id="mu-neg" type="text" maxlength="500"></label>
+          <div class="fld two">
+            <label><span class="fl">Shift</span>
+              <select id="mu-shift" title="低い値=音質・ディテール重視、高い値=構造・プロンプト忠実度重視"><option value="auto">自動</option>
+                <option value="1.0">1.0 (ディテール重視)</option><option value="2.0">2.0 (バランス)</option><option value="3.0">3.0 (Turbo 推奨)</option>
+                <option value="4.0">4.0 (構造重視)</option><option value="5.0">5.0 (最大)</option></select></label>
+            <label><span class="fl">Sampler</span>
+              <select id="mu-infer" title="ODE=安定・再現性、SDE=多様・有機的な質感"><option value="auto">自動 (ODE)</option>
+                <option value="ODE">ODE (安定・クリーン)</option><option value="SDE">SDE (有機的・多様)</option></select></label>
+          </div>
+        </div>
+      </details>
       <div class="msg" id="mu-msg" hidden></div>
-      <div class="actions"><button id="mu-go" class="primary">生成</button><button id="mu-stop" disabled>中止</button></div>
+      <div class="actions"><button id="mu-go" class="primary">生成</button><button id="mu-stop" disabled>中止</button>
+        <button id="mu-regen" type="button" hidden title="歌詞を消して、テーマはそのままで歌詞とキャプションを作り直して生成します">✍️ 歌詞を新しくして生成</button></div>
       <div class="plan" id="mu-plan" hidden>
-        <div class="plan-head">AI が作ったプラン</div>
+        <div class="plan-head" id="mu-plan-head">曲のプラン</div>
         <div class="plan-theme" id="mu-plan-theme"></div>
         <div class="plan-cap" id="mu-plan-cap"></div>
         <pre class="plan-lyrics" id="mu-plan-lyrics"></pre>

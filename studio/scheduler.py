@@ -177,8 +177,22 @@ class Scheduler:
 
     async def ensure(self, name: str, op: Operation = None) -> None:
         """生成の前に必ず呼ぶ。この部品を使える状態にし、GPU 部品なら唯一の常駐者にする。"""
+        own = op is None
         op = op or self.new_operation("ensure", name)
         c = self.comps[name]
+        try:
+            await self._ensure_impl(c, op)
+        except SwitchError as e:
+            if own:
+                op.error, op.log_tail = e.message, e.log_tail
+                op.add(f"失敗: {e.message}")
+            raise
+        finally:
+            if own:
+                op.done = True
+
+    async def _ensure_impl(self, c: Component, op: Operation) -> None:
+        name = c.spec.name
         async with self._lock_for(c):
             self._check_alive(c)
             if c.spec.uses_gpu:
@@ -187,14 +201,28 @@ class Scheduler:
                     return
                 self._note_baseline()
                 if self.gpu_resident and self.gpu_resident != name:
-                    await self._release(self.comps[self.gpu_resident], op)
+                    await self._release(self.comps[self.gpu_resident], op, target=c)
             await self._bring_up(c, op)
             op.add("準備完了")
 
     async def start(self, name: str, op: Operation = None) -> None:
         """部品を起動するだけ(常駐者は変えない)。GPU を使用中の別部品がいれば断る。"""
+        own = op is None
         op = op or self.new_operation("start", name)
         c = self.comps[name]
+        try:
+            await self._start_impl(c, op)
+        except SwitchError as e:
+            if own:
+                op.error, op.log_tail = e.message, e.log_tail
+                op.add(f"失敗: {e.message}")
+            raise
+        finally:
+            if own:
+                op.done = True
+
+    async def _start_impl(self, c: Component, op: Operation) -> None:
+        name = c.spec.name
         async with self._lock_for(c):
             self._check_alive(c)
             if c.spec.uses_gpu and self.gpu_resident not in (None, name):
@@ -205,8 +233,22 @@ class Scheduler:
             op.add("起動しました")
 
     async def stop(self, name: str, op: Operation = None) -> None:
+        own = op is None
         op = op or self.new_operation("stop", name)
         c = self.comps[name]
+        try:
+            await self._stop_impl(c, op)
+        except SwitchError as e:
+            if own:
+                op.error, op.log_tail = e.message, e.log_tail
+                op.add(f"失敗: {e.message}")
+            raise
+        finally:
+            if own:
+                op.done = True
+
+    async def _stop_impl(self, c: Component, op: Operation) -> None:
+        name = c.spec.name
         async with self._lock_for(c):
             if c.external:
                 raise SwitchError(f"{c.spec.label} は外部で動いているため、ここからは停止しません")
@@ -231,9 +273,21 @@ class Scheduler:
                 c.state in ("starting", "ready") and c.spec.uses_gpu for c in self.comps.values()):
             self.baseline_mib = gpu["used_mib"]
 
-    async def _release(self, c: Component, op: Operation) -> None:
-        """今 GPU にいる部品 c を空ける。unload できればプロセスは残し、できなければ止める。"""
+    def _free_mib(self) -> Optional[int]:
+        gpu = self.monitor.snapshot().get("gpu") if self.monitor else None
+        return (gpu["total_mib"] - gpu["used_mib"]) if gpu else None
+
+    async def _release(self, c: Component, op: Operation, target: Component = None) -> None:
+        """今 GPU にいる部品 c を空ける。unload できればプロセスは残し、できなければ止める。
+
+        止められない外部の部品でも、GPU に target の分の空きがあれば止めずに同居する(大きな GPU の開発機向け)。
+        """
         spec = c.spec
+        if c.external and not spec.can_unload and target is not None:
+            free, need = self._free_mib(), target.spec.vram_need_mib + 1024
+            if free is not None and need and free >= need:
+                op.add(f"{spec.label} は外部で動いていますが、GPU に {free // 1024}GiB の空きがあるので止めずに同居します")
+                return
         if spec.can_unload:
             op.add(f"{spec.label} を GPU から降ろしています")
             code = await http_post(spec.base_url + spec.unload_path, timeout=120)
@@ -244,7 +298,10 @@ class Scheduler:
             self._set(c, "unloaded")
         else:
             if c.external:
-                raise SwitchError(f"{spec.label} は外部で動いていて止められません。先に自分で停止してください")
+                free = self._free_mib()
+                hint = f"(GPU の空き {free // 1024}GiB では同居できません)" if free is not None else ""
+                raise SwitchError(f"{spec.label} は外部で動いていて止められません{hint}。先に自分で停止するか、"
+                                  f"studio.local.toml の [components.{spec.name}] に別の port を書いて管理役に起こさせてください")
             await self._stop_process(c, op)
         self.gpu_resident = None
         await self._wait_gpu_free(op)

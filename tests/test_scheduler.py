@@ -119,3 +119,42 @@ class SchedulerTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExternalCoexistTest(unittest.IsolatedAsyncioTestCase):
+    """止められない外部の部品(ACE)が GPU にいるとき: 空きがあれば同居、無ければ分かる言葉で断る。"""
+
+    def make(self, fake, free_mib):
+        specs = {"h3": spec("h3", port=11), "ace": spec("ace", can_unload=False, port=13)}
+        specs["h3"].vram_need_mib = 12000
+        patches = [mock.patch.object(S, "http_get_json", fake.get), mock.patch.object(S, "http_post", fake.post),
+                   mock.patch.object(S.procman, "start", fake.start), mock.patch.object(S.procman, "stop", fake.stop),
+                   mock.patch.object(S.procman, "adopt_if_running", lambda sp: None),
+                   mock.patch.object(S.procman, "is_alive", lambda p: p is not None),
+                   mock.patch.object(S.procman, "log_tail", lambda n, k=20: "")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        monitor = types.SimpleNamespace(snapshot=lambda: {"gpu": {"total_mib": 97887, "used_mib": 97887 - free_mib}})
+        s = Scheduler(specs, monitor=monitor, poll_s=0.01)
+        s.gpu_wait_s = 0
+        ace = s.comps["ace"]
+        ace.proc, ace.external = types.SimpleNamespace(spec=specs["ace"], popen=None, external=True, pid=None, job=None), True
+        ace.state, s.gpu_resident = "ready", "ace"
+        return s
+
+    async def test_coexists_when_gpu_has_room(self):
+        fake = Fake()
+        s = self.make(fake, free_mib=60000)
+        await s.ensure("h3")
+        self.assertEqual(fake.calls, [("start", "h3")])          # ACE は止めない
+        self.assertEqual((s.comps["ace"].state, s.comps["h3"].state, s.gpu_resident), ("ready", "ready", "h3"))
+
+    async def test_refuses_with_hint_when_no_room(self):
+        fake = Fake()
+        s = self.make(fake, free_mib=4000)
+        with self.assertRaises(S.SwitchError) as ctx:
+            await s.ensure("h3")
+        self.assertIn("同居できません", ctx.exception.message)
+        self.assertIn("port", ctx.exception.message)
+        self.assertEqual(fake.calls, [])

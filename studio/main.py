@@ -25,10 +25,25 @@ from .jobs import Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
 from .scheduler import Scheduler
-from .songplan import SongPlanError, make_plan
+from .handlers import ace as ace_handler
+from .songplan import SongPlanError, make_caption, make_plan
 from .tts import Tts, TtsError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
+class _QuietPolling(logging.Filter):
+    """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
+    _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
+              "/api/components/", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js", "/image.js",
+              "/video.js", "/music.js", "/dnd.js", "/favicon.ico")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not ('"GET ' in msg and any(q in msg for q in self._QUIET))
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietPolling())
 
 OUTPUTS_DIR = settings.root / "outputs"
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -198,6 +213,67 @@ async def api_songplan(body: SongPlanIn):
                                want_lyrics=not body.instrumental)
     except (LlmError, SongPlanError) as e:
         raise HTTPException(503, str(e))
+
+
+# ---- 音楽タブの「作る」ボタン(テーマ・歌詞・キャプション。管理役の LLM を使う) ----
+
+def _llm_ready() -> None:
+    """LLM を使う前の確認(/api/enhance と同じ): GPU で生成している間は、LLM を起こさずに断る。"""
+    if app.state.jobs.gpu_busy():
+        raise HTTPException(409, "生成中は作れません(GPU を使っているため)。終わってからもう一度押してください")
+
+
+class MusicIn(BaseModel):
+    genre: str = "J-POP"
+    language: str = "Japanese"
+    theme: str = ""
+    lyrics: str = ""
+    mood: str = ""
+    vocal: str = ""
+    thinking: bool = True
+    instrumental: bool = False
+
+
+@app.post("/api/music/theme")
+async def api_music_theme(body: MusicIn):
+    """ジャンルと言語から、曲のテーマを 1 つ作る。"""
+    _llm_ready()
+    try:
+        plan = await make_plan(app.state.llm.chat, body.genre, body.language, want_lyrics=False, want_caption=False)
+    except (LlmError, SongPlanError) as e:
+        raise HTTPException(503, str(e))
+    return {"theme": plan["theme"]}
+
+
+@app.post("/api/music/lyrics")
+async def api_music_lyrics(body: MusicIn):
+    """歌詞を作る。テーマがあればそのテーマで書き、無ければテーマも作る。"""
+    _llm_ready()
+    try:
+        plan = await make_plan(app.state.llm.chat, body.genre, body.language, body.mood, body.vocal, body.theme.strip(),
+                               want_lyrics=True, want_caption=False)
+    except (LlmError, SongPlanError) as e:
+        raise HTTPException(503, str(e))
+    return {"theme": plan["theme"], "lyrics": plan["lyrics"], "recommended_duration": plan["recommended_duration"]}
+
+
+@app.post("/api/music/caption")
+async def api_music_caption(body: MusicIn):
+    """テーマ・歌詞・ムード・ボーカルから、ACE-Step に渡すキャプション(英語)を作る。"""
+    _llm_ready()
+    try:
+        caption = await make_caption(app.state.llm.chat, body.genre, body.theme.strip(), body.lyrics, body.mood, body.vocal,
+                                     body.language, body.thinking, body.instrumental)
+    except (LlmError, SongPlanError) as e:
+        raise HTTPException(503, str(e))
+    return {"caption": caption}
+
+
+@app.get("/api/music/models")
+async def api_music_models():
+    """ACE の DiT モデル一覧(読込済み・VRAM に載るか・既定)。ACE は起こさず、動いていなければ空の一覧を返す。"""
+    spec = _comp("ace").spec
+    return await ace_handler.list_models(spec.base_url, app.state.jobs.ctx.transport)
 
 
 # ---- 音声合成(AivisSpeech) ----

@@ -113,6 +113,60 @@ class MakePlanTest(unittest.IsolatedAsyncioTestCase):
         plan = await sp.make_plan(chat, "Jazz", want_lyrics=False)
         self.assertEqual((plan["theme"], plan["lyrics"]), ("星の海", ""))
 
+    async def test_theme_only_uses_a_short_prompt(self):
+        calls = []
+
+        async def chat(system, user, max_tokens=0, temperature=0):
+            calls.append((system, user, max_tokens))
+            return '"夜行バスの窓の朝焼け"'
+        plan = await sp.make_plan(chat, "Rock", "Japanese", want_lyrics=False, want_caption=False)
+        self.assertEqual((plan["theme"], plan["caption"], plan["lyrics"]), ("夜行バスの窓の朝焼け", "", ""))
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("lyricist", calls[0][0])           # 約 1000 トークンの作詞用プロンプトは使わない
+        self.assertIn("Genre: Rock", calls[0][1])
+        self.assertIn("Write the theme in Japanese", calls[0][1])
+        plan = await sp.make_plan(chat, theme="海", want_lyrics=False, want_caption=False)    # テーマを渡したら、呼ばずにそのまま
+        self.assertEqual((plan["theme"], len(calls)), ("海", 1))
+
+        async def empty(*a, **k):
+            return "  "
+        with self.assertRaises(sp.SongPlanError):
+            await sp.make_plan(empty, want_lyrics=False, want_caption=False)
+
+    async def test_lyrics_without_caption_does_not_ask_for_one(self):
+        calls = []
+
+        async def chat(system, user, max_tokens=0, temperature=0):
+            calls.append(user)
+            return SAMPLE                                   # 勝手にキャプションを付けてきても捨てる
+        plan = await sp.make_plan(chat, "J-POP", theme="夜", want_caption=False)
+        self.assertEqual((len(calls), plan["caption"], plan["theme"]), (1, "", "夜"))
+        self.assertNotIn("CAPTION:", calls[0])
+        self.assertTrue(plan["lyrics"].startswith("[Intro]"))
+
+    async def test_make_caption_one_sentence_or_detailed(self):
+        calls = []
+
+        async def chat(system, user, max_tokens=0, temperature=0):
+            calls.append((system, user, max_tokens))
+            return "```\nA warm ballad with a gentle mood\n```"
+        cap = await sp.make_caption(chat, "Ballad", "雨の窓辺", "[Verse]\n歌詞", "calm and gentle", "male vocal", "Japanese", thinking=True)
+        self.assertEqual(cap, "A warm ballad with a gentle mood, with a male vocal.")      # LLM が省いたボーカルは足される
+        self.assertIn("ONE complete English prose sentence", calls[0][1])
+        self.assertIn("Theme/Concept: 雨の窓辺", calls[0][1])
+        self.assertIn("歌詞", calls[0][1])
+        self.assertEqual(calls[0][2], 120)
+        await sp.make_caption(chat, "Ballad", thinking=False, instrumental=True, vocal="male vocal", lyrics="[Verse]\nx")
+        self.assertIn("3-5 complete English prose sentences", calls[1][1])
+        self.assertIn("none (instrumental", calls[1][1])
+        self.assertNotIn("male vocal", calls[1][1])         # インストではボーカルを渡さない
+        self.assertEqual((calls[1][0] == sp.CAPTION_GENERATE_DETAILED_PROMPT, calls[1][2]), (True, 350))
+
+        async def empty(*a, **k):
+            return ""
+        with self.assertRaises(sp.SongPlanError):
+            await sp.make_caption(empty, "Jazz")
+
     def test_template_caption(self):
         self.assertEqual(sp.template_caption("Jazz", "calm", "male vocal"), "A calm Jazz song with a fitting atmosphere and male vocal.")
         self.assertNotIn("vocal", sp.template_caption("Jazz", instrumental=True))

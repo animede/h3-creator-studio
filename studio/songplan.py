@@ -142,6 +142,41 @@ GENRE-SPECIFIC ERA HINTS:
 - City Pop → "1980s Japanese city pop"
 """
 
+CAPTION_GENERATE_DETAILED_PROMPT = """You are a music producer writing detailed production descriptions for the ACE-Step AI music generator.
+
+ACE-Step will NOT use its internal thinking process this time, so YOUR caption must be the complete musical blueprint.
+Write a DETAILED, SPECIFIC production description that fully specifies the sound world.
+
+STRICT OUTPUT RULES:
+1. Output ONLY the caption — no titles, no "Note:", no markdown, no lists, no commentary
+2. Write in English only
+3. Write 3-5 COMPLETE PROSE SENTENCES (100-200 words)
+4. NEVER output a comma-separated keyword list — write natural English sentences with subject and verb
+5. Never start with "Sure" / "Here is" / "This is a". Start directly with the genre/style.
+
+WHAT TO INCLUDE (all of the following, in prose sentences):
+1. GENRE + ERA — e.g. "2000s J-Pop", "classic rock", "lo-fi hip-hop"
+2. MOOD/ATMOSPHERE — detailed emotional description
+3. KEY INSTRUMENTS — 2-4 specific instruments and their playing style
+4. RHYTHM — tempo feel, drum pattern character
+5. VOCAL — gender, tone quality, delivery style
+6. PRODUCTION TEXTURE — one word: "warm", "crisp", "lo-fi", "polished"
+
+GOOD EXAMPLE:
+"A 2000s J-Pop track with a nostalgic and bittersweet atmosphere. Shimmering synth pads and clean piano chords establish a warm foundation, supported by a crisp electronic drum beat with subtle snare snaps and a smooth, melodic bassline. The lead vocal is a clear, youthful female voice with an earnest delivery typical of anime themes. The overall production is polished and emotionally uplifting."
+"""
+
+THEME_SYSTEM_PROMPT = """You are a music theme generator. Generate a single short, vivid song theme/scenario (3-10 words MAX).
+Output ONLY the theme text. No quotes, no explanation.
+Do NOT add romanization, pronunciation, or translations in parentheses.
+
+STRICT RULES:
+- The theme MUST feel natural for the genre — imagine it as a real song title or concept
+- NEVER use these overused words: rain, sunset, cherry blossoms, merry-go-round, twilight, starlight, moonlight, silhouette, horizon, forgotten, nostalgia, 雨上がり, 茜色, 忘れられた, メリーゴーランド, 夕焼け, シルエット
+- Be SPECIFIC and CONCRETE — use unexpected nouns, places, objects
+- Keep it SHORT: 3-10 words maximum
+"""
+
 # ジャンル別の世界観(vibe)と、テーマの種になる場面・感情
 GENRES = {
     "J-POP": {
@@ -440,14 +475,18 @@ def template_caption(genre: str, mood: str = "", vocal: str = "", instrumental: 
 
 
 async def make_plan(chat: Chat, genre: str = "J-POP", language: str = "Japanese", mood: str = "", vocal: str = "",
-                    theme: str = "", want_lyrics: bool = True) -> dict:
-    """{"theme", "caption", "lyrics", ...} を作る。歌詞は want_lyrics のときだけ。theme を渡せば、そのテーマで書く。
+                    theme: str = "", want_lyrics: bool = True, want_caption: bool = True) -> dict:
+    """{"theme", "caption", "lyrics", ...} を作る。歌詞は want_lyrics、キャプションは want_caption のときだけ(要らない項目は空)。
+    theme を渡せば、そのテーマで書く。歌詞もキャプションも要らなければ、テーマだけを短い呼び出しで作る。
 
     出力は THEME: 行、CAPTION: 行、JSON メタ行、歌詞の順。足りなければ 1 回だけ再試行し、
     キャプションだけ足りなければ別の呼び出しで補う。テーマか歌詞が足りなければ SongPlanError。
     """
     insp = theme_inspiration(genre)
     genre_key = insp["genre_key"]
+    if not want_lyrics and not want_caption:
+        return {"theme": theme or await _make_theme(chat, insp, language), "caption": "", "lyrics": "",
+                "recommended_duration": 90, "parts": {}}
     inspiration = ([f"Theme (write this exact theme on the THEME line): {theme}"] if theme else
                    [f"Scene inspiration: {insp['setting']}", f"Emotional tone: {insp['emotion']}",
                     f"Creative approach: {insp['angle']}"])
@@ -456,20 +495,23 @@ async def make_plan(chat: Chat, genre: str = "J-POP", language: str = "Japanese"
              f"Language of theme and lyrics: {language}", f"Mood: {mood or 'match the theme'}",
              f"Vocal style: {vocal or 'match the genre'}", "", "OUTPUT FORMAT — exactly these blocks, in this order, nothing else:",
              f"THEME: <one short, vivid, concrete song theme in {language}, 3-10 words, no quotes, no parentheses; avoid overused "
-             "words: rain, sunset, cherry blossoms, twilight, starlight, moonlight, silhouette, horizon, nostalgia>",
-             f'CAPTION: <ONE English sentence, 30-60 words, template: "A [genre/era] [song/track] with [mood] and [vocal]." '
-             f"Style: {genre_key}. Vocal must be {vocal_part}.{' Mood must be ' + chr(34) + mood + chr(34) + '.' if mood else ''} "
-             "No tag lists, no instruments>"]
+             "words: rain, sunset, cherry blossoms, twilight, starlight, moonlight, silhouette, horizon, nostalgia>"]
+    if want_caption:
+        parts.append(f'CAPTION: <ONE English sentence, 30-60 words, template: "A [genre/era] [song/track] with [mood] and [vocal]." '
+                     f"Style: {genre_key}. Vocal must be {vocal_part}.{' Mood must be ' + chr(34) + mood + chr(34) + '.' if mood else ''} "
+                     "No tag lists, no instruments>")
     if want_lyrics:
         parts += ['{"recommended_duration": <seconds>, "parts": {...}}   <- the JSON metadata line, then a blank line',
                   f"<the complete lyrics with ACE-Step structure tags, in {language} ONLY, following the lyricist rules>"]
     system = (LYRICS_GENERATE_SYSTEM_PROMPT + "\n\nFOR THIS REQUEST ONLY: before the JSON metadata line, output a `THEME:` line "
-              "and a `CAPTION:` line as specified by the user. Then the JSON line, then the lyrics (if asked). "
+              + ("and a `CAPTION:` line " if want_caption else "") + "as specified by the user. Then the JSON line, then the lyrics (if asked). "
               "The lyrics must be about the THEME you wrote.")
     plan = {}
     for attempt in range(2):
         response = await chat(system, "\n".join(parts), max_tokens=2200 if want_lyrics else 400, temperature=0.9)
         plan = parse_song_plan(response, want_lyrics)
+        if not want_caption:
+            plan["caption"] = ""
         if theme:
             plan["theme"] = theme
         if plan["theme"] and (not want_lyrics or (plan["lyrics"] and "[" in plan["lyrics"])):
@@ -477,9 +519,9 @@ async def make_plan(chat: Chat, genre: str = "J-POP", language: str = "Japanese"
         log.warning("曲のプランが不完全です(theme=%r、歌詞 %d 文字)%s", plan["theme"], len(plan["lyrics"]), "。再試行します" if attempt == 0 else "")
     else:
         raise SongPlanError("LLM が曲のプラン(テーマと歌詞)をうまく作れませんでした。もう一度試すか、歌詞を自分で入力してください")
-    if not plan["caption"]:
+    if want_caption and not plan["caption"]:
         plan["caption"] = await _fallback_caption(chat, genre_key, plan["theme"], mood, vocal, not want_lyrics)
-    elif vocal and vocal.lower() not in plan["caption"].lower():
+    elif want_caption and vocal and vocal.lower() not in plan["caption"].lower():
         plan["caption"] = plan["caption"].rstrip(".") + f", with a {vocal}."
     return plan
 
@@ -493,3 +535,53 @@ async def _fallback_caption(chat: Chat, genre: str, theme: str, mood: str, vocal
     except Exception:  # noqa: BLE001  LLM の失敗はひな形で続ける
         caption = ""
     return caption or template_caption(genre, mood, vocal, instrumental)
+
+
+async def _make_theme(chat: Chat, insp: dict, language: str) -> str:
+    """ジャンルの世界観と、ランダムな場面・感情・切り口から、テーマだけを作る(短い呼び出し)。"""
+    user = (f"Genre: {insp['genre_key']}\nGenre essence: {insp['ctx']['vibe']}\nScene inspiration: {insp['setting']}\n"
+            f"Emotional tone: {insp['emotion']}\nCreative approach: {insp['angle']}\n"
+            f"Write the theme in {language}.\n\nGenerate one original {insp['genre_key']} song theme:")
+    theme = clean_theme(await chat(THEME_SYSTEM_PROMPT, user, max_tokens=60, temperature=1.2))
+    if not theme:
+        raise SongPlanError("LLM がテーマを作れませんでした。もう一度試してください")
+    return theme
+
+
+async def make_caption(chat: Chat, genre: str, theme: str = "", lyrics: str = "", mood: str = "", vocal: str = "",
+                       language: str = "Japanese", thinking: bool = True, instrumental: bool = False) -> str:
+    """キャプションだけを作る(Easy Music の generate_caption)。thinking なら 1 文(ACE の LM が書き広げる)、
+    そうでなければ 3〜5 文(楽器・リズムまで書く)。"""
+    vocal = "" if instrumental else vocal
+    content = [f"Theme/Concept: {theme}" if theme else "", f"Genre/Style: {genre}" if genre else "",
+               f"Mood: {mood}" if mood else "", "Vocal type: none (instrumental, no vocals)" if instrumental else
+               (f"Vocal type: {vocal}" if vocal else "")]
+    if lyrics and not instrumental:
+        content.append(f"Lyrics (for mood/style reference):\n{lyrics[:500 if thinking else 800]}")
+    content.append(f"Vocal language: {language}")
+    vocal_rule = f' You MUST describe the vocal as "{vocal}".' if vocal else ""
+    mood_rule = f' The mood MUST be "{mood}".' if mood else ""
+    head = "\n\n".join(c for c in content if c) + "\n\n---\n"
+    if thinking:
+        user = (head + "Write ONE complete English prose sentence describing this music.\nFollow this template exactly:\n"
+                '  "A [genre/era] [song/track] with [mood/atmosphere] and [vocal description]."\n\n'
+                f"IMPORTANT: Use the exact Mood and Vocal type listed above.{mood_rule}{vocal_rule}\n\n"
+                'GOOD: "A dramatic anime opening song with an intense, emotionally charged atmosphere and a powerful male vocal."\n'
+                'GOOD: "A nostalgic 1980s city-pop track with a warm, breezy mood and a smooth female vocal."\n'
+                'BAD:  "Anime song, dramatic, energetic, emotional, opening theme, Japanese anime soundtrack."\n\n'
+                "Output ONLY the sentence. No commentary, no lists, no extra lines.")
+        system, max_tokens = CAPTION_GENERATE_SYSTEM_PROMPT, 120
+    else:
+        user = (head + "Write 3-5 complete English prose sentences as a detailed music production blueprint.\n"
+                "Cover ALL of the following in natural sentence form:\n  1. Genre + era\n  2. Mood / emotional atmosphere\n"
+                "  3. 2-3 specific instruments and their playing style\n  4. Rhythm / tempo character\n"
+                f"  5. Vocal type and delivery — MUST use the exact vocal type: \"{vocal or 'as appropriate'}\"\n\n"
+                f"IMPORTANT: Use the exact Mood and Vocal type listed above.{mood_rule}{vocal_rule}\n\n"
+                "Output ONLY the prose sentences. No lists, no bullet points, no commentary.")
+        system, max_tokens = CAPTION_GENERATE_DETAILED_PROMPT, 350
+    caption = clean_caption(await chat(system, user, max_tokens=max_tokens, temperature=0.7))
+    if not caption:
+        raise SongPlanError("LLM がキャプションを作れませんでした。もう一度試してください")
+    if vocal and vocal.lower() not in caption.lower():      # LLM が省いたボーカルは必ず足す
+        caption = caption.rstrip(".") + f", with a {vocal}."
+    return caption

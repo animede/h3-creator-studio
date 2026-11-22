@@ -54,11 +54,22 @@ function renderRefs() {
     list.append(c);
   });
   im("refs-empty").hidden = refs.length > 0;
-  im("mode").textContent = refs.length ? `参照して編集(${refs.length} 枚)` : "なし: テキストから生成";
+  im("mode").textContent = refs.length ? `${refs.length} 枚` : "";
 }
+
+// ---- 作り方(H3-Image の略語): t2i = テキストから、edit = 参照画像で編集 ----
+let mode = "t2i";
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll("#im-modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+  im("refs-fld").hidden = m !== "edit";
+  showMsg("");
+}
+document.querySelectorAll("#im-modes button").forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
 
 function addRef(item) {
   if (item.kind !== "image") { showMsg("参照にできるのは画像だけです"); return false; }
+  if (mode !== "edit") setMode("edit");      // 参照を入れたら編集モードへ
   if (refs.some((r) => r.id === item.id)) { showMsg("その画像はすでに参照に入っています"); return false; }
   if (refs.length >= MAX_REFS) { showMsg(`参照画像は最大 ${MAX_REFS} 枚です`); return false; }
   refs.push(item);
@@ -67,7 +78,7 @@ function addRef(item) {
   return true;
 }
 
-studio.actions.image = (item) => (item.kind === "image" ? [{ label: "参照に使う", run: () => { setTab("image"); addRef(item); } }] : []);
+studio.actions.image = (item) => (item.kind === "image" ? [{ label: "参照に使う", run: () => { setTab("image"); setMode("edit"); addRef(item); } }] : []);
 studio.on.items.push(() => {       // ギャラリーから消された画像は参照から外す
   const before = refs.length;
   for (let i = refs.length - 1; i >= 0; i--) if (!byId(refs[i].id)) refs.splice(i, 1);
@@ -99,9 +110,10 @@ async function generate() {
   if (!prompt) { showMsg("プロンプトを入力してください"); im("prompt").focus(); return; }
   showMsg("");
   const seed = im("random").checked || im("seed").value === "" ? null : parseInt(im("seed").value, 10);
-  tracker.submit(refs.length ? "h3image.edit" : "h3image.t2i", {
+  if (mode === "edit" && !refs.length) { showMsg("edit は参照画像が要ります。画像を参照欄に落としてください"); return; }
+  tracker.submit(mode === "edit" ? "h3image.edit" : "h3image.t2i", {
     prompt, width: +im("w").value, height: +im("h").value, seed, steps: im("steps").value ? +im("steps").value : null,
-    references: refs.map((r) => r.id),
+    references: mode === "edit" ? refs.map((r) => r.id) : [],
   });
 }
 
@@ -111,8 +123,9 @@ im("stop").onclick = () => { im("stop").disabled = true; tracker.stop(); };
 im("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !im("go").disabled) generate(); });
 
 wireEnhance({ tab: "image", ta: im("prompt"), btn: im("enh"), undo: im("enh-undo"), note: im("enh-note"), showMsg,
-  body: () => ({ references: refs.map((r) => r.id) }) });      // 参照があれば編集用の強化
+  body: () => ({ references: mode === "edit" ? refs.map((r) => r.id) : [] }) });      // edit なら参照付きの強化
 
 tracker.resume();
+setMode("t2i");
 renderRefs();
 })();
