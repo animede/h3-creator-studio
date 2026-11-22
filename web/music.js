@@ -15,6 +15,7 @@
   let lastSeed = null;            // 前回の曲のシード(「同じ骨格で作り直す」に使う)
   let captionEdited = false;      // キャプションを利用者が書き換えた(AI が入れた文は、次の生成で作り直す)
   let fillPlan = false;           // 生成を押した直後: 届いたプランの中身を、テーマ・歌詞・キャプション欄に入れる
+  let defaultModel = "";          // ACE の既定のモデル名(/api/music/models の default_model)。分かるまでは空
 
   const mu = (id) => $("mu-" + id);
   const val = (id) => mu(id).value.trim();
@@ -139,13 +140,14 @@
   mu("lastseed").onclick = () => { mu("seed").value = lastSeed; mu("random").checked = false; mu("seed").disabled = false; };
   mu("neg").value = DEFAULT_NEGATIVE;
 
-  const isTurbo = (m) => !m || m.toLowerCase().includes("turbo");
+  // モデル名なし(「ACE の既定」)は、既定のモデル名が分かればそれで見る。分からなければ turbo とみなす
+  const isTurbo = (m) => { const n = m || defaultModel; return !n || n.toLowerCase().includes("turbo"); };
 
   // モデルを選んだら STEP を合わせる(turbo 8、それ以外 50)。SFT は 4 曲を選べない(VRAM)
   function onModel() {
     const m = mu("model").value;
     mu("steps").value = isTurbo(m) ? "8" : "50";
-    const sft = m.toLowerCase().includes("sft");
+    const sft = (m || defaultModel).toLowerCase().includes("sft");
     for (const o of mu("batch").options) o.disabled = sft && +o.value > 2;
     if (sft && +mu("batch").value > 2) mu("batch").value = "2";
   }
@@ -156,9 +158,10 @@
 
   // ACE のモデル一覧(動いていなければ「ACE の既定」だけ)
   async function loadModels() {
-    const sel = mu("model"), keep = sel.value;
+    const sel = mu("model"), keep = sel.value, known = defaultModel;
     let js = { models: [] };
     try { js = await fetch("/api/music/models").then((r) => r.json()); } catch (e) { /* 管理役がまだ起きていない */ }
+    defaultModel = js.default_model || "";
     sel.replaceChildren(new Option("ACE の既定", ""));
     const sorted = [...js.models].sort((a, b) => (b.is_loaded - a.is_loaded) || (isTurbo(b.name) - isTurbo(a.name)) || a.name.localeCompare(b.name));
     for (const m of sorted) {
@@ -171,7 +174,7 @@
     const ok = (v) => v && [...sel.options].some((o) => o.value === v && !o.disabled);
     sel.value = [keep, saved, js.default_model].find(ok) || "";      // いま選んでいるもの → 前回のもの → ACE の既定
     mu("model-note").textContent = js.note ? `${js.note}(既定のモデルで作ります)` : "選んだモデルが読み込まれていなければ、生成の前に自動で読み込みます(数十秒)";
-    if (sel.value !== keep) onModel();
+    if (sel.value !== keep || (!sel.value && defaultModel !== known)) onModel();      // 「ACE の既定」のままでも、既定のモデルが分かった(変わった)なら STEP を合わせ直す
   }
   mu("adv").addEventListener("toggle", () => { if (mu("adv").open) loadModels(); });
 

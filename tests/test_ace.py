@@ -127,15 +127,16 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(llm.calls), 1)                                   # プランは LLM 1 回
         self.assertEqual(job.result["plan"]["theme"], "夜明けの駅")
-        self.assertEqual(comp.formats, [{"prompt": job.result["plan"]["caption"], "lyrics": job.result["plan"]["lyrics"], "temperature": 0.4}])
+        self.assertEqual(comp.formats, [])      # 既定では format_input を呼ばない(BPM・調は生成時の CoT に任せる)
         body = comp.releases[0]
         self.assertEqual(str(uuid.UUID(body["task_id"])), body["task_id"])    # こちらで決めた UUID
         self.assertEqual(job.remote_id, body["task_id"])
         for k, v in {"thinking": True, "inference_steps": 8, "guidance_scale": 3.0, "audio_duration": 60, "audio_format": "mp3",
                      "vocal_language": "ja", "batch_size": 1, "use_cot_caption": True, "use_cot_language": True,
-                     "use_cot_metas": False, "bpm": 96, "key_scale": "C major", "time_signature": "4",
                      "lm_negative_prompt": ace.DEFAULT_NEGATIVE_PROMPT}.items():
             self.assertEqual(body[k], v, k)
+        for k in ("use_cot_metas", "bpm", "key_scale", "time_signature"):
+            self.assertNotIn(k, body, k)      # BPM・調は生成時の CoT に任せる(format_input の値を押し付けない)
         self.assertIn("[Chorus]", body["lyrics"])
         self.assertEqual(body["prompt"], job.result["plan"]["caption"])
         self.assertEqual(comp.polls, 2)
@@ -173,7 +174,7 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
         await self.go(job, comp, FakeLlm())
         body = comp.releases[0]
         self.assertEqual((body["lyrics"], body["vocal_language"], body["instrumental"]), ("[Instrumental]", "", True))
-        self.assertEqual(comp.formats[0]["lyrics"], "")
+        self.assertEqual(comp.formats, [])
         self.assertNotIn("vocal", body["prompt"])
 
     async def test_format_input_failure_is_not_fatal(self):
@@ -384,6 +385,40 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("スロットが 1 本", cm.exception.message)
         self.assertEqual(comp.inits, [])
 
+    async def test_empty_model_uses_the_ace_default_for_steps_and_guidance(self):
+        """画面が「ACE の既定」(model なし)で送ってきたら、ACE の既定のモデル名を読んで STEP・ガイダンス・バッチ数を決める。
+        既定が XL-SFT のサーバへ、turbo 前提の 8 ステップ・CFG 3.0 を送って曲が壊れていた。"""
+        comp = FakeAce([DONE], models=[model("acestep-v15-xl-sft")])           # 既定は acestep-v15-xl-sft
+        job = self.job(theme="a", lyrics="[Verse]\nb", steps=8, batch_size=4)
+        await self.go(job, comp)
+        for k, v in {"model": "acestep-v15-xl-sft", "inference_steps": 50, "guidance_scale": 7.0, "batch_size": 2}.items():
+            self.assertEqual(comp.releases[0][k], v, k)
+        self.assertEqual(job.result["model"], "acestep-v15-xl-sft")
+        self.assertEqual(self.ledger.get_output(job.outputs[0])["params"]["model"], "acestep-v15-xl-sft")
+        comp = FakeAce([DONE], models=[model("acestep-v15-xl-sft")])           # 自分で選んだ別の STEP は残す
+        await self.go(self.job(theme="a", lyrics="[Verse]\nb", steps=20), comp)
+        self.assertEqual(comp.releases[0]["inference_steps"], 20)
+
+        class TurboDefault(FakeAce):                                           # 既定が turbo のサーバ: 画面の 50 は 8 に直す
+            def __call__(self, req):
+                if req.url.path == "/v1/models":
+                    return envelope({"models": [model("acestep-v15-turbo")], "default_model": "acestep-v15-turbo"})
+                return super().__call__(req)
+        comp = TurboDefault([DONE])
+        await self.go(self.job(theme="a", lyrics="[Verse]\nb", steps=50), comp)
+        for k, v in {"model": "acestep-v15-turbo", "inference_steps": 8, "guidance_scale": 3.0}.items():
+            self.assertEqual(comp.releases[0][k], v, k)
+
+    async def test_empty_model_stays_empty_when_ace_has_no_model_list(self):
+        """/v1/models の無い古い ACE では、これまでどおりモデル名なしのまま turbo 扱い(8 ステップ、ガイダンス 3)。"""
+        comp = FakeAce([DONE])                                                 # models=None: 一覧が無い
+        job = self.job(theme="a", lyrics="[Verse]\nb", steps=8)
+        await self.go(job, comp)
+        body = comp.releases[0]
+        self.assertNotIn("model", body)
+        self.assertEqual((body["inference_steps"], body["guidance_scale"]), (8, 3.0))
+        self.assertIsNone(job.params["model"])
+
     def test_pick_slot_and_default_steps(self):
         slots = [{"slot": 1, "model": "a", "loaded": True, "on_gpu": True}, {"slot": 2, "model": "b", "loaded": True, "on_gpu": False},
                  {"slot": 3, "model": None, "loaded": False, "on_gpu": False}]
@@ -435,6 +470,18 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((body["instrumental"], body["vocal_language"], body["thinking"], body["batch_size"]), (True, "", True, 2))
         with self.assertRaises(ValueError):
             ace.normalize("ace.omakase", {"query": "  "})
+
+    async def test_short_lyrics_are_treated_as_theme(self):
+        """歌詞欄に「秋の空」のような一文だけ → テーマにして歌詞は AI が作る。"""
+        comp, llm = FakeAce([DONE]), FakeLlm()
+        job = self.job(lyrics="秋の空")
+        await self.go(job, comp, llm)
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(job.result["plan"]["theme"], "秋の空")
+        self.assertIn("[", job.result["plan"]["lyrics"])          # 作詞された
+        self.assertTrue(ace.looks_like_theme("秋の空"))
+        self.assertFalse(ace.looks_like_theme("[Verse]\n秋の空"))
+        self.assertFalse(ace.looks_like_theme("a" * 41))
 
     def test_normalize(self):
         n = ace.normalize

@@ -1,6 +1,6 @@
 # h3-creator-studio
 
-**最新版: 2026-11-23 11:30 JST** — 止められない外部の部品(ACE-Step)が GPU にいても、空きがあれば止めずに同居する(大きな GPU の開発機向け)。断るときは次にやることを示す。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+**最新版: 2026-11-22 17:33 JST** — モデル未指定のときは ACE の既定モデル名を読んで STEP とガイダンスを決める(既定が XL-SFT のサーバで 8 ステップ・CFG 3.0 を送って曲が壊れていた)。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 **mv-V3 や story のシンプル版を統合した、誰でも使える簡易な画像・動画・音楽コンテンツ制作スタジオ。**
 ブラウザ 1 枚の画面で、画像・動画(音声つき)・音楽を作る。ComfyUI のようにノードをつなぐ必要はない。

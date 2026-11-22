@@ -81,7 +81,8 @@ def _advanced(params: dict, model: str) -> dict:
     return {"model": model or None, "steps": _opt_int(params, "steps", 1, 200, "STEP"),
             "seed": _opt_int(params, "seed", 0, 2**31 - 1, "シード"), "shift": shift, "infer_method": infer,
             "negative_prompt": _text(params, "negative_prompt", 500) or DEFAULT_NEGATIVE_PROMPT,
-            "thinking": params.get("thinking") is not False, "batch_size": batch}
+            "thinking": params.get("thinking") is not False, "batch_size": batch,
+            "use_format_input": bool(params.get("use_format_input", False))}
 
 
 def normalize(kind: str, params: dict, ledger=None) -> dict:
@@ -114,7 +115,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
 
 
 def _is_turbo(model) -> bool:
-    return not model or "turbo" in model.lower()          # モデル名なし(ACE の既定)は従来どおり turbo として扱う
+    return not model or "turbo" in model.lower()          # モデル名なしは turbo 扱い(ACE の既定を読めなかったときの備え。読めれば run() が実名を入れる)
 
 
 def _needs_cfg(model) -> bool:
@@ -148,6 +149,13 @@ async def prepare(job: Job, ctx: Ctx) -> None:
         job.result["plan"] = {"theme": p["query"], "caption": "ACE-Step の LM が曲の中身を決めます", "lyrics": ""}
         return
     inst = p["instrumental"]
+    # 歌詞欄に短い一文(構造タグ無し、1 行、40 文字以下)が入っていたら、歌詞ではなくテーマとして扱う。
+    # 「秋の空」のような 3 文字の歌詞で 12 秒の曲ができていた(2026-11-22)
+    if looks_like_theme(p["lyrics"]):
+        if not p["theme"]:
+            p["theme"] = p["lyrics"].strip()
+        p["lyrics"] = ""
+        job.message = "歌詞欄の短い文はテーマとして使い、歌詞は AI が作ります"
     manual = songplan.clean_caption(p["caption"])
     auto = p["caption_auto"]            # None: 従来どおり(プランを作るついでに作る) / True: 空なら必ず AI が作る / False: ひな形
     want_lyrics = not inst and not p["lyrics"]
@@ -234,6 +242,15 @@ def pick_slot(slots: list, model: str):
     return int(candidates[0]["slot"]) if candidates else None
 
 
+async def _default_model(c: httpx.AsyncClient) -> str:
+    """ACE が既定で使うモデル名(/v1/models の default_model)。一覧が取れない古い ACE では空を返す。"""
+    try:
+        r = await c.get("/v1/models", timeout=15.0)
+        return str((r.json().get("data") or {}).get("default_model") or "") if _ok(r) else ""
+    except (httpx.HTTPError, ValueError):
+        return ""
+
+
 async def _ensure_model(job: Job, c: httpx.AsyncClient, model) -> None:
     """選んだモデルが ACE のスロットに載っていなければ、primary 以外のスロットへ読み込む(/v1/init)。
     ACE は未読込のモデルを黙って既定に置き換えず、エラーにするので、生成の前に載せる。
@@ -296,6 +313,12 @@ async def _format_input(job: Job, c: httpx.AsyncClient, plan: dict) -> dict:
         if data.get(key):
             meta[key] = str(data[key])
     return meta
+
+
+def looks_like_theme(lyrics: str) -> bool:
+    """歌詞欄の中身が、歌詞ではなくテーマ(短い一文)に見えるか。"""
+    t = (lyrics or "").strip()
+    return bool(t) and "[" not in t and "\n" not in t and len(t) <= 40
 
 
 def build_release_body(p: dict, plan: dict, meta: dict, task_id: str, seed: int) -> dict:
@@ -394,8 +417,19 @@ async def run(job: Job, ctx: Ctx) -> None:
     omakase = job.kind == "ace.omakase"
     t0 = time.monotonic()
     async with _client(ctx) as c:
+        if not p["model"]:
+            # モデル未指定(画面の「ACE の既定」)を turbo 扱いにすると、既定が XL-SFT のサーバへ 8 ステップ・CFG 3.0 を送って曲が壊れる(2026-11-22 に確認)。
+            # ACE の既定のモデル名を読んで、STEP・ガイダンス・バッチ数をそのモデルに合わせる。読めない古い ACE は、これまでどおり turbo 扱い
+            name = await _default_model(c)
+            if name:
+                log.info("モデル未指定なので ACE の既定 %s を使います", name)
+                p["model"] = name
+                if p["steps"] == (50 if _is_turbo(name) else 8):       # 画面の STEP は既定のモデルを知らずに選んだ値(turbo 前提の 8 など)。食い違うならモデルの既定に任せる
+                    p["steps"] = None
         await _ensure_model(job, c, p["model"])
-        meta = {} if omakase else await _format_input(job, c, plan)
+        # BPM・調は生成時に ACE の思考(CoT)に決めさせる。事前の format_input は同じ入力に BPM 200 や 40 を返すことがあり、
+        # その値を use_cot_metas=False で押し付けると曲がでたらめになる(2026-11-22 に確認)。use_format_input=true で従来どおり
+        meta = await _format_input(job, c, plan) if (not omakase and p.get("use_format_input")) else {}
         if job.cancel_requested:
             raise JobCancelled()
 
