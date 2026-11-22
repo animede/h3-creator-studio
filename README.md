@@ -1,6 +1,6 @@
 # h3-creator-studio
 
-**最新版: 2026-11-22 17:33 JST** — モデル未指定のときは ACE の既定モデル名を読んで STEP とガイダンスを決める(既定が XL-SFT のサーバで 8 ステップ・CFG 3.0 を送って曲が壊れていた)。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+**最新版: 2026-11-22 18:48 JST** — Windows 実機前の点検(子プロセスの UTF-8 出力、expandable_segments、共有 GPU メモリ監視の負荷、run.bat を ASCII に、AivisSpeech 展開のリトライ)。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 **mv-V3 や story のシンプル版を統合した、誰でも使える簡易な画像・動画・音楽コンテンツ制作スタジオ。**
 ブラウザ 1 枚の画面で、画像・動画(音声つき)・音楽を作る。ComfyUI のようにノードをつなぐ必要はない。
@@ -52,6 +52,10 @@ git clone https://github.com/animede/h3-creator-studio.git
 cd h3-creator-studio
 .\setup.bat
 ```
+
+- **置き場所は `C:\h3-creator-studio` のような短い英数字のパスにする。** 長いパスや日本語のユーザー名の下だと、動かない道具がある。
+- **入手は `git clone` で行う(GitHub の ZIP は使わない)。** ZIP だと `.bat` の改行コード(CRLF)が崩れて動かないことがある。
+- コンソールで Ctrl+C を押すと「バッチ ジョブを終了しますか」と聞かれる。**Y** を答える。また、簡易編集モードのままウィンドウの中をクリックすると出力が止まり、サーバーが固まったように見える(Enter で再開する)。
 
 `setup.bat` は uv(Python の道具)を入れ、部品を `components\` に取り込み、環境とモデルを用意する。
 uv を入れた直後に「PowerShell を開き直してもう一度実行」と出たら、その通りにする(ここまでで入れたのは uv だけ)。

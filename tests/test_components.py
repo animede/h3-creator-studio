@@ -18,6 +18,11 @@ def touch(p: Path):
     p.write_text("")
 
 
+def without_alloc(env):
+    """PYTORCH_CUDA_ALLOC_CONF は実行環境の値に左右されるので、比べるときは外す。"""
+    return {k: v for k, v in env.items() if k != "PYTORCH_CUDA_ALLOC_CONF"}
+
+
 class ComponentsTest(unittest.TestCase):
     def setUp(self):
         self._t = tempfile.TemporaryDirectory()
@@ -56,7 +61,7 @@ class ComponentsTest(unittest.TestCase):
             cmd = sp.build_command(sp.dir)
         self.assertEqual(cmd[0], str(self.root / "h3" / ".venv" / "Scripts" / "python.exe"))
         # 内蔵 LLM は動かさず、管理役の LLM(8701)を指す
-        self.assertEqual(sp.env(sp.dir, sp.port), {"H3_LLM_LOCAL": "0", "H3_LLM_URL": "http://127.0.0.1:8701"})
+        self.assertEqual(without_alloc(sp.env(sp.dir, sp.port)), {"H3_LLM_LOCAL": "0", "H3_LLM_URL": "http://127.0.0.1:8701"})
 
     def test_h3image(self):
         touch(self.root / "h3image" / ".venv" / "bin" / "python")
@@ -64,7 +69,7 @@ class ComponentsTest(unittest.TestCase):
         cmd = sp.build_command(sp.dir)
         self.assertEqual(cmd[1:], ["-u", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8633"])
         self.assertEqual((sp.unload_path, sp.reload_path), ("/api/admin/unload", "/api/admin/load"))
-        self.assertEqual(sp.env(sp.dir, sp.port),
+        self.assertEqual(without_alloc(sp.env(sp.dir, sp.port)),
                          {"H3IMG_LLM_BASE_URL": "http://127.0.0.1:8701/v1", "H3IMG_LLM_MODEL": "gemma-4-E4B"})
 
     def test_ace(self):

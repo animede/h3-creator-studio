@@ -62,6 +62,13 @@ def _windows_job_object(popen: subprocess.Popen):
         from ctypes import wintypes
 
         kernel32 = ctypes.windll.kernel32
+        # 64bit ではハンドルが int に切り詰められないよう、型を明示する
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
 
         class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
             _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
@@ -104,6 +111,11 @@ def start(spec) -> Proc:
     """
     cmd = spec.build_command(spec.dir)           # 未導入なら ComponentNotInstalled
     env = {**os.environ, **spec.env(spec.dir, spec.port), **spec.extra_env, "PYTHONUNBUFFERED": "1"}
+    # 標準出力をログファイルへ流すと、Windows の cp932 では日本語の print で UnicodeEncodeError になるため UTF-8 に固定する
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+    if sys.platform == "win32":
+        env.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")   # 開発者モードなしでは symlink を作れず、HF のキャッシュ作成が失敗する
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     kwargs = {}
     if sys.platform == "win32":

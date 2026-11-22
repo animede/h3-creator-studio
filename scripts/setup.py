@@ -249,12 +249,24 @@ def aivis_url(plat: str = None) -> str:
     return AIVIS_BASE + f"AivisSpeech-Engine-{'Windows' if is_win(plat) else 'Linux'}-x64-{AIVIS_VERSION}.7z.001"
 
 
+def _rename_retry(src: Path, dst: Path, tries: int = 10, wait: float = 0.5) -> None:
+    """rename を PermissionError のときだけ再試行する(Windows では Defender やインデクサが展開直後のファイルを掴む)。"""
+    for i in range(tries):
+        try:
+            src.rename(dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(wait)
+
+
 def _lift(sub: Path, dest: Path) -> None:
     """sub の中身を dest へ持ち上げて sub を消す(sub と同名の中身があっても衝突しないよう、一度どかす)。"""
     tmp = dest / f".lift-{os.getpid()}"
-    sub.rename(tmp)
+    _rename_retry(sub, tmp)
     for item in list(tmp.iterdir()):
-        item.rename(dest / item.name)
+        _rename_retry(item, dest / item.name)
     tmp.rmdir()
 
 
@@ -273,7 +285,7 @@ def normalize_aivis_layout(d: Path, plat: str = None) -> Optional[Path]:
         if found is not None and found.parent != d:
             for item in list(found.parent.iterdir()):
                 if not (d / item.name).exists():
-                    item.rename(d / item.name)
+                    _rename_retry(item, d / item.name)
             exe = find_aivis_exe(d, plat)
     if exe is not None and not is_win(plat):
         exe.chmod(exe.stat().st_mode | 0o111)
@@ -331,7 +343,7 @@ def install_aivis(target: Path, plat: str = None, fetch: Callable = download, ex
             raise RuntimeError(f"展開しても {aivis_exe_name(plat)} が見つかりません(配布物の構成が変わったかもしれません)")
         if target.is_dir():
             target.rmdir()                  # 空のフォルダだけ(decide_source が空でないものは弾いている)
-        tmp.rename(target)
+        _rename_retry(tmp, target)
     finally:
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(tmp, ignore_errors=True)

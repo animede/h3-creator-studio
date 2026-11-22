@@ -5,19 +5,23 @@ import os
 import shutil
 import subprocess
 import sys
+import logging
 import threading
 import time
 from typing import Callable, Optional
 
 import psutil
 
+log = logging.getLogger(__name__)
+
 POLL_S = 2.0
-SHARED_CACHE_S = 4.0
+SHARED_CACHE_S = 10.0
 SHARED_WINDOW_S = 10.0
 SHARED_GROW_MIB = 1024
 WARN_SPILL = ("VRAM があふれて共有 GPU メモリに退避しています(極端に遅くなります)。"
               "画角を小さくするか、他の GPU 利用アプリを閉じてください")
 WARN_NO_SMI = "nvidia-smi が見つかりません"
+SHARED_MAX_FAILS = 3   # 連続でこの回数 None なら、共有 GPU メモリの監視をあきらめる
 
 
 def find_nvidia_smi() -> Optional[str]:
@@ -153,6 +157,8 @@ class GpuMonitor:
         self._shared_hist = collections.deque()   # (時刻, MiB)
         self._shared_at = 0.0
         self._shared = None
+        self._shared_fails = 0
+        self._shared_off = False
         self._warn_until = 0.0
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -160,7 +166,7 @@ class GpuMonitor:
 
     def start(self) -> None:
         if self._thread is None:
-            self.poll()
+            self.poll(read_shared=False)   # PowerShell(数秒かかる)で起動を止めない。共有 GPU メモリは最初のループで読む
             self._thread = threading.Thread(target=self._loop, name="gpu-monitor", daemon=True)
             self._thread.start()
 
@@ -189,12 +195,16 @@ class GpuMonitor:
         except (OSError, subprocess.SubprocessError):
             return None
 
-    def _update_shared(self, gpu: Optional[dict], now: float) -> Optional[str]:
+    def _update_shared(self, gpu: Optional[dict], now: float, read: bool = True) -> Optional[str]:
         """共有 GPU メモリの増加を見張る。警告文(または None)を返す。"""
-        if sys.platform != "win32":
+        if sys.platform != "win32" or self._shared_off:
             return None
-        if now - self._shared_at >= SHARED_CACHE_S:
+        if read and now - self._shared_at >= SHARED_CACHE_S:
             self._shared, self._shared_at = read_shared_mib(), time.time()
+            self._shared_fails = 0 if self._shared is not None else self._shared_fails + 1
+            if self._shared_fails >= SHARED_MAX_FAILS:
+                self._shared_off = True
+                log.warning("共有 GPU メモリを読めないため、この起動中は監視をやめます")
         if self._shared is None:
             return None
         self._shared_hist.append((now, self._shared))
@@ -205,11 +215,11 @@ class GpuMonitor:
             self._warn_until = now + 30
         return WARN_SPILL if now < self._warn_until else None
 
-    def poll(self) -> None:
+    def poll(self, read_shared: bool = True) -> None:
         now = time.time()
         gpu = self._read_gpu()
         vm = psutil.virtual_memory()
-        warning = self._update_shared(gpu, now) or (None if self._smi else WARN_NO_SMI)
+        warning = self._update_shared(gpu, now, read_shared) or (None if self._smi else WARN_NO_SMI)
         snap = {"gpu": gpu, "ram": {"used_mib": int(vm.used / 1048576), "total_mib": int(vm.total / 1048576)},
                 "procs": {k: int(v / 1048576) for k, v in self.rss_provider().items() if v is not None},
                 "shared_gpu_mib": self._shared if sys.platform == "win32" else None,

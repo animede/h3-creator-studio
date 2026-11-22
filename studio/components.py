@@ -1,4 +1,5 @@
 """部品カタログ: 4 つの部品の起動コマンド・準備確認・GPU の空け方を 1 か所にまとめる。"""
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,13 +137,15 @@ def get_spec(name: str, cfg: Settings = None) -> ComponentSpec:
                     startup_timeout_s=900)
         spec.build_command = lambda dd: _h3_command(dd, spec.port)
         # 部品の内蔵 LLM は使わず、管理役の LLM(llama-server)を使う
-        spec.env = lambda dd, p: {"H3_LLM_LOCAL": "0", "H3_LLM_URL": f"http://127.0.0.1:{cfg.llm_port}"}
+        spec.env = lambda dd, p: {"H3_LLM_LOCAL": "0", "H3_LLM_URL": f"http://127.0.0.1:{cfg.llm_port}",
+                                      "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True"}
     elif name == "h3image":
         spec = make("MiniMax-H3-Image(画像)", 8633, health_path="/api/health", health_ok=lambda j: True,
                     uses_gpu=True, can_unload=True, unload_path="/api/admin/unload", reload_path="/api/admin/load", vram_need_mib=13500,
                     startup_timeout_s=900)
         spec.build_command = lambda dd: _h3image_command(dd, spec.port)
-        spec.env = lambda dd, p: {"H3IMG_LLM_BASE_URL": f"http://127.0.0.1:{cfg.llm_port}/v1", "H3IMG_LLM_MODEL": "gemma-4-E4B"}
+        spec.env = lambda dd, p: {"H3IMG_LLM_BASE_URL": f"http://127.0.0.1:{cfg.llm_port}/v1", "H3IMG_LLM_MODEL": "gemma-4-E4B",
+                                      "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True"}
     elif name == "ace":
         spec = make("ACE-Step(音楽)", 8001, health_path="/health",
                     health_ok=lambda j: bool(isinstance(j, dict) and (j.get("data") or {}).get("models_initialized")),

@@ -1,4 +1,6 @@
 @echo off
+for /f "tokens=2 delims=:" %%a in ('chcp') do set "OLDCP=%%a"
+set "OLDCP=%OLDCP: =%"
 rem UTF-8 first: every line below (Japanese text included) is parsed with this code page
 chcp 65001 >nul
 rem h3-creator-studio のセットアップ(Windows)。uv を用意し、管理役の .venv を作って、scripts\setup.py に渡す。
@@ -42,6 +44,7 @@ echo [3/3] 部品の取り込みと準備
 .venv\Scripts\python.exe scripts\setup.py %*
 set "RC=%ERRORLEVEL%"
 if "%UV_NEW%"=="1" call :notice_after
+chcp %OLDCP% >nul
 endlocal & exit /b %RC%
 
 :uv_notice
@@ -53,11 +56,13 @@ echo      .\setup.bat
 echo  をもう一度実行してください。
 echo  ここまでで入れたのは uv だけです。本番の準備は 2 回目の実行で始まります。
 echo ============================================================
+chcp %OLDCP% >nul
 endlocal & exit /b 1
 
 :failed
 echo.
 echo 管理役の環境を作れませんでした。上の出力を確認して、.\setup.bat をもう一度実行してください。
+chcp %OLDCP% >nul
 endlocal & exit /b 1
 
 :notice_after

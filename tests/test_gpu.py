@@ -1,5 +1,8 @@
+import time
 import unittest
+from unittest import mock
 
+from studio import gpu
 from studio.gpu import localized_counter_path, parse_perflib, parse_smi
 
 SAMPLE = "0, NVIDIA GeForce RTX 3090, 1234, 24576, 7\n1, NVIDIA GeForce RTX 3060, 100, 12288, 0\n"
@@ -27,6 +30,22 @@ class GpuTest(unittest.TestCase):
         self.assertIsNone(localized_counter_path("2\nSystem\n", "2\nシステム\n"))
         # 現地語側に番号が無いときも None(呼び出し側が英語のパスに戻す)
         self.assertIsNone(localized_counter_path("1500\nGPU Process Memory\n1502\nShared Usage\n", "1500\nGPU\n"))
+
+    def test_shared_read_throttled(self):
+        m, t0 = gpu.GpuMonitor(), time.time()
+        with mock.patch.object(gpu.sys, "platform", "win32"), mock.patch.object(gpu, "read_shared_mib", return_value=100) as rd:
+            m._update_shared(None, t0)
+            m._update_shared(None, t0 + 2)      # 10 秒未満は前の値を使う
+            self.assertEqual(rd.call_count, 1)
+            m._update_shared(None, t0 + gpu.SHARED_CACHE_S + 1)
+            self.assertEqual(rd.call_count, 2)
+
+    def test_shared_gives_up_after_failures(self):
+        m, t0 = gpu.GpuMonitor(), time.time()
+        with mock.patch.object(gpu.sys, "platform", "win32"), mock.patch.object(gpu, "read_shared_mib", return_value=None) as rd:
+            for i in range(6):
+                m._update_shared(None, t0 + i * 100)
+            self.assertEqual(rd.call_count, gpu.SHARED_MAX_FAILS)
 
 
 if __name__ == "__main__":
