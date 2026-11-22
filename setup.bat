@@ -1,11 +1,12 @@
 @echo off
+rem UTF-8 first: every line below (Japanese text included) is parsed with this code page
+chcp 65001 >nul
 rem h3-creator-studio のセットアップ(Windows)。uv を用意し、管理役の .venv を作って、scripts\setup.py に渡す。
 rem   .\setup.bat                  部品の取り込み + 環境 + モデル(合計 約 100GB、回線次第で数時間)
 rem   .\setup.bat --no-models      環境だけ(モデルは後で)
 rem   .\setup.bat --only h3,ace    指定した部品だけ
 rem   .\setup.bat --llm            同梱 LLM(約 5GB)も先に取得する
 rem 何度実行してもよい。済んでいる所は飛ばし、途中で止まっても続きから進む。
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 set "UV_NEW=0"

@@ -114,7 +114,7 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
     """
     if total_mib is None or total_mib >= LOW_VRAM_MIB:
         return {}
-    return {"ACESTEP_GPU_PROFILE": "12gb", "ACESTEP_LM_OFFLOAD_TO_CPU": "1", "ACESTEP_RESIDENT_COMPONENTS": "",
+    return {"ACESTEP_GPU_PROFILE": "12gb", "ACESTEP_LM_OFFLOAD_TO_CPU": "1", "ACESTEP_RESIDENT_COMPONENTS": "none",
             "ACESTEP_VAE_DECODE_CHUNK_SIZE": "128", "ACESTEP_QUANTIZATION": "int8_weight_only"}
 
 

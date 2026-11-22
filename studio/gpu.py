@@ -25,9 +25,11 @@ def find_nvidia_smi() -> Optional[str]:
     if found:
         return found
     if sys.platform == "win32":
-        p = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "nvidia-smi.exe")
-        if os.path.isfile(p):
-            return p
+        # 新しいドライバは System32、古いドライバは NVIDIA Corporation\NVSMI(PATH に無い)
+        for p in (os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "nvidia-smi.exe"),
+                  os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe")):
+            if os.path.isfile(p):
+                return p
     return None
 
 

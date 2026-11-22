@@ -84,7 +84,7 @@ class ComponentsTest(unittest.TestCase):
         self.assertFalse(sp.health_ok({"data": {"models_initialized": False}}))
 
     def test_ace_gpu_env_only_below_10gib(self):
-        recipe = {"ACESTEP_GPU_PROFILE": "12gb", "ACESTEP_LM_OFFLOAD_TO_CPU": "1", "ACESTEP_RESIDENT_COMPONENTS": "",
+        recipe = {"ACESTEP_GPU_PROFILE": "12gb", "ACESTEP_LM_OFFLOAD_TO_CPU": "1", "ACESTEP_RESIDENT_COMPONENTS": "none",
                   "ACESTEP_VAE_DECODE_CHUNK_SIZE": "128", "ACESTEP_QUANTIZATION": "int8_weight_only"}
         self.assertEqual(ace_gpu_env(8188), recipe)          # RTX 3050 8GB / 3060 Ti など
         self.assertEqual(ace_gpu_env(10239), recipe)
