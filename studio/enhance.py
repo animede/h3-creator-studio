@@ -79,11 +79,26 @@ async def enhance_prompt(runner, tab: str, text: str, mode: str = None, seconds:
         raise EnhanceError(400, "tab は image か video です")
     if not text:
         raise EnhanceError(400, "プロンプトを入力してください")
-    if runner.gpu_busy():
-        raise EnhanceError(409, "生成中はプロンプトを強化できません(GPU を使っているため)。終わってからもう一度押してください")
     name = COMPONENTS[tab]
     if name not in ctx.sched.comps:
         raise EnhanceError(409, f"{name} が無効になっています(studio.toml の [components.{name}] enabled を確認してください)")
+    # 生成中でも強化はできる(LLM は CPU 専用で動く)。ただし部品が載っていないときは、載せるために仕事中の部品を降ろすことになるなら断る
+    plan = ctx.sched.plan(name) if hasattr(ctx.sched, "plan") else None
+    if plan is not None and plan.action == "wait":
+        busy = "、".join(ctx.sched.comps[n].spec.label for n in plan.blockers) or "別の部品"
+        raise EnhanceError(409, f"{ctx.sched.comps[name].spec.label} を GPU に載せられません({busy} が生成中のため)。"
+                                "生成が終わってからもう一度押してください")
+    mark, idle = getattr(ctx.sched, "mark_busy", None), getattr(ctx.sched, "mark_idle", None)
+    if mark is not None:
+        mark(name)                 # 強化の最中は、別の生成がこの部品を GPU から降ろさないようにする
+    try:
+        return await _enhance(ctx, name, tab, text, mode, seconds, task, lang, references)
+    finally:
+        if idle is not None:
+            idle(name)
+
+
+async def _enhance(ctx, name: str, tab: str, text: str, mode, seconds, task, lang, references) -> dict:
     async with ctx.llm.session():
         try:
             await ctx.sched.ensure(name)                 # 部品が応えられる状態に(強化の後、どのみち生成で使う)

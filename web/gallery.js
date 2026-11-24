@@ -9,6 +9,7 @@ const studio = {
   viewing: {},               // タブ -> 生成物ビューアに出している ID(未指定なら、そのタブの最新)
   galleryKind: "all",
   actions: {},               // タブ -> (生成物) => [{label, run}]  生成物ビューアに出すボタン(各タブの js が入れる)
+  own: {},                   // タブ -> {history(grid), open(生成物)}  右側の生成物ビューアと履歴を自前で描くタブ(MV タブ)。open はギャラリーでクリックされたとき
   on: { tab: [], items: [] },   // 各タブの js が入れる: タブが変わったとき / 一覧が更新されたとき
 };
 
@@ -74,6 +75,8 @@ function tabItems() { return studio.items.filter((i) => i.tab === studio.tab); }
 
 function renderHistory() {
   const grid = $("hist-grid");
+  const own = studio.own[studio.tab];
+  if (own) { own.history(grid); return; }
   const list = tabItems();
   const shown = currentItem();
   grid.replaceChildren();
@@ -111,6 +114,7 @@ function currentItem() {
 }
 
 function renderViewer() {
+  if (studio.own[studio.tab]) return;
   const item = currentItem();
   const v = $("viewer"), meta = $("vmeta");
   meta.hidden = !item;
@@ -167,7 +171,9 @@ function renderGallery() {
   const list = studio.items.filter((i) => studio.galleryKind === "all" || i.kind === studio.galleryKind);
   if (!list.length) { grid.append(el("div", "placeholder", "まだ何もありません")); return; }
   for (const it of list) {
-    grid.append(thumbNode(it, (x) => {      // クリック: その生成物を、いまのタブの生成物ビューアで開く
+    grid.append(thumbNode(it, (x) => {      // クリック: その生成物を、いまのタブの生成物ビューアで開く(MV タブは、その MV を作った制作を開く)
+      const own = studio.own[studio.tab];
+      if (own) { if (own.open) own.open(x); setGalleryView(false); return; }
       studio.viewing[studio.tab] = x.id;
       setGalleryView(false);
       renderHistory();
@@ -196,6 +202,7 @@ document.querySelectorAll("#g-chips .chip").forEach((c) => c.addEventListener("c
 
 function setTab(tab) {
   studio.tab = tab;
+  $("workspace").dataset.tab = tab;
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
   document.querySelectorAll(".tabpanel").forEach((p) => { p.hidden = p.id !== "tab-" + tab; });
   $("progress").hidden = true;      // 進捗は、そのタブのジョブがあるときだけ各タブの js が出す

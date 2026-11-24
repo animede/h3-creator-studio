@@ -6,7 +6,8 @@ port = 8700
 components_dir = "components"   # 部品を置くフォルダ(リポジトリ直下からの相対)
 
 # 各部品: repo = components_dir 内のフォルダ名、dir = 場所を直接指定(絶対パス可)、
-#         port = 待ち受けポート、enabled = false で無効化、env = 追加の環境変数
+#         port = 待ち受けポート、enabled = false で無効化、env = 追加の環境変数、
+#         vram_budget_gb = share のときの VRAM の予算(GiB。書かなければ下の [gpu] の説明の既定)
 [components.h3]
 repo = "minimax-h3"
 port = 8611
@@ -27,9 +28,30 @@ repo = "AivisSpeech-Engine"
 port = 10101
 enabled = true
 
+# GPU の使い方。
+#   mode = "auto"      総 VRAM が 40GiB 以上なら share、それ未満なら exclusive(既定)
+#   mode = "exclusive" GPU に載せる部品は常に 1 つ。生成のたびに自動で載せ替える(12GB 級はこれ)
+#   mode = "share"     大きな GPU 向け。複数の部品を同時に載せ、別々の部品の生成を並行に走らせる。
+#                      部品ごとに VRAM の予算を割り当てて起動時に部品へ渡し、予算の合計が収まるかぎり他を降ろさずに載せる。
+#                      足りなければ、仕事中でない部品を最後に使った時刻の古い順に降ろし、それでも足りなければ
+#                      仕事中の部品が空くまで待つ(ジョブには「GPU の空きを待っています」と出る)。
+# share の予算の既定は、総 VRAM T に対して h3 = min(T×0.5, 48)GiB、h3image = min(T×0.35, 31)GiB、ace = 14GiB。
+# 部品ごとに [components.h3] vram_budget_gb = 40 のように書くと上書きできる(exclusive では予算を渡さない)。
+# GPU を使わない仕事(TTS、MV の音声分離など)は、GPU の使い方によらず CPU で 2 本まで同時に走る。
+[gpu]
+mode = "auto"
+
 # 管理役が持つ LLM(プロンプト強化・作詞)。llama.cpp の llama-server で Gemma 4 E4B を動かす。
 # gpu = "auto"(空き VRAM に入る分だけ GPU、残りは CPU)/ "off"(CPU のみ)/ "all" / 層数
 # gguf・llama_server を書くと、取得せずにそのファイルを使う。tools_dir は取得先(リポジトリ直下からの相対)。
+# GPU で生成している間は、LLM を待たせず、CUDA を隠した CPU 専用で動かす(遅くなる)。仕事が無くなると GPU 版へ戻る。
+# MV タブ(リップシンク MV)の音声処理(Demucs のボーカル分離、シーン分割)を動かす Python。
+# 空なら setup --mv が作る components/mvtools/.venv を使う。すでに Demucs と librosa の入った環境があれば、その python を書く。
+# device = ボーカルの分離(Demucs)を動かす装置。空なら CPU("cuda" で GPU。GPU の仕事と VRAM を取り合うので、空きに余裕があるときだけ)。
+[mv]
+tools_python = ""
+device = ""
+
 [llm]
 port = 8701
 gpu = "auto"

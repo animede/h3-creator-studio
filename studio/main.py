@@ -1,6 +1,8 @@
 """管理役の FastAPI アプリ。画面(web/)と JSON API を 1 オリジンで配る。"""
 import argparse
 import asyncio
+import contextlib
+import json
 import logging
 import mimetypes
 import re
@@ -8,14 +10,14 @@ import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import procman
+from . import mv_audio, presets, procman
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .enhance import EnhanceError, enhance_prompt
@@ -24,6 +26,8 @@ from .handlers import HANDLERS
 from .jobs import Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
+from .mv import Director
+from .presets import PresetError
 from .scheduler import Scheduler
 from .handlers import ace as ace_handler
 from .songplan import SongPlanError, make_caption, make_plan
@@ -35,8 +39,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
-              "/api/components/", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js", "/image.js",
-              "/video.js", "/music.js", "/dnd.js", "/favicon.ico")
+              "/api/components/", "/api/mv", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
+              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/dnd.js", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -57,10 +61,13 @@ async def lifespan(app: FastAPI):
     app.state.tts = Tts(sched, ledger, OUTPUTS_DIR)
     app.state.llm = llm = Llm(settings)
     app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm), HANDLERS)
-    llm.busy = runner.gpu_busy        # GPU で生成している間、LLM は起こさずに待つ
+    app.state.mv = director = Director(runner, ledger, OUTPUTS_DIR)
+    director.restore()       # 再起動で途切れた MV の制作は、一時停止にして残す
+    llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
     sched.monitor = monitor
     monitor.start()
+    sched.configure_gpu(settings.gpu_mode)       # exclusive / share を、総 VRAM(監視の最初の値)で決める
     runner.start()
     await sched.adopt_running()
     yield
@@ -85,7 +92,8 @@ def api_status():
     sched, snap = app.state.sched, app.state.monitor.snapshot()
     return {"components": sched.status(), "gpu": snap["gpu"], "ram": snap["ram"], "shared_gpu_mib": snap["shared_gpu_mib"],
             "warning": snap["warning"], "operation": sched.current_operation(), "busy": sched.is_busy(), "ts": time.time(),
-            "jobs_done_counter": app.state.jobs.done_counter}
+            "jobs_done_counter": app.state.jobs.done_counter,
+            "gpu_mode": sched.mode, "residents": sched.resident_status(), "lanes": app.state.jobs.lane_status()}
 
 
 @app.post("/api/components/{name}/{action}")
@@ -93,6 +101,11 @@ async def api_component_action(name: str, action: str):
     if action not in ("start", "stop", "ensure"):
         raise HTTPException(404, "start / stop / ensure のいずれかです")
     comp = _comp(name)
+    if comp.spec.uses_gpu and action == "ensure":
+        plan = app.state.sched.plan(name)
+        if plan.action == "wait":      # 仕事中の部品を降ろさないと載らない: 待たせずに断る(画面の操作が、生成の終わりまで固まらないように)
+            busy = "、".join(app.state.sched.comps[n].spec.label for n in plan.blockers) or "別の部品"
+            raise HTTPException(409, f"{comp.spec.label} を GPU に載せられません({busy} が生成中のため)。生成が終わってからもう一度押してください")
     if comp.spec.uses_gpu and action in ("start", "ensure"):
         await app.state.llm.release_before_gpu()      # 管理役の LLM が VRAM を持っていたら返す
     return {"operation_id": app.state.sched.launch(action, name).id}
@@ -205,9 +218,7 @@ class SongPlanIn(BaseModel):
 
 @app.post("/api/songplan")
 async def api_songplan(body: SongPlanIn):
-    """テーマ・歌詞・キャプションを LLM で作って返す(生成はしない。「歌詞だけ作る」にも使える)。"""
-    if app.state.jobs.gpu_busy():
-        raise HTTPException(409, "生成中は歌詞を作れません(GPU を使っているため)。終わってからもう一度押してください")
+    """テーマ・歌詞・キャプションを LLM で作って返す(生成はしない。「歌詞だけ作る」にも使える)。生成中は LLM が CPU 専用になり、遅くなる。"""
     try:
         return await make_plan(app.state.llm.chat, body.genre, body.language, body.mood, body.vocal, body.theme.strip(),
                                want_lyrics=not body.instrumental)
@@ -215,13 +226,7 @@ async def api_songplan(body: SongPlanIn):
         raise HTTPException(503, str(e))
 
 
-# ---- 音楽タブの「作る」ボタン(テーマ・歌詞・キャプション。管理役の LLM を使う) ----
-
-def _llm_ready() -> None:
-    """LLM を使う前の確認(/api/enhance と同じ): GPU で生成している間は、LLM を起こさずに断る。"""
-    if app.state.jobs.gpu_busy():
-        raise HTTPException(409, "生成中は作れません(GPU を使っているため)。終わってからもう一度押してください")
-
+# ---- 音楽タブの「作る」ボタン(テーマ・歌詞・キャプション。管理役の LLM を使う。生成中でも作れる) ----
 
 class MusicIn(BaseModel):
     genre: str = "J-POP"
@@ -237,7 +242,6 @@ class MusicIn(BaseModel):
 @app.post("/api/music/theme")
 async def api_music_theme(body: MusicIn):
     """ジャンルと言語から、曲のテーマを 1 つ作る。"""
-    _llm_ready()
     try:
         plan = await make_plan(app.state.llm.chat, body.genre, body.language, want_lyrics=False, want_caption=False)
     except (LlmError, SongPlanError) as e:
@@ -248,7 +252,6 @@ async def api_music_theme(body: MusicIn):
 @app.post("/api/music/lyrics")
 async def api_music_lyrics(body: MusicIn):
     """歌詞を作る。テーマがあればそのテーマで書き、無ければテーマも作る。"""
-    _llm_ready()
     try:
         plan = await make_plan(app.state.llm.chat, body.genre, body.language, body.mood, body.vocal, body.theme.strip(),
                                want_lyrics=True, want_caption=False)
@@ -260,7 +263,6 @@ async def api_music_lyrics(body: MusicIn):
 @app.post("/api/music/caption")
 async def api_music_caption(body: MusicIn):
     """テーマ・歌詞・ムード・ボーカルから、ACE-Step に渡すキャプション(英語)を作る。"""
-    _llm_ready()
     try:
         caption = await make_caption(app.state.llm.chat, body.genre, body.theme.strip(), body.lyrics, body.mood, body.vocal,
                                      body.language, body.thinking, body.instrumental)
@@ -272,6 +274,8 @@ async def api_music_caption(body: MusicIn):
 @app.get("/api/music/models")
 async def api_music_models():
     """ACE の DiT モデル一覧(読込済み・VRAM に載るか・既定)。ACE は起こさず、動いていなければ空の一覧を返す。"""
+    if "ace" not in app.state.sched.comps:          # studio.toml で ACE を無効にしている: 画面が落ちないよう、空の一覧で答える
+        return {"models": [], "default_model": None, "note": "音楽の部品(ACE-Step)は無効になっています"}
     spec = _comp("ace").spec
     return await ace_handler.list_models(spec.base_url, app.state.jobs.ctx.transport)
 
@@ -298,6 +302,185 @@ async def api_tts(body: TtsIn):
         return _public(await app.state.tts.synthesize(body.text, body.style_id, body.speed))
     except TtsError as e:
         raise HTTPException(e.status, e.message)
+
+
+# ---- MV(リップシンク) ----
+
+class MvIn(BaseModel):
+    song_id: str = ""
+    image_id: str = ""
+    character: str = ""            # 人物の説明(空なら、画像のプロンプト。それも無ければ中立の文)
+    concept: str = ""              # 曲の内容・世界観(空なら、曲のテーマ・キャプション・ジャンル)
+    aspect: str = "16:9"           # 16:9 / 9:16 / 1:1 / 4:5
+    quality: str = "fast"          # fast / standard / high
+    min_s: float = 5.0             # シーンの長さ(5〜10 秒)
+    max_s: float = 10.0
+    seed: Optional[int] = None
+    background_text: str = "auto"  # 背景の文字の扱い: auto / large / none(画面には出さない)
+
+
+class MvRetryIn(BaseModel):
+    prompt: Optional[str] = None   # 演出(H3 に渡すプロンプト全文)を書き換えるとき
+    seed: Optional[int] = None
+
+
+@contextlib.contextmanager
+def _mv_errors():
+    """制作の操作の失敗を HTTP のエラーにする(見つからない → 404、入力や状態が合わない → 400。理由はどちらも日本語)。"""
+    try:
+        yield
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _mv_public(view: Optional[dict]) -> Optional[dict]:
+    """制作の辞書の最終の MV(台帳の行)を、ギャラリーと同じ形(url つき)にする。"""
+    return {**view, "output": _public(view["output"]) if view.get("output") else None} if view else view
+
+
+@app.get("/api/mv/tools")
+def api_mv_tools():
+    """MV に要る道具(Demucs と librosa の入った Python、ffmpeg)があるか。無ければ、画面に出す案内(hint)つきで知らせる。"""
+    hint = None
+    try:
+        mv_audio.tools_python()
+    except mv_audio.MvToolsMissing as e:
+        hint = e.message
+    if hint is None and shutil.which("ffmpeg") is None:
+        hint = "ffmpeg が見つかりません(PATH に入れてください)"
+    return {"available": hint is None, "hint": hint}
+
+
+@app.get("/api/mv")
+def api_mv_list(limit: int = 100):
+    """制作の一覧(新しい順。シーンの中身は含めない)。"""
+    return [_mv_public(v) for v in app.state.mv.list(max(1, min(limit, 500)))]
+
+
+@app.post("/api/mv")
+async def api_mv_create(body: MvIn):
+    with _mv_errors():
+        return _mv_public(app.state.mv.create(body.model_dump()))
+
+
+@app.get("/api/mv/{pid}")
+def api_mv_get(pid: str):
+    view = app.state.mv.view(pid)
+    if view is None:
+        raise HTTPException(404, "その MV の制作は見つかりません(削除されたかもしれません)")
+    return _mv_public(view)
+
+
+@app.post("/api/mv/{pid}/pause")
+async def api_mv_pause(pid: str):
+    with _mv_errors():
+        return _mv_public(await app.state.mv.pause(pid))
+
+
+@app.post("/api/mv/{pid}/resume")
+async def api_mv_resume(pid: str):
+    with _mv_errors():
+        return _mv_public(app.state.mv.resume(pid))
+
+
+@app.post("/api/mv/{pid}/cancel")
+async def api_mv_cancel(pid: str):
+    with _mv_errors():
+        return _mv_public(await app.state.mv.cancel(pid))
+
+
+@app.post("/api/mv/{pid}/reassemble")
+async def api_mv_reassemble(pid: str):
+    with _mv_errors():
+        return _mv_public(app.state.mv.reassemble(pid))
+
+
+@app.post("/api/mv/{pid}/scenes/{index}/retry")
+async def api_mv_retry_scene(pid: str, index: int, body: Optional[MvRetryIn] = None):
+    body = body or MvRetryIn()
+    with _mv_errors():
+        return _mv_public(app.state.mv.retry_scene(pid, index, body.prompt, body.seed))
+
+
+@app.delete("/api/mv/{pid}")
+async def api_mv_delete(pid: str):
+    """制作を消す(作業フォルダごと)。ギャラリーの最終の MV は残る。"""
+    with _mv_errors():
+        await app.state.mv.delete(pid)
+    return {"ok": True}
+
+
+# ---- プリセット(各タブの入力欄の値に名前を付けたもの) ----
+
+class PresetIn(BaseModel):
+    tab: Optional[str] = None      # image / video / music / mv
+    name: Optional[str] = None
+    values: Any = None             # 入力欄の値の辞書(文字・数・真偽値・それらの配列)。形の検査は presets.check_values(日本語の 400)
+
+
+class PresetPatch(BaseModel):
+    name: Optional[str] = None
+    values: Any = None
+
+
+@contextlib.contextmanager
+def _preset_errors():
+    """プリセットの操作の失敗を HTTP のエラーにする(理由は日本語)。"""
+    try:
+        yield
+    except PresetError as e:
+        raise HTTPException(e.status, e.message)
+
+
+@app.get("/api/presets")
+def api_presets(tab: str = None):
+    """同梱のプリセット(builtin: true)、自分のプリセットの順。tab で絞る。"""
+    with _preset_errors():
+        return presets.list_presets(app.state.ledger, tab)
+
+
+@app.post("/api/presets")
+def api_presets_create(body: PresetIn):
+    """自分のプリセットを作る。同じ名前があれば「名前(2)」…にして、作ったものを返す。"""
+    with _preset_errors():
+        return presets.create_preset(app.state.ledger, body.tab, body.name, body.values)
+
+
+@app.post("/api/presets/import")
+async def api_presets_import(request: Request):
+    """書き出した JSON(プリセットの配列か {"presets": [...]})から、自分のプリセットを作って返す。1 件でも不正なら何も作らない。"""
+    try:
+        data = await request.json()
+    except ValueError:
+        raise HTTPException(400, "JSON として読めません")
+    with _preset_errors():
+        return await asyncio.to_thread(presets.import_presets, app.state.ledger, data)
+
+
+@app.get("/api/presets/export")
+def api_presets_export(tab: str = None, include_builtin: bool = False):
+    """自分のプリセット(include_builtin=1 なら同梱のものも)を JSON のファイルで返す。そのまま import できる。"""
+    with _preset_errors():
+        data = presets.export_presets(app.state.ledger, tab, include_builtin)
+    filename = f"h3-presets-{tab}.json" if tab else "h3-presets.json"       # tab は検査済み(image / video / music / mv)
+    return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.put("/api/presets/{pid}")
+def api_presets_update(pid: str, body: PresetPatch):
+    """名前と値のうち、渡したほうだけを書き換える。同梱のプリセットは 400。"""
+    with _preset_errors():
+        return presets.update_preset(app.state.ledger, pid, body.name, body.values)
+
+
+@app.delete("/api/presets/{pid}")
+def api_presets_delete(pid: str):
+    with _preset_errors():
+        presets.delete_preset(app.state.ledger, pid)
+    return {"ok": True}
 
 
 # ---- ギャラリーとアップロード ----

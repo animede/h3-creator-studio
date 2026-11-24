@@ -1,0 +1,62 @@
+h3-creator-studio
+Copyright (c) 2026 animede
+Licensed under the MIT License (see LICENSE), except for the files listed below.
+
+----------------------------------------------------------------------
+studio/mvtools/ (separate.py, analyze.py)
+----------------------------------------------------------------------
+These files are ported from Minimax-H3-lipsync-mv
+(https://github.com/animede/Minimax-H3-lipsync-mv), Copyright 2026 YUZUKI,
+licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0), and have been modified.
+They remain under the Apache License, Version 2.0; each file carries
+"SPDX-License-Identifier: Apache-2.0" and a header describing the changes.
+
+  separate.py  vocal separation with Demucs (htdemucs). Ported from
+               app/services/audio.py (_DEMUCS_SCRIPT, separate_vocals).
+               Modified: standalone script; also writes the accompaniment;
+               progress lines on stderr; one JSON line as the result;
+               exit code 1 on failure.
+  analyze.py   vocal-based scene segmentation (5-10 s scenes from silence,
+               vocal valleys, breaths, bars and section changes, joined by
+               dynamic programming). Ported from app/services/audio.py
+               (analyze_boundaries, plan_scenes) and
+               docs/vocal-scene-segmentation.md. Modified: standalone script
+               with JSON output; the first and last boundaries are never moved
+               by candidate merging; fallback to an even split when no path
+               exists; instrumental detection (has_vocals).
+
+Demucs, PyTorch, librosa and the other packages these scripts use are not
+included in this repository. `setup --mv` installs them into
+components/mvtools/.venv from PyPI and download.pytorch.org under their own
+licenses.
+
+----------------------------------------------------------------------
+studio/mvscript.py, studio/mvclip.py
+----------------------------------------------------------------------
+These files are also ported from Minimax-H3-lipsync-mv, Copyright 2026 YUZUKI,
+licensed under the Apache License, Version 2.0, and have been modified. They
+remain under the Apache License, Version 2.0; each file carries
+"SPDX-License-Identifier: Apache-2.0" and a header describing the changes.
+
+  mvscript.py  scene-by-scene direction for the MV: the scenario request with
+               one JSON-repair turn, the identity / subject text, frame-kind
+               guidance, the six-section MiniMax-H3 Ref2VA prompt formatter and
+               the lip-sync enforcement. Ported from app/services/llm.py
+               (_extract_json, _scenario_request, _identity_instruction,
+               _subject_definition, frame_kind, _FRAME_LLM_GUIDANCE,
+               _BACKGROUND_TEXT_GUIDANCE, _FRAME_SHOT_PREFIX,
+               format_h3_official_ref2va_prompt,
+               enforce_reference_and_lipsync, generate_scenario).
+               Modified: async calls to this studio's single-turn LLM client;
+               JSON extraction prefers objects; narration branches and
+               analyze_character are not ported; an unreadable overview does
+               not stop the run.
+  mvclip.py    frame-grid quantization of the scene plan, per-scene seeds and
+               the ffmpeg command lines that fit a clip to its exact length
+               and join the clips under the original song. Ported from
+               app/services/audio.py (quantize_scene_plan), app/pipeline.py
+               (per-scene seed) and app/services/h3.py (finish_scene,
+               concatenate_and_mux). Modified: the commands are only built here
+               (run by studio/handlers/mv.py); a clip that H3 returns short is
+               padded by cloning its last frame.

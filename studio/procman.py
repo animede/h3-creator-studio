@@ -104,13 +104,14 @@ def _windows_job_object(popen: subprocess.Popen):
 
 # ---- 起動・停止 ----
 
-def start(spec) -> Proc:
+def start(spec, extra_env: dict = None) -> Proc:
     """spec のコマンドを子プロセスとして起動する(出力は logs/<name>.log に追記)。
 
+    extra_env は起動のたびに決まる環境変数(share の VRAM の予算など)。spec.env の後、studio.toml の env の前に重ねる。
     注意: Linux の PDEATHSIG は「親スレッド」の死に反応するので、イベントループのスレッドから呼ぶこと。
     """
     cmd = spec.build_command(spec.dir)           # 未導入なら ComponentNotInstalled
-    env = {**os.environ, **spec.env(spec.dir, spec.port), **spec.extra_env, "PYTHONUNBUFFERED": "1"}
+    env = {**os.environ, **spec.env(spec.dir, spec.port), **(extra_env or {}), **spec.extra_env, "PYTHONUNBUFFERED": "1"}
     # 標準出力をログファイルへ流すと、Windows の cp932 では日本語の print で UnicodeEncodeError になるため UTF-8 に固定する
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")

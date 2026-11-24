@@ -7,6 +7,7 @@ import asyncio
 import logging
 import mimetypes
 import re
+from pathlib import Path
 
 import httpx
 
@@ -134,14 +135,19 @@ def _client(ctx: Ctx, timeout: float = 15.0) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=spec.base_url, timeout=timeout, transport=ctx.transport)
 
 
+def _file_part(field: str, path: Path, filename: str = None) -> tuple:
+    """ファイル 1 つを multipart の部品にする(MV が、台帳に載せない作業用の音声を渡すのにも使う)。"""
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return field, (filename or path.name, path.read_bytes(), mime)
+
+
 def _load_file(ctx: Ctx, field: str, oid: str, label: str) -> tuple:
     """台帳の生成物を multipart のファイル 1 つにする。"""
     rec = ctx.ledger.get_output(oid)
     if rec is None:
         raise JobFailed(f"{label}が見つかりません(削除されたかもしれません): {oid}")
     path = ctx.ledger.abs_path(rec["path"])
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return field, (rec.get("filename") or path.name, path.read_bytes(), mime)
+    return _file_part(field, path, rec.get("filename"))
 
 
 def _build_request(job: Job, ctx: Ctx) -> tuple[str, dict, list]:
@@ -180,8 +186,9 @@ async def _progress_job_id(c: httpx.AsyncClient):
         return None
 
 
-async def _watch_progress(job: Job, c: httpx.AsyncClient, stale_id) -> None:
-    """生成の POST を待つ間、/api/progress を読んでジョブの進捗・文言・部品側 ID を更新し続ける(キャンセルされるまで)。"""
+async def _watch_progress(job: Job, c: httpx.AsyncClient, stale_id, prefix: str = "") -> None:
+    """生成の POST を待つ間、/api/progress を読んでジョブの進捗・文言・部品側 ID を更新し続ける(キャンセルされるまで)。
+    prefix は文言の頭に付ける(MV が「シーン 3 / 12: 」を付ける)。"""
     errors, interrupt_sent = 0, False
     while True:
         await asyncio.sleep(POLL_S)
@@ -205,14 +212,13 @@ async def _watch_progress(job: Job, c: httpx.AsyncClient, stale_id) -> None:
         label = PHASE_LABEL.get(phase) or info.get("message") or str(phase)
         step, total = info.get("step") or 0, info.get("total_steps") or 0
         if phase == "denoising" and total:
-            job.progress = max(0.0, min(0.99, step / total))
+            job.progress = max(job.progress, min(0.99, step / total))
             label = f"{label} {step}/{total}"
         elif phase == "decoding":
             job.progress = 0.99
-        elif phase != "done":
-            job.progress = 0.0
+        # それ以外の段(読み込み・エンコード、書き出しの後のテキストエンコーダの読み直し)では進み具合を戻さない
         if not job.cancel_requested:
-            job.message = label
+            job.message = prefix + label
 
 
 async def _send_interrupt(job: Job, c: httpx.AsyncClient) -> bool:
@@ -230,10 +236,10 @@ def _is_interrupt(r: httpx.Response) -> bool:
     return r.status_code == 499 or "interrupt" in text.lower() or "中断" in text
 
 
-async def _generate(job: Job, c: httpx.AsyncClient, endpoint: str, data: dict, files: list) -> dict:
-    """生成の POST を待ち、結果の JSON を返す。その間の進捗は別タスクが読む。"""
+async def _generate(job: Job, c: httpx.AsyncClient, endpoint: str, data: dict, files: list, prefix: str = "") -> dict:
+    """生成の POST を待ち、結果の JSON を返す。その間の進捗は別タスクが読む(文言の頭には prefix を付ける)。"""
     stale_id = await _progress_job_id(c)
-    watcher = asyncio.create_task(_watch_progress(job, c, stale_id))
+    watcher = asyncio.create_task(_watch_progress(job, c, stale_id, prefix))
     try:
         r = await c.post(endpoint, data=data, files=files or None, timeout=POST_TIMEOUT_S)
     except httpx.ReadTimeout:

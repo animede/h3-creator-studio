@@ -1,9 +1,11 @@
 """管理役が持つ LLM: llama.cpp の llama-server(CUDA 版)で Gemma 4 E4B を動かす。プロンプト強化と作詞に使う。
 
-考え方は ACE-Step-1.5-fast の easy-music(services/local_llm_service.py)をそのまま引き継ぐ:
+考え方は ACE-Step-1.5-fast の easy-music(services/local_llm_service.py)を引き継ぐ:
 - 最初に使うときに起こす(lazy)。`--fit on --fit-target 1536` で、いま GPU に載っている部品の隣の空き VRAM に
   入る分だけ GPU に載せ、残りは CPU で動かす。
-- GPU で生成する直前に止めて VRAM を返し(release_before_gpu)、生成の最中は起こさない(chat は待つ)。
+- GPU で生成する直前に、GPU を使っている子を止めて VRAM を返す(release_before_gpu)。
+- GPU の仕事が走っている(順番を待っている)間は、chat を待たせず、CUDA を隠した CPU 専用の子で動かす(遅くはなる)。
+  仕事が無くなって次に使うときに、GPU 版へ戻す(行き来しないよう、仕事が走っても待ってもいないときだけ)。
 - 子プロセスは procman で起動するので、管理役が死ねば道連れになる(Linux は PDEATHSIG、Windows は Job Object)。
 """
 import asyncio
@@ -37,6 +39,7 @@ HEALTH_TIMEOUT_S = 300     # 初回はモデルの読み込みに時間がかか
 REQUEST_TIMEOUT_S = 600    # CPU に溢れた分の推論は遅い
 SESSION_WAIT_S = 300       # release_before_gpu が、使用中の chat の終わりを待つ最長
 SETTLE_S = 2.5             # GPU 版を止めたあと、nvidia-smi の監視(2 秒おき)が空きを反映するのを待つ
+CPU_ONLY_ENV = {"CUDA_VISIBLE_DEVICES": "-1"}   # CPU 専用で起動するときは、GPU を見せない(CUDA の文脈も作らせない)。空文字は Windows で未設定と同じ扱いになることがあるので -1
 
 # Gemma 4 の思考チャネル / <think> ブロック(念のため両方除去)
 THOUGHT_RE = re.compile(r"<\|channel>thought\n.*?<channel\|>\s*|<think>.*?</think>\s*", flags=re.DOTALL)
@@ -213,10 +216,13 @@ def download_model(cfg: Settings) -> Path:
     return Path(hf_hub_download(repo_id=MODEL_REPO, filename=MODEL_FILE, local_dir=str(dest)))
 
 
-def build_command(exe: Path, gguf: Path, port: int, gpu: bool, mode) -> list:
+def build_command(exe: Path, gguf: Path, port: int, gpu: bool, mode, cpu_only: bool = False) -> list:
+    """cpu_only: CUDA 版の llama-server を、GPU に 1 層も載せずに起動する(環境変数 CPU_ONLY_ENV と組み合わせる)。"""
     cmd = [str(exe), "-m", str(gguf), "--host", "127.0.0.1", "--port", str(port), "-c", str(N_CTX),
            "-t", str(max(4, (os.cpu_count() or 8) // 2)), "--reasoning", "off"]
-    if gpu:
+    if gpu and cpu_only:
+        cmd += ["-ngl", "0", "--fit", "off"]
+    elif gpu:
         if mode == "auto":     # 空き VRAM に入る層数だけ GPU へ(他の部品が載っていても共存できる)
             cmd += ["--fit", "on", "--fit-target", str(FIT_TARGET_MIB)]
         else:
@@ -233,16 +239,17 @@ class LlmSpec:
     name: str = "llm"
     label: str = "LLM(Gemma 4 E4B)"
     extra_env: dict = field(default_factory=dict)
+    env_add: dict = field(default_factory=dict)       # 起動のたびに決まる環境変数(CPU 専用なら CUDA を隠す)
 
     def build_command(self, d) -> list:
         return self.cmd
 
     def env(self, d, p) -> dict:
-        return {}
+        return dict(self.env_add)
 
 
 class Llm:
-    """llama-server の子プロセス 1 つ。busy() が True の間(GPU で生成している間)は、起こさずに待つ。"""
+    """llama-server の子プロセス 1 つ。busy() が True の間(GPU の仕事が走っている・待っている間)は、CPU 専用で動かす(待たせない)。"""
 
     def __init__(self, cfg: Settings, busy: Callable[[], bool] = lambda: False, transport=None,
                  poll_s: float = 0.5, settle_s: float = SETTLE_S):
@@ -252,7 +259,9 @@ class Llm:
         self.starts = 0
         self._proc: Optional[procman.Proc] = None
         self._external = False        # 同じポートで、すでに別の llama-server が動いていた
-        self._gpu = False             # いまの子プロセスが CUDA 版か
+        self._gpu = False             # いまの子プロセスが GPU を使っているか(VRAM を持っているか)
+        self._cpu_only = False        # いまの子プロセスは CUDA 版を、GPU を隠して起動したもの(VRAM を持たない)
+        self._releasing = False       # release_before_gpu が GPU 版を止めようとしている(止まるまで、新しい chat は入れない)
         self._starting = False
         self._error: Optional[str] = None
         self._users = 0               # chat / 強化の最中の数(release_before_gpu はこれが 0 になるのを待つ)
@@ -280,12 +289,15 @@ class Llm:
             if self._proc is not None and not procman.is_alive(self._proc):
                 self._proc = None
             if self.running() and await self._healthy():
-                return self.base_url
-            if self._proc is not None:
+                if not (self._cpu_only and await self._should_return_to_gpu()):
+                    return self.base_url
+                log.info("LLM: GPU の仕事が無いので、CPU 専用の llama-server を GPU 版に戻します")
+                await self.stop()
+            elif self._proc is not None:
                 await self.stop()             # 生きているのに応答しない
             elif await self._healthy():
                 log.info("ポート %d で llama-server が既に動いているので、それを使います(停止はしません)", self.port)
-                self._external = True
+                self._external, self._cpu_only = True, False
                 return self.base_url
             self._external, self._error, self._starting = False, None, True
             try:
@@ -297,8 +309,15 @@ class Llm:
                 self._starting = False
             return self.base_url
 
+    async def _should_return_to_gpu(self) -> bool:
+        """CPU 専用で動いている子を、GPU 版に戻してよいか。GPU の仕事が走っても待ってもいなくて、他に使っている chat が無いときだけ。"""
+        if self._external or self._proc is None or self._releasing or self._users > 1 or self.busy():
+            return False
+        return await asyncio.to_thread(use_gpu, self.mode)
+
     async def _start(self) -> None:
         gpu = await asyncio.to_thread(use_gpu, self.mode)
+        cpu_only = gpu and bool(self.busy())       # GPU の仕事が走っている(待っている)間は、GPU を隠して CPU だけで動かす
         try:
             exe = find_binary(self.cfg, gpu)
             if exe is None:
@@ -311,9 +330,11 @@ class Llm:
         except Exception as e:  # noqa: BLE001  ネットワーク・ディスクなど
             raise LlmError(f"LLM の用意に失敗しました: {type(e).__name__}: {e}"
                            "(studio.local.toml の [llm] に llama_server と gguf のパスを書けば、取得は不要です)")
-        log.info("LLM: %s / %s / GPU 設定 %s / 空き VRAM %s MiB", exe, gguf.name, self.mode, await asyncio.to_thread(smi_mib, "free"))
-        spec = LlmSpec(dir=exe.parent, port=self.port, cmd=build_command(exe, gguf, self.port, gpu, self.mode))
-        self._proc, self._gpu = procman.start(spec), gpu      # Linux の PDEATHSIG のため、イベントループのスレッドから起動する
+        log.info("LLM: %s / %s / GPU 設定 %s%s / 空き VRAM %s MiB", exe, gguf.name, self.mode, "(GPU の仕事の間は CPU 専用)" if cpu_only else "",
+                 await asyncio.to_thread(smi_mib, "free"))
+        spec = LlmSpec(dir=exe.parent, port=self.port, cmd=build_command(exe, gguf, self.port, gpu, self.mode, cpu_only),
+                       env_add=dict(CPU_ONLY_ENV) if cpu_only else {})
+        self._proc, self._gpu, self._cpu_only = procman.start(spec), gpu and not cpu_only, cpu_only    # Linux の PDEATHSIG のため、イベントループのスレッドから起動する
         self.starts += 1
         waited = 0.0
         while waited < HEALTH_TIMEOUT_S:
@@ -322,7 +343,7 @@ class Llm:
                 self._proc = None
                 raise LlmError(f"llama-server が途中で終了しました(終了コード {code})。{procman.log_tail('llm', 8)}")
             if await self._healthy():
-                log.info("LLM の準備ができました(%.0f 秒、%s)", waited, "GPU あり" if gpu else "CPU")
+                log.info("LLM の準備ができました(%.0f 秒、%s)", waited, "GPU あり" if self._gpu else "CPU")
                 return
             await asyncio.sleep(self.poll_s)
             waited += self.poll_s
@@ -334,40 +355,41 @@ class Llm:
         proc, self._proc = self._proc, None
         if proc is None:
             return False
+        self._cpu_only = False
         await asyncio.to_thread(procman.stop, proc)
         return True
 
     async def release_before_gpu(self) -> bool:
-        """GPU 部品を載せる直前に呼ぶ。CUDA 版の子プロセスが居れば止めて VRAM を返す(次の chat で起こし直す)。
+        """GPU 部品を載せる直前に呼ぶ。GPU を使っている子プロセスが居れば止めて VRAM を返す(次の chat で、CPU 専用の子として起こし直す)。
 
-        chat / 強化の最中なら、その終わりを待ってから止める。CPU だけで動いている子は止めない。
+        chat / 強化の最中なら、その終わりを待ってから止める。CPU だけで動いている子は VRAM を持たないので、待たず、止めない。
         """
-        waited = 0.0
-        while self._users > 0 and waited < SESSION_WAIT_S:
-            await asyncio.sleep(self.poll_s)
-            waited += self.poll_s
         if self._proc is None or not self._gpu:
             return False
-        log.info("LLM を止めて VRAM を返します")
-        stopped = await self.stop()
-        if stopped and self.settle_s:
-            await asyncio.sleep(self.settle_s)
-        return stopped
+        self._releasing = True       # 止める子に新しい chat を載せない(止まるまでの数秒だけ、入れずに待たせる)
+        try:
+            waited = 0.0
+            while self._users > 0 and waited < SESSION_WAIT_S:
+                await asyncio.sleep(self.poll_s)
+                waited += self.poll_s
+            if self._proc is None or not self._gpu:
+                return False
+            log.info("LLM を止めて VRAM を返します")
+            stopped = await self.stop()
+            if stopped and self.settle_s:
+                await asyncio.sleep(self.settle_s)
+            return stopped
+        finally:
+            self._releasing = False
 
     # ---- 使う ----
 
-    async def _wait_gpu_idle(self) -> None:
-        if not self.busy():
-            return
-        log.info("LLM: GPU で生成中なので、終わるまで待ちます")
-        while self.busy():
-            await asyncio.sleep(self.poll_s)
-
     @contextlib.asynccontextmanager
     async def session(self):
-        """LLM を使う区間。GPU で生成している間は入れず、入っている間は release_before_gpu が止めるのを待つ。"""
-        await self._wait_gpu_idle()
-        self._users += 1       # busy() の確認から加算までに await が無いので、すれ違わない
+        """LLM を使う区間。GPU の仕事が走っていても入れる(CPU 専用の子で動く)。入っている間は release_before_gpu が止めるのを待つ。"""
+        while self._releasing:       # GPU 版を止めている最中だけは、止まるまで待つ(止まる子に chat を載せないため)
+            await asyncio.sleep(self.poll_s)
+        self._users += 1       # _releasing の確認から加算までに await が無いので、すれ違わない
         try:
             yield
         finally:
@@ -395,12 +417,13 @@ class Llm:
         """画面用の状態。nvidia-smi を呼ぶので、イベントループの外(同期ルート)から呼ぶこと。"""
         running = self.running()
         try:
-            gguf, binary = find_gguf(self.cfg), find_binary(self.cfg, self._gpu if running else use_gpu(self.mode))
+            gguf, binary = find_gguf(self.cfg), find_binary(self.cfg, (self._gpu or self._cpu_only) if running else use_gpu(self.mode))
         except LlmError as e:
             gguf, binary = None, None
             self._error = self._error or e.message
         return {"running": running, "starting": self._starting, "external": self._external,
-                "gpu": self._gpu if running else use_gpu(self.mode), "gpu_setting": str(self.mode),
+                "gpu": self._gpu if running else use_gpu(self.mode), "cpu_only": self._cpu_only if running else False,
+                "gpu_setting": str(self.mode),
                 "free_vram_mib": smi_mib("free"), "starts": self.starts, "port": self.port,
                 "gguf": str(gguf) if gguf else None, "binary": str(binary) if binary else None,
-                "in_use": self._users, "waiting": bool(self.busy()), "error": self._error}
+                "in_use": self._users, "gpu_work": bool(self.busy()), "error": self._error}

@@ -64,7 +64,7 @@
   }
   markGenre();
 
-  // 1 つだけ選べて、もう一度押すと外れるチップ。get() は今の値、set(v) は選び直し
+  // 1 つだけ選べて、もう一度押すと外れるチップ。get() は今の値、set(v) は選び直し。戻り値は、印を今の値に付け直す関数
   function singleChips(box, items, get, set) {
     const mark = () => box.querySelectorAll(".chip").forEach((b) => b.classList.toggle("active", b.dataset.v === get()));
     for (const [v, label] of items) {
@@ -74,9 +74,10 @@
       b.onclick = () => { set(get() === v ? "" : v); mark(); };
       box.append(b);
     }
+    return mark;
   }
-  singleChips(mu("moods"), MOODS, () => mood, (v) => { mood = v; });
-  singleChips(mu("vocals"), VOCALS, () => vocal, (v) => { vocal = v; });
+  const markMood = singleChips(mu("moods"), MOODS, () => mood, (v) => { mood = v; });
+  const markVocal = singleChips(mu("vocals"), VOCALS, () => vocal, (v) => { vocal = v; });
 
   // ---- 「作る」ボタン(管理役の LLM): テーマ / 歌詞 / キャプション ----
 
@@ -160,10 +161,13 @@
   async function loadModels() {
     const sel = mu("model"), keep = sel.value, known = defaultModel;
     let js = { models: [] };
-    try { js = await fetch("/api/music/models").then((r) => r.json()); } catch (e) { /* 管理役がまだ起きていない */ }
+    try {
+      const r = await fetch("/api/music/models");
+      if (r.ok) js = await r.json();
+    } catch (e) { /* 管理役がまだ起きていない */ }
     defaultModel = js.default_model || "";
     sel.replaceChildren(new Option("ACE の既定", ""));
-    const sorted = [...js.models].sort((a, b) => (b.is_loaded - a.is_loaded) || (isTurbo(b.name) - isTurbo(a.name)) || a.name.localeCompare(b.name));
+    const sorted = [...(Array.isArray(js.models) ? js.models : [])].sort((a, b) => (b.is_loaded - a.is_loaded) || (isTurbo(b.name) - isTurbo(a.name)) || a.name.localeCompare(b.name));
     for (const m of sorted) {
       const o = new Option(`${m.name}${m.is_loaded ? "  ✓読込済" : "  (未読込。選ぶと読み込みます)"}${m.vram_ok ? "" : "  (VRAM 不足)"}`, m.name);
       o.disabled = !m.vram_ok;
@@ -255,7 +259,53 @@
     generate();
   }
 
+  // ---- プリセット(入力欄の値と、作り方・ジャンル・ムード・ボーカルの選び。生成中のプランは含めない) ----
+
+  function getPresetValues() {
+    return {
+      mode, genre, language: mu("lang").value, duration: +mu("dur").value, instrumental: inst(),
+      query: val("query"), theme: val("theme"), lyrics: val("lyrics"), caption: captionEdited ? val("caption") : "",      // AI が入れたキャプションは、生成で作り直すので入れない
+      caption_auto: mu("caption-auto").checked, mood, vocal,
+      model: mu("model").value, steps: +mu("steps").value, batch_size: +mu("batch").value, thinking: mu("thinking").checked,
+      seed: presetGetSeed(mu("seed"), mu("random")), negative_prompt: val("neg"), shift: mu("shift").value, infer_method: mu("infer").value,
+    };
+  }
+
+  // 書かれている項目だけ反映する(知らない項目は無視)。文字の欄(一言・テーマ・歌詞)は空でなければ置き換える(キャプションだけは下の通り)。
+  // 選択肢に無い値(読み込まれていないモデルなど)は入れない。モデルを先に選び(STEP が合う)、そのあと STEP と曲数をプリセットの値にする
+  function applyPresetValues(v) {
+    const skipped = [];
+    const text = (key, id) => { if (typeof v[key] === "string" && v[key].trim()) presetSet(mu(id), v[key]); };
+    const pick = (key, id, label) => { if (key in v && !presetSet(mu(id), v[key])) skipped.push(label); };
+    if (v.mode === "simple" || v.mode === "omakase") setMode(v.mode);
+    if (GENRES.includes(v.genre)) { genre = v.genre; markGenre(); }
+    if (v.mood === "" || MOODS.some(([k]) => k === v.mood)) { mood = v.mood; markMood(); }
+    if (v.vocal === "" || VOCALS.some(([k]) => k === v.vocal)) { vocal = v.vocal; markVocal(); }
+    pick("language", "lang", "歌の言語");
+    pick("duration", "dur", "曲長");
+    if ("instrumental" in v) presetSet(mu("inst"), v.instrumental);
+    text("query", "query");
+    text("theme", "theme");
+    if (typeof v.lyrics === "string" && v.lyrics.trim()) { presetSet(mu("lyrics"), v.lyrics); mu("lyrics-note").textContent = ""; }
+    if (typeof v.caption === "string") {      // キャプションは音の「型」なので、空でも反映する(前のプリセットのキャプションを引きずらない)
+      presetSet(mu("caption"), v.caption);
+      captionEdited = !!v.caption.trim();      // 書いてあれば「自分で書いた」扱いで生成にも使う。空なら、生成のときに AI が作る
+    }
+    if ("caption_auto" in v) presetSet(mu("caption-auto"), v.caption_auto);
+    pick("model", "model", "モデル");
+    pick("steps", "steps", "STEP");
+    pick("batch_size", "batch", "曲数");
+    if ("thinking" in v) presetSet(mu("thinking"), v.thinking);
+    if ("seed" in v) presetSetSeed(mu("seed"), mu("random"), v.seed);
+    if (typeof v.negative_prompt === "string") presetSet(mu("neg"), v.negative_prompt);
+    pick("shift", "shift", "Shift");
+    pick("infer_method", "infer", "Sampler");
+    updateButtons();
+    return skipped;
+  }
+
   const tracker = createTracker("music", { setBusy, showMsg, onJob });
+  wirePresets({ tab: "music", box: mu("presets"), get: getPresetValues, apply: applyPresetValues });
   mu("go").onclick = generate;
   mu("regen").onclick = regenerate;
   mu("stop").onclick = () => { mu("stop").disabled = true; tracker.stop(); };

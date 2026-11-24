@@ -5,6 +5,8 @@
 #   ./setup.sh --no-models      # 環境だけ(モデルは後で)
 #   ./setup.sh --only h3,ace    # 指定した部品だけ
 #   ./setup.sh --llm            # 同梱 LLM(約 5GB)も先に取得する
+#   ./setup.sh --mv             # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
+#   ./setup.sh --only mvtools   # その道具だけ
 # 何度実行してもよい。済んでいる所は飛ばし、途中で止まっても続きから進む。
 set -e
 cd "$(dirname "$0")"

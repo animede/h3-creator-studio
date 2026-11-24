@@ -9,6 +9,8 @@
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
   python scripts/setup.py --only h3,ace   # 指定した部品だけ
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B)も先に取得する
+  python scripts/setup.py --mv            # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
+  python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける)
 """
 from __future__ import annotations
 
@@ -55,6 +57,17 @@ COMPS = {
     "aivis": Comp("aivis", "AivisSpeech(音声合成)", "AivisSpeech-Engine", None),
 }
 ORDER = ("h3", "h3image", "ace", "aivis")
+
+# MV の音声処理の道具(components/mvtools/.venv)。部品ではなく、管理役が子プロセスで使う Python 環境(studio/mv_audio.py)
+MV_NAME = "mvtools"
+MV_LABEL = "MV の音声処理の道具(Demucs + librosa、CPU 版 torch)"
+MV_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
+# torch / torchaudio は CPU 版の cp312 の wheel が manylinux_2_28_x86_64 と win_amd64 の両方にある版(2.11.0)。
+# Demucs 4.0.1 は torchaudio の上限を付けていないので、この版で動く(Linux で htdemucs の分離まで確認済み)
+MV_TORCH = ["torch==2.11.0", "torchaudio==2.11.0"]
+MV_PACKAGES = ["demucs==4.0.1", "soundfile", "librosa==0.11.0"]
+MV_IMPORTS = "import torch, soundfile, librosa, demucs.apply, demucs.pretrained"
+MV_WARMUP = "from demucs.pretrained import get_model; get_model('htdemucs')"
 
 
 def say(msg: str = "") -> None:
@@ -462,6 +475,106 @@ def _py312_on_windows() -> bool:
     return False
 
 
+def parse_only(only: str, enabled: list, mv: bool = False) -> tuple:
+    """--only の値 → (対象の部品, MV の音声処理の道具も対象か, 使えない名前)。空なら全部の部品。
+    mvtools は部品ではなく、--mv と同じ(--only mvtools だけなら部品は何も触らない)。"""
+    if not only.strip():
+        return list(enabled), mv, []
+    want = [x.strip() for x in only.split(",") if x.strip()]
+    bad = [x for x in want if x != MV_NAME and x not in enabled]
+    return [n for n in ORDER if n in want and n in enabled], mv or MV_NAME in want, bad
+
+
+def mv_notice(plat: str = None) -> str:
+    """導入の前に出す目安。ダウンロードは wheel の大きさの合計(実測): Linux で約 410MB(torch の CPU 版 約 190MB)、
+    Windows で約 315MB(同 約 115MB)。どちらも Demucs の重み(約 80MB)を含む。ディスクは Linux の venv が約 1.2GB + 重み。"""
+    total, torch_mb, rest = (315, 115, 120) if is_win(plat) else (410, 190, 140)
+    return (f"約 {total}MB のダウンロード(torch の CPU 版 約 {torch_mb}MB、scipy・numba ほか 約 {rest}MB、Demucs の重み 約 80MB)で、"
+            "ディスクには最大で約 1.3GB 使います。回線次第で数分かかります")
+
+
+def mv_steps(venv: Path, py: Path, have_venv: bool = False) -> list:
+    """MV の音声処理の道具を入れるコマンド(uv)。venv / py は絶対パス。
+    torch / torchaudio を CPU 用のインデックスから先に入れておくと、あとの Demucs は(PyPI の CUDA 版ではなく)それを使う。"""
+    steps = []
+    if not have_venv:
+        steps.append(Step("mvtools: 仮想環境の作成(uv venv)", ["uv", "venv", "--python", "3.12", str(venv)]))
+    steps.append(Step("mvtools: torch / torchaudio(CPU 版)の導入",
+                      ["uv", "pip", "install", "--python", str(py), "--index-url", MV_TORCH_INDEX] + MV_TORCH))
+    steps.append(Step("mvtools: Demucs / soundfile / librosa の導入", ["uv", "pip", "install", "--python", str(py)] + MV_PACKAGES))
+    return steps
+
+
+def mv_warmup_step(py: Path) -> Step:
+    """htdemucs の重み(約 80MB)を先に取得する。取得済みなら数秒で終わる。"""
+    return Step("mvtools: Demucs の重み(htdemucs)の取得", [str(py), "-c", MV_WARMUP])
+
+
+def mv_ready(py: Path, run: Callable = subprocess.run) -> bool:
+    """その Python が torch / soundfile / librosa / demucs を import できるか。"""
+    if not Path(py).is_file():
+        return False
+    try:
+        r = run([str(py), "-c", MV_IMPORTS], capture_output=True, timeout=300)    # 初回の import は遅いことがある(Windows の Defender など)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def show_mv_import_error(py: Path) -> None:
+    """import できない原因(トレースバック)を、そのまま表示する。"""
+    try:
+        subprocess.call([str(py), "-c", MV_IMPORTS])
+    except OSError as e:
+        say(f"  実行できませんでした: {e}")
+
+
+def setup_mv(cfg: Settings, models: bool = True) -> bool:
+    """MV の音声処理の道具を components/mvtools/.venv に用意する。Demucs と librosa を import できる venv があれば、導入は飛ばす
+    (重みの取得だけは毎回流す。取得済みなら数秒で終わり、前回の失敗からの再開にもなる)。
+    [mv] tools_python に自分の Python を書いてあるときは、そこを使い、何も入れない。"""
+    from studio import mv_audio
+    say(f"\n>>> {MV_LABEL}")
+    ffmpeg_hint = dict(missing_tools()).get("ffmpeg")
+    if ffmpeg_hint:
+        say(f"  ※ ffmpeg が PATH にありません。MV の音声の変換と切り出しに要ります → {ffmpeg_hint}")
+    if mv_audio.configured_python(cfg):
+        try:
+            py = mv_audio.tools_python(cfg)
+        except mv_audio.MvToolsMissing as e:
+            say(f"失敗しました: {e.message}")
+            return False
+        if not mv_ready(py):
+            say(f"失敗しました: [mv] tools_python の Python({py})に Demucs / librosa などが入っていません。"
+                "入れるか、tools_python の行を消して setup --mv をやり直してください")
+            show_mv_import_error(py)
+            return False
+        say(f"  既存を使います: {py}([mv] tools_python。導入も重みの取得も飛ばします)")
+        return True
+    tdir = mv_audio.tools_dir(cfg)
+    venv = tdir / ".venv"
+    py = mv_audio.venv_python(venv)
+    if mv_ready(py):
+        say(f"  準備済みです: {py}(Demucs と librosa が入っています。導入は飛ばします)")
+    else:
+        if not ensure_uv_on_path():
+            say("uv が見つかりません。setup.sh / setup.bat から実行してください(uv を入れます)。")
+            return False
+        say(f"  ※ {mv_notice()}")
+        tdir.mkdir(parents=True, exist_ok=True)
+        for step in mv_steps(venv, py, have_venv=py.is_file()):
+            if not run_step(step, tdir):
+                return False
+        if not mv_ready(py):
+            say("失敗しました: 導入は終わりましたが、torch / librosa / demucs を読み込めません。原因:")
+            show_mv_import_error(py)
+            return False
+    if models:
+        return run_step(mv_warmup_step(py), tdir)
+    say("  Demucs の重み(約 80MB)は取得しません(--no-models)。MV の分離を最初に使うときに取得します")
+    return True
+
+
 def prefetch_llm(cfg: Settings) -> bool:
     """同梱 LLM(llama-server と GGUF)を、管理役と同じ関数で先に取得する。"""
     from studio import llm
@@ -481,7 +594,8 @@ def prefetch_llm(cfg: Settings) -> bool:
     return True
 
 
-def print_summary(cfg: Settings, selected: list) -> None:
+def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> None:
+    """mv: MV の音声処理の道具を対象にしたときの結果(None なら対象外)。"""
     say("\n== まとめ ==")
     for name in selected:
         d = cfg.component_dir(name)
@@ -490,6 +604,11 @@ def print_summary(cfg: Settings, selected: list) -> None:
         say(f"           場所: {d}")
         say(f"           環境: {'あり' if env_ok else '未'}    モデル: "
             + ("不要(配布版)" if models_ok is None else "あり" if models_ok else "未"))
+    if mv is not None:
+        from studio import mv_audio
+        say(f"  {MV_NAME:8} {MV_LABEL}")
+        say(f"           場所: {mv_audio.tools_dir(cfg)}")
+        say(f"           環境: {'あり' if mv else '未'}")
     start = ".\\run.bat" if is_win() else "./run.sh"
     say(f"\n起動: {start}   → ブラウザで http://{cfg.host}:{cfg.port}")
     if any(component_status(n, cfg.component_dir(n))[1] is False for n in selected):
@@ -499,12 +618,13 @@ def print_summary(cfg: Settings, selected: list) -> None:
 def parse_args(argv: list = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="h3-creator-studio のセットアップ(何度実行しても安全。続きから進みます)")
     p.add_argument("--no-models", action="store_true", help="環境だけ作り、モデルは取得しない")
-    p.add_argument("--only", default="", help="対象の部品をカンマ区切りで(h3,h3image,ace,aivis)")
+    p.add_argument("--only", default="", help="対象の部品をカンマ区切りで(h3,h3image,ace,aivis。mvtools は MV の音声処理の道具だけを指す)")
     p.add_argument("--components-dir", default="", help="部品を取り込むフォルダ(既定は studio.toml の components_dir)")
     p.add_argument("--clone-anyway", action="store_true", help="~/<部品名> があっても components/ に取り込み直す")
     p.add_argument("--ace-xl", action="store_true", help="音楽に XL モデルも入れる(約 45GB。既定は 2B のみで約 15GB)")
     p.add_argument("--no-ref", action="store_true", help="h3 の参照モード用キャッシュ(transformer_ref、+約 32GB)を作らない")
     p.add_argument("--llm", action="store_true", help="同梱 LLM(llama-server と GGUF、約 5GB)も先に取得する")
+    p.add_argument("--mv", action="store_true", help="MV の音声処理の道具(Demucs + librosa + CPU 版 torch、約 1.3GB)も用意する")
     return p.parse_args(argv)
 
 
@@ -520,19 +640,15 @@ def main(argv: list = None) -> int:
         cfg.components_dir = args.components_dir
         say(f"部品の取り込み先: {cfg.component_dir('h3').parent}(この場所を使い続けるなら studio.local.toml に components_dir = '...' を書いてください)")
     enabled = [n for n in ORDER if n in cfg.component_names()]
-    selected = enabled
-    if args.only.strip():
-        want = [x.strip() for x in args.only.split(",") if x.strip()]
-        bad = [x for x in want if x not in enabled]
-        if bad:
-            say(f"--only に使えない名前があります: {', '.join(bad)}(使えるのは {', '.join(enabled)})")
-            return 2
-        selected = [n for n in ORDER if n in want]
+    selected, want_mv, bad = parse_only(args.only, enabled, args.mv)
+    if bad:
+        say(f"--only に使えない名前があります: {', '.join(bad)}(使えるのは {', '.join(enabled + [MV_NAME])})")
+        return 2
     models = not args.no_models
-    say(f"対象の部品: {', '.join(selected)}" + ("   [環境だけ。モデルは取得しません]" if not models else ""))
+    say(f"対象の部品: {', '.join(selected + ([MV_NAME] if want_mv else []))}" + ("   [環境だけ。モデルは取得しません]" if not models else ""))
 
     try:
-        if not check_prerequisites(selected, models, Path(cfg.root) / cfg.components_dir):
+        if selected and not check_prerequisites(selected, models, Path(cfg.root) / cfg.components_dir):
             say("\n足りないものを入れてから、setup をもう一度実行してください。")
             return 1
     except KeyboardInterrupt:
@@ -540,7 +656,8 @@ def main(argv: list = None) -> int:
 
     try:
         # 1. 取り込み(すべて先に済ませる。ここは短い)
-        say("\n== 部品の取り込み ==")
+        if selected:
+            say("\n== 部品の取り込み ==")
         sources = {}
         for name in selected:
             src = decide_source(name, cfg, Path.home(), args.clone_anyway)
@@ -580,11 +697,16 @@ def main(argv: list = None) -> int:
 
         if args.llm and not prefetch_llm(cfg):
             return 1
+        mv_ok = None
+        if want_mv:
+            mv_ok = setup_mv(cfg, models)
+            if not mv_ok:
+                return 1
     except KeyboardInterrupt:
         say("\n中断しました。setup をもう一度実行すると続きから進みます。")
         return 130
 
-    print_summary(cfg, selected)
+    print_summary(cfg, selected, mv_ok)
     return 0
 
 

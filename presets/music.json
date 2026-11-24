@@ -1,0 +1,9 @@
+{
+  "presets": [
+    {"name": "J-POP バラード", "values": {"mode": "simple", "genre": "Ballad", "language": "Japanese", "duration": 180, "instrumental": false, "mood": "bittersweet and sad", "vocal": "", "caption": ""}},
+    {"name": "アニソン 疾走感(90 秒)", "values": {"mode": "simple", "genre": "Anime", "language": "Japanese", "duration": 90, "instrumental": false, "mood": "intense and powerful", "vocal": "powerful vocal", "caption": ""}},
+    {"name": "シティポップ", "values": {"mode": "simple", "genre": "City Pop", "language": "Japanese", "duration": 180, "instrumental": false, "mood": "cool and stylish", "vocal": "", "caption": ""}},
+    {"name": "Lo-fi 作業用インスト", "values": {"mode": "simple", "genre": "Hip Hop", "duration": 120, "instrumental": true, "mood": "calm and gentle", "vocal": "", "caption": "lo-fi hip hop instrumental, mellow electric piano chords, warm vinyl crackle, soft boom-bap drums, round bass, relaxed and cozy, around 75 BPM"}},
+    {"name": "おまかせ 切ないバラード", "values": {"mode": "omakase", "query": "雨の夜に聴く切ないバラード", "language": "Japanese", "duration": -1, "instrumental": false}}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "presets": [
+    {"name": "縦長ショート 9:16 5 秒", "values": {"resolution": "768x1344", "seconds": 5, "match_audio": false}},
+    {"name": "横長 16:9 MV 風 10 秒", "values": {"resolution": "1344x768", "seconds": 10, "match_audio": false}},
+    {"name": "正方形 SNS 5 秒", "values": {"resolution": "768x768", "seconds": 5, "match_audio": false}},
+    {"name": "軽量お試し(6GB 向け)", "values": {"resolution": "512x512", "seconds": 5, "match_audio": false}},
+    {"name": "歌唱 Ref2VA + Vocal Lock", "values": {"mode": "ref2va", "match_audio": true, "vocal_lock": true, "prompt": "The person in the reference image sings toward the camera in a medium close-up, frontal or three-quarter view. Lip movements stay in sync with the reference vocal, with natural expressions and subtle head and shoulder movement under soft stage lighting."}}
+  ]
+}

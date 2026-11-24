@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from studio.components import ComponentNotInstalled, ace_gpu_env, get_spec
+from studio.components import ComponentNotInstalled, ace_gpu_env, default_budget_gb, get_spec, h3_profile
 from studio.config import Settings
 
 
@@ -96,6 +96,38 @@ class ComponentsTest(unittest.TestCase):
         self.assertEqual(ace_gpu_env(10240), {})             # 10GiB 以上は ACE の自動選択に任せる
         self.assertEqual(ace_gpu_env(16376), {})
         self.assertEqual(ace_gpu_env(None), {})              # nvidia-smi が無ければ何も足さない
+
+    def test_default_budgets_from_total_vram(self):
+        gib = 1024
+        self.assertEqual([default_budget_gb(n, 96 * gib) for n in ("h3", "h3image", "ace", "aivis")], [48, 31, 14, None])
+        self.assertEqual([default_budget_gb(n, 80 * gib) for n in ("h3", "h3image", "ace")], [40, 28, 14])
+        self.assertEqual([round(default_budget_gb(n, 48 * gib), 2) for n in ("h3", "h3image", "ace")], [24, 16.8, 14])
+        self.assertEqual(default_budget_gb("h3", 200 * gib), 48)           # 上限(h3 は 48、h3image は 31)
+        self.assertEqual(default_budget_gb("h3image", 200 * gib), 31)
+
+    def test_h3_profile_is_the_largest_that_fits_the_budget(self):
+        self.assertEqual([h3_profile(g) for g in (96, 90, 80, 48, 47.8, 40, 32, 24, 16, 12, 8, 6)],
+                         ["96gb", "80gb", "80gb", "48gb", "32gb", "32gb", "32gb", "16gb", "16gb", "8gb", "8gb", "8gb"])
+
+    def test_budget_env_for_share(self):
+        gib = 1024
+        h3, h3image, ace = self.spec("h3"), self.spec("h3image"), self.spec("ace")
+        self.assertEqual(h3.budget_env(48 * gib), {"H3_PROFILE": "48gb", "H3_VRAM_LIMIT_GB": "48"})
+        self.assertEqual(h3.budget_env(24 * gib), {"H3_PROFILE": "16gb", "H3_VRAM_LIMIT_GB": "24"})
+        self.assertEqual(h3.budget_env(int(47.8 * gib)), {"H3_PROFILE": "32gb", "H3_VRAM_LIMIT_GB": "47.8"})
+        self.assertEqual(h3image.budget_env(31 * gib), {"H3IMG_VRAM_GB": "31"})
+        self.assertEqual(h3image.budget_env(int(16.8 * gib)), {"H3IMG_VRAM_GB": "16"})       # 整数の GiB(切り捨て)
+        self.assertEqual(ace.budget_env(14 * gib), {"ACESTEP_GPU_PROFILE": "16gb"})
+        self.assertEqual(ace.budget_env(13 * gib), {"ACESTEP_GPU_PROFILE": "12gb"})
+        self.assertEqual(ace.budget_env(10 * gib), {"ACESTEP_GPU_PROFILE": "12gb"})
+        small = ace.budget_env(9 * gib)                                                       # 10GiB 未満は、8GB のカード向けの省メモリ設定も
+        self.assertEqual((small["ACESTEP_GPU_PROFILE"], small["ACESTEP_QUANTIZATION"], small["ACESTEP_RESIDENT_COMPONENTS"]),
+                         ("12gb", "int8_weight_only", "none"))
+        self.assertEqual(self.spec("aivis").budget_env(8 * gib), {})                          # CPU の部品に予算は無い
+
+    def test_budget_override_comes_from_settings(self):
+        cfg = Settings({"components": {"h3": {"dir": "x", "vram_budget_gb": 40}, "h3image": {"dir": "y"}}}, self.root)
+        self.assertEqual((get_spec("h3", cfg).vram_budget_gb, get_spec("h3image", cfg).vram_budget_gb), (40.0, None))
 
     def test_aivis(self):
         touch(self.root / "aivis" / "Linux-x64" / "run")

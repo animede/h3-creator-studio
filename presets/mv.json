@@ -1,0 +1,10 @@
+{
+  "presets": [
+    {"name": "YouTube 横長 16:9 標準", "values": {"aspect": "16:9", "quality": "standard", "min_s": 5, "max_s": 10}},
+    {"name": "YouTube 横長 16:9 高速", "values": {"aspect": "16:9", "quality": "fast", "min_s": 5, "max_s": 10}},
+    {"name": "TikTok・Reels 縦長 9:16 高速", "values": {"aspect": "9:16", "quality": "fast", "min_s": 5, "max_s": 7}},
+    {"name": "Instagram 正方形 1:1 標準", "values": {"aspect": "1:1", "quality": "standard", "min_s": 5, "max_s": 8}},
+    {"name": "Instagram フィード 縦 4:5 標準", "values": {"aspect": "4:5", "quality": "standard", "min_s": 5, "max_s": 8}},
+    {"name": "高画質 横長 16:9(24GB 以上)", "values": {"aspect": "16:9", "quality": "high", "min_s": 5, "max_s": 10}}
+  ]
+}

@@ -24,7 +24,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     params_json TEXT, error TEXT, created_at REAL, finished_at REAL
 );
 CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created_at DESC);
+CREATE TABLE IF NOT EXISTS mv_projects (
+    id TEXT PRIMARY KEY, created_at REAL NOT NULL, updated_at REAL NOT NULL, state TEXT NOT NULL,
+    params_json TEXT, scenes_json TEXT, output_id TEXT, error TEXT, message TEXT
+);
+CREATE INDEX IF NOT EXISTS mv_projects_created ON mv_projects(created_at DESC);
+CREATE TABLE IF NOT EXISTS presets (
+    id TEXT PRIMARY KEY, tab TEXT NOT NULL, name TEXT NOT NULL, values_json TEXT NOT NULL,
+    created_at REAL NOT NULL, updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS presets_tab ON presets(tab, created_at);
 """
+MV_FIELDS = ("state", "output_id", "error", "message")     # update_mv_project がそのまま置き換える列
 
 
 def make_thumb(src: Path, dst: Path, width: int = THUMB_WIDTH) -> tuple[int, int]:
@@ -162,7 +173,7 @@ class Ledger:
         return {"id": r["id"], "tab": r["tab"], "kind": r["kind"], "status": r["status"], "error": r["error"],
                 "params": json.loads(r["params_json"] or "{}"), "created": r["created_at"], "started": None,
                 "finished": r["finished_at"], "progress": 1.0 if r["status"] == "completed" else 0.0,
-                "message": "", "log_tail": "", "steps": [], "result": {},
+                "message": "", "log_tail": "", "steps": [], "result": {}, "lane": None, "wait_reason": None,
                 "outputs": [o["id"] for o in self.list_outputs(job_id=r["id"])]}
 
     def get_job(self, job_id: str) -> Optional[dict]:
@@ -175,3 +186,107 @@ class Ledger:
         with self._lock:
             rows = self._db.execute(sql, ((tab, limit) if tab else (limit,))).fetchall()
         return [self._job_dict(r) for r in rows]
+
+    # ---- MV の制作(リップシンク MV のプロジェクト) ----
+
+    @staticmethod
+    def _mv(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["params"] = json.loads(d.pop("params_json") or "{}")
+        d["scenes"] = json.loads(d.pop("scenes_json") or "[]")
+        return d
+
+    def create_mv_project(self, pid: str, state: str, params: dict, scenes: list = (), message: str = "") -> dict:
+        now = time.time()
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO mv_projects (id, created_at, updated_at, state, params_json, scenes_json, output_id, error, message)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (pid, now, now, state, json.dumps(params, ensure_ascii=False), json.dumps(list(scenes), ensure_ascii=False),
+                 None, None, message))
+        return self.get_mv_project(pid)
+
+    def get_mv_project(self, pid: str) -> Optional[dict]:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM mv_projects WHERE id = ?", (pid,)).fetchone()
+        return self._mv(row) if row else None
+
+    def list_mv_projects(self, limit: int = 200) -> list:
+        """新しい順。"""
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM mv_projects ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [self._mv(r) for r in rows]
+
+    def update_mv_project(self, pid: str, params_patch: dict = None, scene_patches: dict = None, params: dict = None,
+                          scenes: list = None, **fields) -> Optional[dict]:
+        """渡した項目だけを書き換える(updated_at は自動)。無ければ None。
+        state / output_id / error / message / params(全体)/ scenes(全体)は置き換え、params_patch は params に混ぜ、
+        scene_patches({シーン番号: {項目: 値}})は該当シーンに混ぜる。読んで書くまでを 1 回のロックで行う(別々の項目を書く同士が上書きしない)。"""
+        bad = set(fields) - set(MV_FIELDS)
+        if bad:
+            raise ValueError(f"MV の制作に無い項目です: {sorted(bad)}")
+        with self._lock, self._db:
+            row = self._db.execute("SELECT * FROM mv_projects WHERE id = ?", (pid,)).fetchone()
+            if row is None:
+                return None
+            cur = self._mv(row)
+            new_params = dict(cur["params"] if params is None else params)
+            new_params.update(params_patch or {})
+            new_scenes = list(cur["scenes"] if scenes is None else scenes)
+            for index, patch in (scene_patches or {}).items():
+                for sc in new_scenes:
+                    if sc.get("index") == int(index):
+                        sc.update(patch)
+            sets = {**fields, "updated_at": time.time(), "params_json": json.dumps(new_params, ensure_ascii=False),
+                    "scenes_json": json.dumps(new_scenes, ensure_ascii=False)}
+            self._db.execute(f"UPDATE mv_projects SET {', '.join(k + ' = ?' for k in sets)} WHERE id = ?", (*sets.values(), pid))
+        return self.get_mv_project(pid)
+
+    def delete_mv_project(self, pid: str) -> bool:
+        """台帳の行だけを消す(作業フォルダと最終の MV は呼び出し側が扱う)。無ければ False。"""
+        with self._lock, self._db:
+            return self._db.execute("DELETE FROM mv_projects WHERE id = ?", (pid,)).rowcount > 0
+
+    # ---- プリセット(各タブの入力欄の値に名前を付けたもの。同梱のものは台帳に入れず、リポジトリの presets/*.json にある) ----
+
+    @staticmethod
+    def _preset(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["values"] = json.loads(d.pop("values_json") or "{}")
+        return d
+
+    def create_preset(self, tab: str, name: str, values: dict) -> dict:
+        pid, now = uuid.uuid4().hex[:12], time.time()
+        with self._lock, self._db:
+            self._db.execute("INSERT INTO presets (id, tab, name, values_json, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                             (pid, tab, name, json.dumps(values, ensure_ascii=False), now, now))
+        return self.get_preset(pid)
+
+    def get_preset(self, pid: str) -> Optional[dict]:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM presets WHERE id = ?", (pid,)).fetchone()
+        return self._preset(row) if row else None
+
+    def list_presets(self, tab: str = None) -> list:
+        """作った順(古いものが先)。tab があれば、そのタブのものだけ。"""
+        sql = "SELECT * FROM presets" + (" WHERE tab = ?" if tab else "") + " ORDER BY created_at, rowid"
+        with self._lock:
+            rows = self._db.execute(sql, (tab,) if tab else ()).fetchall()
+        return [self._preset(r) for r in rows]
+
+    def update_preset(self, pid: str, name: str = None, values: dict = None) -> Optional[dict]:
+        """渡した項目(名前・値)だけを書き換える(updated_at は自動)。無ければ None。"""
+        sets = {"updated_at": time.time()}
+        if name is not None:
+            sets["name"] = name
+        if values is not None:
+            sets["values_json"] = json.dumps(values, ensure_ascii=False)
+        with self._lock, self._db:
+            cur = self._db.execute(f"UPDATE presets SET {', '.join(k + ' = ?' for k in sets)} WHERE id = ?", (*sets.values(), pid))
+            if cur.rowcount == 0:
+                return None
+        return self.get_preset(pid)
+
+    def delete_preset(self, pid: str) -> bool:
+        with self._lock, self._db:
+            return self._db.execute("DELETE FROM presets WHERE id = ?", (pid,)).rowcount > 0

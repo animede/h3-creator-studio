@@ -14,7 +14,7 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
       const js = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "入力を確認してください");
       last = null;
-      track({ id: js.id, status: "queued", progress: 0, message: "順番を待っています", steps: [], created: Date.now() / 1000 });
+      track({ id: js.id, status: "queued", progress: 0, message: "順番を待っています", wait_reason: "順番を待っています", steps: [], created: Date.now() / 1000 });
     } catch (e) {
       setBusy(false);
       showMsg(`生成を始められませんでした: ${e.message || e}`);
@@ -84,8 +84,9 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
     bar.hidden = failed || cancelled;
     bar.classList.toggle("indet", j.status !== "running" || pct === 0);
     bar.querySelector("i").style.width = j.status === "running" && pct > 0 ? pct + "%" : "";
+    // 順番待ちのジョブは、待っている理由(順番 / GPU の空き待ち)を出す
     $("pmsg").textContent = failed ? `失敗: ${j.error || "原因不明"}` : cancelled ? "中止しました"
-      : `${j.message || ""}  (経過 ${fmtElapsed(j.created)})`;
+      : `${(j.status === "queued" && j.wait_reason) || j.message || ""}  (経過 ${fmtElapsed(j.created)})`;
     const steps = $("psteps");
     steps.replaceChildren();
     if (j.status === "preparing") (j.steps || []).slice(-4, -1).forEach((t) => steps.append(el("li", "", t)));
@@ -93,11 +94,11 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
     $("plog").textContent = j.log_tail || "";
   }
 
-  // ページを開き直したとき、進行中のジョブがあれば追跡を再開する
+  // ページを開き直したとき、進行中のジョブがあれば追跡を再開する(同時に複数あれば、走っているものを先に)
   async function resume() {
     try {
       const jobs = await fetch(`/api/jobs?tab=${tab}&limit=10`).then((r) => r.json());
-      const run = jobs.find((j) => ["queued", "preparing", "running"].includes(j.status));
+      const run = jobs.find((j) => ["preparing", "running"].includes(j.status)) || jobs.find((j) => j.status === "queued");
       if (run) track(run);
     } catch (e) { /* 管理役がまだ起きていない */ }
   }

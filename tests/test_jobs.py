@@ -230,5 +230,95 @@ class OrderTest(JobsBase):
         self.assertEqual(self.order, [("prepare", False), ("ensure", False), ("run", False)])
 
 
+class FinishedHookTest(JobsBase):
+    """on_finished: ジョブが終わる(完了・失敗・中止)たびに、後片づけのあとで callback(job) が呼ばれる。"""
+
+    def hooked(self, handler):
+        runner, ledger = self.make(FakeSched(), handler)
+        seen = []
+        runner.on_finished(lambda job: seen.append((job.id, job.status, [j.id for j in runner.running()], runner.current)))
+        return runner, seen
+
+    async def test_called_once_per_job_after_the_lane_is_freed(self):
+        runner, seen = self.hooked(make_handler([]))
+        job = runner.submit("image", "h3image.t2i", {})
+        await self.wait_for(job, "completed")
+        await asyncio.sleep(0.05)
+        self.assertEqual(seen, [(job.id, "completed", [], None)])     # 呼ばれたとき、もうレーンは空き、実行中のジョブは無い
+
+    async def test_failed_and_cancelled_jobs_are_reported_too(self):
+        async def boom(job, ctx):
+            raise JobFailed("部品が失敗")
+        runner, seen = self.hooked(make_handler([], boom))
+        failed = runner.submit("image", "h3image.t2i", {})
+        await self.wait_for(failed, "failed")
+
+        gate = asyncio.Event()
+
+        async def hold(job, ctx):
+            await gate.wait()
+            if job.cancel_requested:
+                raise JobCancelled()
+        runner.handlers["h3image.t2i"] = make_handler([], hold)
+        running, queued = runner.submit("image", "h3image.t2i", {}), runner.submit("image", "h3image.t2i", {})
+        await self.wait_for(running, "running")
+        await runner.cancel(queued.id)            # 順番待ちのまま中止
+        await runner.cancel(running.id)           # 走っているものを中止
+        gate.set()
+        await self.wait_for(running, "cancelled")
+        await asyncio.sleep(0.05)
+        self.assertEqual({(i, st) for i, st, _, _ in seen}, {(failed.id, "failed"), (queued.id, "cancelled"), (running.id, "cancelled")})
+        self.assertEqual(len(seen), 3)
+
+    async def test_callback_may_submit_the_next_job(self):
+        """MV の管理役のように、終わった通知の中で次のジョブを入れても、そのまま割り当てられて走る。"""
+        order = []
+
+        async def run(job, ctx):
+            order.append(job.params["n"])
+        runner, _ = self.make(FakeSched(), Handler("h3image", lambda kind, params, ledger: dict(params), run, lambda job, ctx: None))
+        jobs = []
+
+        def chain(job):
+            if job.params["n"] < 3:
+                jobs.append(runner.submit("image", "h3image.t2i", {"n": job.params["n"] + 1}))
+        runner.on_finished(chain)
+        first = runner.submit("image", "h3image.t2i", {"n": 1})
+        for _ in range(300):
+            if len(jobs) == 2 and all(j.status == "completed" for j in jobs):
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual((first.status, order), ("completed", [1, 2, 3]))
+
+    async def test_failing_callback_does_not_break_the_runner_or_other_callbacks(self):
+        runner, _ = self.make(FakeSched(), make_handler([]))
+        got = []
+
+        def bad(job):
+            raise RuntimeError("通知先の失敗")
+        runner.on_finished(bad)
+        runner.on_finished(lambda job: got.append(job.id))
+        with self.assertLogs("studio.jobs", "ERROR"):
+            first = runner.submit("image", "h3image.t2i", {})
+            await self.wait_for(first, "completed")
+            await asyncio.sleep(0.05)
+            second = runner.submit("image", "h3image.t2i", {})      # その後も、ふつうに走る
+            await self.wait_for(second, "completed")
+            await asyncio.sleep(0.05)
+        self.assertEqual(got, [first.id, second.id])
+
+    async def test_not_called_while_stopping(self):
+        gate = asyncio.Event()
+
+        async def hold(job, ctx):
+            await gate.wait()
+        runner, seen = self.hooked(make_handler([], hold))
+        job = runner.submit("image", "h3image.t2i", {})
+        await self.wait_for(job, "running")
+        await runner.stop()
+        await asyncio.sleep(0.05)
+        self.assertEqual((job.status, seen), ("cancelled", []))      # 管理役の停止では、通知しない(台帳が閉じられる途中で呼ばれないように)
+
+
 if __name__ == "__main__":
     unittest.main()

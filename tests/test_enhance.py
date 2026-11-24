@@ -45,6 +45,31 @@ class FakeSched:
             raise self.error
 
 
+class PlanSched(FakeSched):
+    """載せる見通し(plan)を持つ scheduler。action が wait なら、blockers が生成中で載せられない。"""
+
+    def __init__(self, llm, action="ready", blockers=()):
+        super().__init__(llm)
+        self.action, self.blockers = action, list(blockers)
+
+    def plan(self, name):
+        return types.SimpleNamespace(action=self.action, blockers=self.blockers)
+
+
+class MarkingSched(PlanSched):
+    """mark_busy / mark_idle を持つ scheduler: 強化の間だけ、部品に仕事中の印が付く。"""
+
+    def __init__(self, llm, error=None):
+        super().__init__(llm)
+        self.error, self.marks = error, []
+
+    def mark_busy(self, name):
+        self.marks.append(("busy", name))
+
+    def mark_idle(self, name):
+        self.marks.append(("idle", name))
+
+
 class EnhanceTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -53,13 +78,13 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.ledger.close)
         self.requests = []
 
-    def runner(self, handler, llm=None, sched_error=None, busy=False):
+    def runner(self, handler, llm=None, sched_error=None, busy=False, sched=None):
         llm = llm or FakeLlm()
 
         def record(req: httpx.Request) -> httpx.Response:
             self.requests.append(req)
             return handler(req)
-        ctx = Ctx(FakeSched(llm, sched_error), self.ledger, Path("."), transport=httpx.MockTransport(record), llm=llm)
+        ctx = Ctx(sched(llm) if sched else FakeSched(llm, sched_error), self.ledger, Path("."), transport=httpx.MockTransport(record), llm=llm)
         return types.SimpleNamespace(ctx=ctx, gpu_busy=lambda: busy), llm
 
     async def test_video_calls_h3_enhance_after_ensure_then_llm(self):
@@ -104,11 +129,58 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
             await enhance_prompt(runner, "image", "x", references=["nope"])
         self.assertEqual(cm.exception.status, 400)
 
-    async def test_errors_have_japanese_reasons(self):
-        runner, _ = self.runner(lambda r: httpx.Response(200, json={}), busy=True)
-        with self.assertRaises(EnhanceError) as cm:                     # 生成中
-            await enhance_prompt(runner, "image", "猫")
+    async def test_gpu_work_does_not_refuse(self):
+        """生成中でも強化できる(管理役の LLM は CPU 専用で動く)。「GPU で生成中」と断らない。"""
+        runner, llm = self.runner(lambda r: httpx.Response(200, json={"prompt": "A cat."}), busy=True)
+        out = await enhance_prompt(runner, "image", "猫")
+        self.assertEqual(out["text"], "A cat.")
+        self.assertEqual(llm.events, ["session+", "ensure h3image", "llm", "session-"])
+
+    async def test_refuses_only_when_loading_would_evict_a_busy_component(self):
+        runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "x"}),
+                                  sched=lambda l: PlanSched(l, "wait", ["h3image"]))
+        with self.assertRaises(EnhanceError) as cm:       # 載っていなくて、載せるには生成中の H3-Image を降ろす必要がある
+            await enhance_prompt(runner, "video", "猫")
         self.assertEqual(cm.exception.status, 409)
+        self.assertIn("MiniMax-H3-Image", cm.exception.message)
+        self.assertIn("生成中", cm.exception.message)
+        self.assertEqual((llm.events, self.requests), ([], []))       # LLM も部品も起こさない
+        for action in ("ready", "fit", "evict"):                      # 載っている・待たずに載せられるなら、いつもどおり
+            runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "強化"}), sched=lambda l, a=action: PlanSched(l, a))
+            self.assertEqual((await enhance_prompt(runner, "video", "猫"))["text"], "強化")
+            self.assertEqual(llm.events[1], "ensure h3")
+
+    async def test_component_is_marked_busy_only_while_enhancing(self):
+        """強化の最中に別の生成が、その部品を GPU から降ろさないよう、仕事中の印を付ける(成功でも失敗でも外す)。"""
+        made = []
+
+        def factory(llm, error=None):
+            made.append(MarkingSched(llm, error))
+            return made[-1]
+        runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "強化"}), sched=factory)
+        await enhance_prompt(runner, "video", "猫")
+        self.assertEqual(made[0].marks, [("busy", "h3"), ("idle", "h3")])
+        self.assertEqual(llm.events[0:2], ["session+", "ensure h3"])
+        runner, _ = self.runner(lambda r: httpx.Response(502, json={"detail": "LLM に接続できません"}), sched=factory)
+        with self.assertRaises(EnhanceError):
+            await enhance_prompt(runner, "image", "猫")
+        self.assertEqual(made[1].marks, [("busy", "h3image"), ("idle", "h3image")])
+        runner, _ = self.runner(lambda r: httpx.Response(200, json={}), llm=FakeLlm(LlmError("起動できません")), sched=factory)
+        with self.assertRaises(EnhanceError):
+            await enhance_prompt(runner, "video", "猫")
+        self.assertEqual(made[2].marks, [("busy", "h3"), ("idle", "h3")])
+        refused = []
+
+        def waiting(llm):
+            refused.append(MarkingSched(llm))
+            refused[-1].action, refused[-1].blockers = "wait", ["h3image"]
+            return refused[-1]
+        runner, _ = self.runner(lambda r: httpx.Response(200, json={}), sched=waiting)
+        with self.assertRaises(EnhanceError):
+            await enhance_prompt(runner, "video", "猫")
+        self.assertEqual(refused[0].marks, [])                       # 断ったときは、印を付けない
+
+    async def test_errors_have_japanese_reasons(self):
         runner, _ = self.runner(lambda r: httpx.Response(200, json={}))
         for tab, text in (("music", "x"), ("image", "  ")):
             with self.assertRaises(EnhanceError) as cm:

@@ -125,6 +125,25 @@ im("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ct
 wireEnhance({ tab: "image", ta: im("prompt"), btn: im("enh"), undo: im("enh-undo"), note: im("enh-note"), showMsg,
   body: () => ({ references: mode === "edit" ? refs.map((r) => r.id) : [] }) });      // edit なら参照付きの強化
 
+// ---- プリセット(入力欄の値だけ。参照画像は含めない) ----
+
+function getPresetValues() {
+  return { mode, prompt: im("prompt").value.trim(), width: +im("w").value, height: +im("h").value,
+    steps: im("steps").value ? +im("steps").value : null, seed: presetGetSeed(im("seed"), im("random")) };
+}
+
+// 書かれている項目だけ反映する(知らない項目は無視)。プロンプトは空でなければ置き換える(サイズだけのプリセットで、書きかけの文を消さない)
+function applyPresetValues(v) {
+  const skipped = [];
+  if (v.mode === "t2i" || v.mode === "edit") setMode(v.mode);
+  if (typeof v.prompt === "string" && v.prompt.trim()) presetSet(im("prompt"), v.prompt);
+  for (const [key, id] of [["width", "w"], ["height", "h"]]) if (Number.isFinite(v[key])) presetSet(im(id), v[key]);      // change で 32 の倍数に丸め、サイズの選択も合う
+  if ("steps" in v && !presetSet(im("steps"), v.steps == null ? "" : v.steps)) skipped.push("ステップ数");
+  if ("seed" in v) presetSetSeed(im("seed"), im("random"), v.seed);
+  return skipped;
+}
+wirePresets({ tab: "image", box: $("im-presets"), get: getPresetValues, apply: applyPresetValues });
+
 tracker.resume();
 setMode("t2i");
 renderRefs();

@@ -1,10 +1,12 @@
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from studio import mv_audio
 from studio.components import ComponentNotInstalled, get_spec
 from studio.config import Settings
 
@@ -301,10 +303,186 @@ class StatusTest(unittest.TestCase):
 class ArgsTest(unittest.TestCase):
     def test_defaults_and_flags(self):
         a = S.parse_args([])
-        self.assertFalse(a.no_models or a.llm or a.ace_xl or a.clone_anyway)
+        self.assertFalse(a.no_models or a.llm or a.ace_xl or a.clone_anyway or a.mv)
         a = S.parse_args(["--no-models", "--only", "h3,ace", "--components-dir", "D:/c", "--llm"])
         self.assertTrue(a.no_models and a.llm)
+        self.assertFalse(a.mv)
         self.assertEqual((a.only, a.components_dir), ("h3,ace", "D:/c"))
+
+    def test_mv_flag(self):
+        self.assertTrue(S.parse_args(["--mv"]).mv)
+        a = S.parse_args(["--mv", "--only", "mvtools"])
+        self.assertTrue(a.mv)
+        self.assertEqual(a.only, "mvtools")
+
+
+class ParseOnlyTest(unittest.TestCase):
+    ENABLED = ["h3", "h3image", "ace", "aivis"]
+
+    def test_empty_means_every_enabled_component(self):
+        self.assertEqual(S.parse_only("", self.ENABLED), (self.ENABLED, False, []))
+        self.assertEqual(S.parse_only("  ", self.ENABLED, True), (self.ENABLED, True, []))
+
+    def test_components_keep_the_setup_order(self):
+        self.assertEqual(S.parse_only("ace, h3", self.ENABLED), (["h3", "ace"], False, []))
+
+    def test_mvtools_is_not_a_component(self):
+        self.assertEqual(S.parse_only("mvtools", self.ENABLED), ([], True, []))
+        self.assertEqual(S.parse_only("h3,mvtools", self.ENABLED), (["h3"], True, []))
+        self.assertEqual(S.parse_only("h3", self.ENABLED, True), (["h3"], True, []))
+
+    def test_unknown_and_disabled_names_are_reported(self):
+        self.assertEqual(S.parse_only("zzz,mvtools", self.ENABLED), ([], True, ["zzz"]))
+        self.assertEqual(S.parse_only("ace", ["h3"]), ([], False, ["ace"]))
+
+
+class MvToolsTest(unittest.TestCase):
+    """setup --mv: components/mvtools/.venv に CPU 版 torch と Demucs / librosa を入れる。"""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.root = Path(self._t.name)
+        self.cfg = Settings({}, self.root)
+        self.venv = self.root / "components" / "mvtools" / ".venv"
+        self.py = mv_audio.venv_python(self.venv)
+        self.lines, self.labels = [], []
+        for target, new in (("say", mock.Mock(side_effect=self.lines.append)),
+                            ("ensure_uv_on_path", mock.Mock(return_value=True)),
+                            ("run_step", mock.Mock(side_effect=self.run_step))):
+            p = mock.patch.object(S, target, new)
+            p.start()
+            self.addCleanup(p.stop)
+        self.fail_label = None
+
+    def tearDown(self):
+        self._t.cleanup()
+
+    def run_step(self, step, comp_dir):
+        self.labels.append(step.label)
+        return step.label != self.fail_label
+
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+    def test_steps(self):
+        steps = S.mv_steps(self.venv, self.py)
+        self.assertEqual([st.argv for st in steps], [
+            ["uv", "venv", "--python", "3.12", str(self.venv)],
+            ["uv", "pip", "install", "--python", str(self.py), "--index-url", "https://download.pytorch.org/whl/cpu",
+             "torch==2.11.0", "torchaudio==2.11.0"],
+            ["uv", "pip", "install", "--python", str(self.py), "demucs==4.0.1", "soundfile", "librosa==0.11.0"]])
+        self.assertEqual([st.argv for st in S.mv_steps(self.venv, self.py, have_venv=True)], [st.argv for st in steps[1:]])
+        self.assertEqual(S.mv_warmup_step(self.py).argv,
+                         [str(self.py), "-c", "from demucs.pretrained import get_model; get_model('htdemucs')"])
+
+    def test_notice_gives_the_download_size_per_platform(self):
+        linux, win = S.mv_notice("linux"), S.mv_notice("win32")
+        self.assertIn("約 410MB のダウンロード(torch の CPU 版 約 190MB", linux)
+        self.assertIn("約 315MB のダウンロード(torch の CPU 版 約 115MB", win)
+        for text in (linux, win):
+            self.assertIn("Demucs の重み 約 80MB", text)
+            self.assertIn("約 1.3GB", text)
+
+    def test_torch_comes_from_the_cpu_index_only(self):
+        steps = S.mv_steps(self.venv, self.py)
+        self.assertIn(S.MV_TORCH_INDEX, steps[1].argv)
+        self.assertNotIn("--index-url", steps[2].argv)           # あとの導入は PyPI。torch は入っているものを使う
+        self.assertFalse(any(a.startswith("torch") for a in steps[2].argv))
+
+    def test_mv_ready(self):
+        run = mock.Mock(return_value=mock.Mock(returncode=0))
+        self.assertFalse(S.mv_ready(self.py, run))                # python が無い
+        run.assert_not_called()
+        touch(self.py)
+        self.assertTrue(S.mv_ready(self.py, run))
+        self.assertEqual(run.call_args.args[0], [str(self.py), "-c", S.MV_IMPORTS])
+        self.assertIn("librosa", S.MV_IMPORTS)
+        self.assertIn("demucs", S.MV_IMPORTS)
+        self.assertFalse(S.mv_ready(self.py, mock.Mock(return_value=mock.Mock(returncode=1))))
+        self.assertFalse(S.mv_ready(self.py, mock.Mock(side_effect=OSError("x"))))
+        self.assertFalse(S.mv_ready(self.py, mock.Mock(side_effect=subprocess.TimeoutExpired("x", 1))))
+
+    def test_fresh_install_runs_every_step_then_fetches_the_weights(self):
+        with mock.patch.object(S, "mv_ready", side_effect=[False, True]):
+            self.assertTrue(S.setup_mv(self.cfg))
+        self.assertEqual(self.labels, ["mvtools: 仮想環境の作成(uv venv)", "mvtools: torch / torchaudio(CPU 版)の導入",
+                                       "mvtools: Demucs / soundfile / librosa の導入", "mvtools: Demucs の重み(htdemucs)の取得"])
+        self.assertIn("ダウンロード", self.text())                 # ダウンロードの目安を出す
+        self.assertIn(S.mv_notice(), self.text())
+        self.assertTrue((self.root / "components" / "mvtools").is_dir())
+        self.assertEqual(S.run_step.call_args_list[0].args[1], self.root / "components" / "mvtools")
+
+    def test_nothing_is_installed_when_demucs_and_librosa_are_already_there(self):
+        with mock.patch.object(S, "mv_ready", return_value=True):
+            self.assertTrue(S.setup_mv(self.cfg))
+        self.assertEqual(self.labels, ["mvtools: Demucs の重み(htdemucs)の取得"])      # 重みの取得だけ(取得済みなら数秒)
+        self.assertIn("準備済みです", self.text())
+        S.ensure_uv_on_path.assert_not_called()
+
+    def test_no_models_skips_the_weights(self):
+        with mock.patch.object(S, "mv_ready", return_value=True):
+            self.assertTrue(S.setup_mv(self.cfg, models=False))
+        self.assertEqual(self.labels, [])
+        self.assertIn("--no-models", self.text())
+
+    def test_existing_venv_is_reused(self):
+        touch(self.py)
+        with mock.patch.object(S, "mv_ready", side_effect=[False, True]):
+            self.assertTrue(S.setup_mv(self.cfg, models=False))
+        self.assertNotIn("mvtools: 仮想環境の作成(uv venv)", self.labels)
+        self.assertEqual(len(self.labels), 2)
+
+    def test_a_failing_step_stops_the_setup(self):
+        self.fail_label = "mvtools: torch / torchaudio(CPU 版)の導入"
+        with mock.patch.object(S, "mv_ready", return_value=False):
+            self.assertFalse(S.setup_mv(self.cfg))
+        self.assertEqual(self.labels, ["mvtools: 仮想環境の作成(uv venv)", self.fail_label])
+
+    def test_installed_but_not_importable_is_an_error(self):
+        with mock.patch.object(S, "mv_ready", return_value=False), mock.patch.object(S, "show_mv_import_error") as show:
+            self.assertFalse(S.setup_mv(self.cfg))
+        self.assertIn("読み込めません", self.text())
+        show.assert_called_once_with(self.py)                     # 原因のトレースバックを見せる
+        self.assertNotIn("mvtools: Demucs の重み(htdemucs)の取得", self.labels)
+
+    def test_import_error_is_shown_by_running_the_same_import(self):
+        with mock.patch.object(S.subprocess, "call", return_value=1) as call:
+            S.show_mv_import_error(self.py)
+        call.assert_called_once_with([str(self.py), "-c", S.MV_IMPORTS])
+        S.show_mv_import_error(self.root / "no" / "python")        # 実行できなくても例外にしない
+        self.assertIn("実行できませんでした", self.text())
+
+    def test_uv_missing(self):
+        S.ensure_uv_on_path.return_value = False
+        with mock.patch.object(S, "mv_ready", return_value=False):
+            self.assertFalse(S.setup_mv(self.cfg))
+        self.assertEqual(self.labels, [])
+        self.assertIn("uv が見つかりません", self.text())
+
+    def test_configured_python_is_used_and_nothing_is_installed(self):
+        mine = touch(self.root / "my" / "python")
+        self.cfg.mv = {"tools_python": str(mine)}
+        with mock.patch.object(S, "mv_ready", return_value=True):
+            self.assertTrue(S.setup_mv(self.cfg))
+        self.assertEqual(self.labels, [])
+        self.assertIn("既存を使います", self.text())
+        self.assertIn(str(mine), self.text())
+        with mock.patch.object(S, "mv_ready", return_value=False), mock.patch.object(S, "show_mv_import_error"):
+            self.assertFalse(S.setup_mv(self.cfg))                # 自分の Python に何かを入れることはしない
+        self.assertEqual(self.labels, [])
+        self.assertIn("Demucs / librosa などが入っていません", self.text())
+
+    def test_configured_python_that_does_not_exist(self):
+        self.cfg.mv = {"tools_python": str(self.root / "nope" / "python")}
+        self.assertFalse(S.setup_mv(self.cfg))
+        self.assertIn("[mv] tools_python", self.text())
+        self.assertEqual(self.labels, [])
+
+    def test_components_dir_is_followed(self):
+        cfg = Settings({"components_dir": "elsewhere"}, self.root)
+        with mock.patch.object(S, "mv_ready", side_effect=[False, True]):
+            S.setup_mv(cfg, models=False)
+        self.assertEqual(S.run_step.call_args_list[0].args[1], self.root / "elsewhere" / "mvtools")
 
 
 if __name__ == "__main__":

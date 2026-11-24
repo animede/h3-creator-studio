@@ -8,6 +8,8 @@ rem   .\setup.bat                  部品の取り込み + 環境 + モデル(�
 rem   .\setup.bat --no-models      環境だけ(モデルは後で)
 rem   .\setup.bat --only h3,ace    指定した部品だけ
 rem   .\setup.bat --llm            同梱 LLM(約 5GB)も先に取得する
+rem   .\setup.bat --mv             MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
+rem   .\setup.bat --only mvtools   その道具だけ
 rem 何度実行してもよい。済んでいる所は飛ばし、途中で止まっても続きから進む。
 setlocal
 cd /d "%~dp0"

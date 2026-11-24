@@ -1,5 +1,6 @@
 // 管理役の画面: メモリ計・部品の状態表示(折りたたみ可)。タブ・生成物・ギャラリーは gallery.js / image.js。
 const STATE_LABEL = { stopped: "停止", starting: "起動中", ready: "準備完了", unloaded: "退避中", stopping: "停止中", error: "エラー" };
+const LANE_LABEL = { h3: "H3", h3image: "H3-Image", ace: "ACE", cpu: "CPU" };      // レーン(部品)の短い名前
 const rows = {};          // 部品名 -> {el, parts}
 const openLogs = new Set();
 let timer = null;
@@ -77,6 +78,21 @@ function showOp(op) {
   if (op.error && op.log_tail) line.append(el("pre", "", op.log_tail));
 }
 
+// 状態バーの 2 行目: レーンごとの実行中のジョブ(種類と進み)と順番待ちの数。share のときは、GPU に載っている部品と予算も出す
+function renderLanes(s) {
+  const share = s.gpu_mode === "share";
+  const items = [el("span", "lane", share ? "GPU: 共有(複数の部品を同時に載せる)" : "GPU: 1 部品ずつ")];
+  for (const [name, l] of Object.entries(s.lanes || {})) {
+    const jobs = l.running_jobs || [];
+    if (!jobs.length && !l.queued) continue;
+    const parts = jobs.map((j) => `${j.kind.split(".").pop()} ${j.status === "running" ? Math.round((j.progress || 0) * 100) + "%" : "準備中"}`);
+    if (l.queued) parts.push(`待ち ${l.queued}`);
+    items.push(el("span", "lane run", `${LANE_LABEL[name] || name}: ${parts.join(" / ")}`));
+  }
+  if (share) for (const r of s.residents || []) items.push(el("span", "lane res" + (r.busy ? " busy" : ""), `${LANE_LABEL[r.name] || r.name} 予算 ${gib(r.budget_mib)} GiB${r.busy ? "(仕事中)" : ""}`));
+  $("lanes").replaceChildren(...items);
+}
+
 function render(s) {
   const gpu = s.gpu;
   if (gpu) setGauge("g-vram", gpu.used_mib, gpu.total_mib, `${gib(gpu.used_mib)} / ${gib(gpu.total_mib)} GiB`);
@@ -87,6 +103,7 @@ function render(s) {
   const w = $("warning");
   w.hidden = !s.warning;
   w.textContent = s.warning || "";
+  renderLanes(s);
 
   for (const [name, c] of Object.entries(s.components)) {
     if (!rows[name]) buildRow(name, c);
@@ -94,13 +111,14 @@ function render(s) {
     r.badge.textContent = STATE_LABEL[c.state] || c.state;
     r.badge.className = "badge " + c.state;
     r.tag.hidden = !c.gpu_resident;
+    r.tag.textContent = c.budget_mib ? `GPU ${gib(c.budget_mib)} GiB` : "GPU";      // share のときは予算つき
     r.ext.hidden = !c.external;
     r.port.textContent = `:${c.port}`;
     r.rss.textContent = c.rss_mib != null ? `RSS ${gib(c.rss_mib)} GiB` : "";
     r.rss.title = c.error || "";
     const running = ["starting", "ready", "unloaded"].includes(c.state);
     r.bStart.disabled = s.busy || running;
-    r.bStop.disabled = s.busy || c.state === "stopped" || c.external;
+    r.bStop.disabled = s.busy || c.state === "stopped" || c.external || c.busy;       // 仕事中の部品は止めない
     r.bEnsure.disabled = s.busy;
     if (openLogs.has(name)) refreshLog(name);
   }
@@ -111,9 +129,9 @@ function render(s) {
 // 部品パネル: 準備が整ったら自動で畳み、見出しに 1 行で状況を出す(利用者が開閉したら以後は自動にしない)
 function summarize(s) {
   const comps = Object.values(s.components);
-  const res = comps.find((c) => c.gpu_resident);
+  const res = comps.filter((c) => c.gpu_resident);       // share では複数載っている
   const op = s.operation && !s.operation.done ? s.operation : null;
-  let text = res ? `GPU: ${res.label}(${STATE_LABEL[res.state] || res.state})` : "GPU: 空き";
+  let text = res.length ? `GPU: ${res.map((c) => `${c.label}(${STATE_LABEL[c.state] || c.state})`).join("、")}` : "GPU: 空き";
   const starting = comps.find((c) => c.state === "starting" || c.state === "stopping");
   if (op && op.steps.length) text += " - " + op.steps[op.steps.length - 1].msg;
   else if (starting) text += ` - ${starting.label}: ${STATE_LABEL[starting.state]}`;
@@ -141,7 +159,7 @@ async function poll() {
   try {
     const s = await fetch("/api/status").then((r) => r.json());
     render(s);
-    busy = s.busy;
+    busy = s.busy || Object.values(s.lanes || {}).some((l) => (l.running_jobs || []).length || l.queued);     // 仕事が走っている間は 1 秒おき
     if (s.jobs_done_counter != null) {
       if (doneCounter !== null && s.jobs_done_counter !== doneCounter) loadGallery();   // 履歴・ビューアも更新される
       doneCounter = s.jobs_done_counter;

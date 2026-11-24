@@ -210,6 +210,23 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(comp.interrupts[0], {"job_id": "remote1"})
         self.assertEqual(self.ledger.list_outputs(), [])
 
+    async def test_progress_message_prefix_and_file_part(self):
+        """MV が使う口: 進捗の文言の頭に prefix を付ける(「シーン 2 / 5: 」)。台帳に載せない作業用のファイルも multipart の部品にできる。"""
+        comp = FakeH3()
+        job = Job(id="job123456789", tab="mv", kind="mv.scene", params={})
+        comp.job = job
+        async with h3._client(self.ctx(comp)) as c:
+            await h3._generate(job, c, "/api/ref2va", {"prompt": "p"}, [], prefix="シーン 2 / 5: ")
+        progress, message, remote = comp.seen[0]
+        self.assertEqual((message, remote), ("シーン 2 / 5: 生成中 2/8", "remote1"))
+        self.assertAlmostEqual(progress, 0.25)
+        wav = self.root / "scene_001_vocals.wav"
+        wav.write_bytes(b"RIFFx")
+        field, (name, body, mime) = h3._file_part("references", wav)
+        self.assertEqual((field, name, body), ("references", "scene_001_vocals.wav", b"RIFFx"))
+        self.assertTrue(mime.startswith("audio/"))
+        self.assertEqual(h3._file_part("references", wav, "voice.wav")[1][0], "voice.wav")
+
     async def test_errors(self):
         with self.assertRaises(JobFailed) as cm:
             await h3.run(self.job("h3.t2va", {"prompt": "p"}), self.ctx(FakeH3(post_status=400, post_detail="seconds must be between 5.0 and 15.0")))

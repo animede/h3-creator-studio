@@ -1,6 +1,8 @@
 """設定の読み込み: studio.toml(既定)→ studio.local.toml(個人の上書き)。"""
 import copy
+import logging
 from pathlib import Path
+from typing import Optional
 
 try:
     import tomllib
@@ -8,6 +10,7 @@ except ModuleNotFoundError:  # Python 3.10 以前
     import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+log = logging.getLogger("studio.config")
 
 
 def deep_merge(base: dict, over: dict) -> dict:
@@ -29,6 +32,16 @@ def _read_toml(path: Path) -> dict:
 
 
 LLM_DEFAULTS = {"port": 8701, "gpu": "auto", "gguf": "", "llama_server": "", "tools_dir": "components/llm"}
+GPU_MODES = ("auto", "exclusive", "share")
+
+
+def parse_gpu_mode(value) -> str:
+    """[gpu] mode の値を "auto" / "exclusive" / "share" にそろえる。読めなければ auto。"""
+    v = str(value).strip().lower()
+    if v in GPU_MODES:
+        return v
+    log.warning("[gpu] mode = %r は読めません(auto / exclusive / share のいずれか)。auto として扱います", value)
+    return "auto"
 
 
 class Settings:
@@ -40,6 +53,8 @@ class Settings:
         self.components = {name: dict(tbl) for name, tbl in data.get("components", {}).items()}
         self.llm = {**LLM_DEFAULTS, **data.get("llm", {})}     # 管理役が持つ LLM(llama-server)の設定
         self.llm_port = int(self.llm["port"])
+        self.gpu_mode = parse_gpu_mode(data.get("gpu", {}).get("mode", "auto"))
+        self.mv = dict(data.get("mv", {}))     # MV(リップシンク)の設定。tools_python = Demucs と librosa の入った Python     # GPU に載せる部品を 1 つにするか、複数にするか
 
     def component_names(self) -> list[str]:
         return [n for n, c in self.components.items() if c.get("enabled", True)]
@@ -58,6 +73,18 @@ class Settings:
 
     def component_env(self, name: str) -> dict:
         return {str(k): str(v) for k, v in self.components.get(name, {}).get("env", {}).items()}
+
+    def component_budget_gb(self, name: str) -> Optional[float]:
+        """share のときの VRAM の予算(GiB)の上書き(vram_budget_gb)。書かれていなければ None(総 VRAM から決める)。"""
+        v = self.components.get(name, {}).get("vram_budget_gb")
+        if v in (None, ""):
+            return None
+        try:
+            gb = float(v)
+        except (TypeError, ValueError):
+            log.warning("[components.%s] vram_budget_gb = %r は数字ではありません。無視します", name, v)
+            return None
+        return gb if gb > 0 else None
 
 
 def load_settings(root: Path = REPO_ROOT) -> Settings:

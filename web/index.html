@@ -9,10 +9,13 @@
 <body>
 <header class="topbar">
   <h1>h3-creator-studio</h1>
-  <div class="gauges">
-    <div class="gauge" id="g-vram"><span class="g-label">VRAM</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
-    <div class="gauge" id="g-shared" hidden><span class="g-label">共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
-    <div class="gauge" id="g-ram"><span class="g-label">CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+  <div class="topright">
+    <div class="gauges">
+      <div class="gauge" id="g-vram"><span class="g-label">VRAM</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+      <div class="gauge" id="g-shared" hidden><span class="g-label">共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+      <div class="gauge" id="g-ram"><span class="g-label">CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+    </div>
+    <div class="lanes" id="lanes" aria-label="ジョブの状況と GPU に載っている部品"></div>
   </div>
 </header>
 <div id="warning" class="warning" hidden></div>
@@ -29,12 +32,14 @@
   <button class="tab active" data-tab="image" role="tab">画像</button>
   <button class="tab" data-tab="video" role="tab">動画</button>
   <button class="tab" data-tab="music" role="tab">音楽</button>
+  <button class="tab" data-tab="mv" role="tab">MV(リップシンク)</button>
 </nav>
 
-<main class="workspace" id="workspace">
+<main class="workspace" id="workspace" data-tab="image">
   <section class="panel ops" id="ops" aria-label="操作">
     <h2>操作</h2>
     <div class="tabpanel" id="tab-image">
+      <div class="presetbar" id="im-presets"></div>
       <div class="seg" id="im-modes" role="group" aria-label="作り方">
         <button data-mode="t2i" class="active"><b>T2I</b><small>テキストから</small></button><button data-mode="edit"><b>edit</b><small>参照画像で編集</small></button>
       </div>
@@ -72,6 +77,7 @@
       <div class="actions"><button id="im-go" class="primary">生成</button><button id="im-stop" disabled>中止</button></div>
     </div>
     <div class="tabpanel" id="tab-video" hidden>
+      <div class="presetbar" id="vd-presets"></div>
       <div class="seg" id="vd-modes" role="group" aria-label="作り方">
         <button data-mode="t2va" class="active"><b>T2VA</b><small>テキストから</small></button><button data-mode="fl2va"><b>FL2VA</b><small>最初・最後のフレームから</small></button>
         <button data-mode="ref2va"><b>Ref2VA</b><small>参照から</small></button><button data-mode="still"><b>T2I / Ref2I</b><small>静止画</small></button>
@@ -120,6 +126,7 @@
       <div class="actions"><button id="vd-go" class="primary">生成</button><button id="vd-stop" disabled>中止</button></div>
     </div>
     <div class="tabpanel" id="tab-music" hidden>
+      <div class="presetbar" id="mu-presets"></div>
       <div class="seg" id="mu-modes" role="group" aria-label="作り方">
         <button data-mode="simple" class="active">簡単(ジャンルから)</button><button data-mode="omakase">✨ おまかせ(一言から)</button>
       </div>
@@ -204,6 +211,35 @@
         <pre class="plan-lyrics" id="mu-plan-lyrics"></pre>
       </div>
     </div>
+    <div class="tabpanel" id="tab-mv" hidden>
+      <div class="presetbar" id="mv-presets"></div>
+      <div class="msg" id="mv-tools" hidden></div>
+      <div class="fld" id="mv-song-fld"><span class="fl">曲 <span class="note inl" id="mv-song-note">音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
+        <div class="refs frame" id="mv-song" aria-label="曲のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
+      <div class="fld" id="mv-image-fld"><span class="fl">キャラクター画像 <span class="note inl" id="mv-image-note">画像タブの画像・ギャラリー・PC の画像ファイル</span></span>
+        <div class="refs frame" id="mv-image" aria-label="キャラクター画像のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
+      <label class="fld"><span class="fl">人物の説明 <small>(任意。空なら画像のプロンプトを使います)</small></span>
+        <textarea id="mv-char" class="sm" rows="3" maxlength="600" placeholder="例: 銀色の長い髪、青いセーラー服の少女。アニメ調"></textarea></label>
+      <label class="fld"><span class="fl">曲の内容・世界観 <small>(任意。空なら曲のテーマ・キャプション・ジャンルを使います)</small></span>
+        <textarea id="mv-concept" class="sm" rows="3" maxlength="1000" placeholder="例: 夜明けの駅で、旅立つ人を見送る歌"></textarea></label>
+      <div class="fld two">
+        <label><span class="fl">投稿先</span>
+          <select id="mv-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
+            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option></select></label>
+        <label><span class="fl">画質 <b id="mv-size"></b></span>
+          <select id="mv-quality"><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+      </div>
+      <span class="note mv-qnote" id="mv-qnote"></span>
+      <div class="fld two">
+        <label><span class="fl">シーンの最短(秒)</span><input id="mv-min" type="number" min="5" max="10" step="0.5" value="5"></label>
+        <label><span class="fl">シーンの最長(秒)</span><input id="mv-max" type="number" min="5" max="10" step="0.5" value="10"></label>
+      </div>
+      <div class="fld"><span class="fl">シード</span>
+        <div class="inline"><input id="mv-seed" type="number" min="0" placeholder="例: 12345" disabled>
+          <label class="chk"><input id="mv-random" type="checkbox" checked>ランダム</label></div></div>
+      <div class="msg" id="mv-msg" hidden></div>
+      <div class="actions"><button id="mv-go" class="primary">MV を作る</button></div>
+    </div>
   </section>
 
   <section class="panel output" id="output" aria-label="生成物">
@@ -219,6 +255,7 @@
       <span class="vname" id="vname"></span><span class="vinfo" id="vinfo"></span>
       <span class="vbtns"><a id="vsave" class="btn" download>保存</a><span id="vacts"></span></span>
     </div>
+    <div class="mvproj" id="mv-project"></div>
   </section>
 
   <section class="panel history" id="history" aria-label="履歴">
@@ -241,8 +278,10 @@
 <script src="gallery.js"></script>
 <script src="dnd.js"></script>
 <script src="jobs.js"></script>
+<script src="presets.js"></script>
 <script src="image.js"></script>
 <script src="video.js"></script>
 <script src="music.js"></script>
+<script src="mv.js"></script>
 </body>
 </html>

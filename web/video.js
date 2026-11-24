@@ -266,6 +266,27 @@
   wireEnhance({ tab: "video", ta: vd("prompt"), btn: vd("enh"), undo: vd("enh-undo"), note: vd("enh-note"), showMsg,
     body: () => ({ task: mode === "still" ? "t2va" : mode, seconds: +vd("secs").value }) });
 
+  // ---- プリセット(入力欄の値だけ。参照・フレーム・読み上げ(TTS)は含めない) ----
+
+  function getPresetValues() {
+    return { mode, prompt: vd("prompt").value.trim(), resolution: vd("res").value, seconds: +vd("secs").value,
+      match_audio: vd("match").checked, vocal_lock: vd("vocal").checked, seed: presetGetSeed(vd("seed"), vd("random")) };
+  }
+
+  // 書かれている項目だけ反映する(知らない項目は無視)。プロンプトは空でなければ置き換える。作り方を先に合わせ、欄の出し入れは render が追従する
+  function applyPresetValues(v) {
+    const skipped = [];
+    if ([...document.querySelectorAll("#vd-modes button")].some((b) => b.dataset.mode === v.mode)) setMode(v.mode);
+    if (typeof v.prompt === "string" && v.prompt.trim()) presetSet(vd("prompt"), v.prompt);
+    if ("resolution" in v && !presetSet(vd("res"), v.resolution)) skipped.push("解像度");
+    if (Number.isFinite(v.seconds)) presetSet(vd("secs"), v.seconds);
+    if ("match_audio" in v) presetSet(vd("match"), v.match_audio);
+    if ("vocal_lock" in v) presetSet(vd("vocal"), v.vocal_lock);
+    if ("seed" in v) presetSetSeed(vd("seed"), vd("random"), v.seed);
+    return skipped;
+  }
+  wirePresets({ tab: "video", box: $("vd-presets"), get: getPresetValues, apply: applyPresetValues });
+
   tracker.resume();
   render();
 })();

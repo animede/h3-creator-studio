@@ -1,0 +1,185 @@
+import json
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from studio import mvclip as C
+
+HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+
+
+def plan(*durations):
+    """尺(秒)の並びから、分析の出力と同じ形のシーン計画を作る。"""
+    t, out = 0.0, []
+    for i, d in enumerate(durations, start=1):
+        out.append({"index": i, "start": t, "end": t + d, "duration": d, "kind": "vocal"})
+        t += d
+    return out
+
+
+class QuantizeTest(unittest.TestCase):
+    def test_boundaries_snap_to_one_frame_grid(self):
+        scenes = C.quantize_scene_plan(plan(8.4, 6.37, 9.123, 5.5))
+        self.assertEqual([s["start_frame"] for s in scenes], [0, 202, 354, 573])
+        self.assertEqual([s["end_frame"] for s in scenes], [202, 354, 573, 705])
+        self.assertEqual([s["frame_count"] for s in scenes], [202, 152, 219, 132])
+        for s in scenes:
+            self.assertAlmostEqual(s["duration"], s["frame_count"] / 24, places=5)
+            self.assertAlmostEqual(s["end"] - s["start"], s["duration"], places=5)
+            self.assertEqual(s["frame_count"], round(s["duration"] * 24))        # クリップの枚数 = round(尺 × 24)
+        self.assertEqual(sum(s["frame_count"] for s in scenes), round(29.393 * 24))      # 丸めの誤差を積み上げない
+        self.assertEqual([s["end_frame"] for s in scenes[:-1]], [s["start_frame"] for s in scenes[1:]])
+        self.assertEqual(scenes[0]["kind"], "vocal")                  # 他の項目は残る
+
+    def test_empty_and_input_untouched(self):
+        self.assertEqual(C.quantize_scene_plan([]), [])
+        scenes = plan(8.4)
+        C.quantize_scene_plan(scenes)
+        self.assertNotIn("start_frame", scenes[0])
+
+    def test_first_start_is_zero_even_if_it_is_not(self):
+        scenes = [{"index": 1, "start": 0.01, "end": 5.0, "duration": 4.99}]
+        self.assertEqual(C.quantize_scene_plan(scenes)[0]["start_frame"], 0)
+
+
+class SeedAndPadTest(unittest.TestCase):
+    def test_scene_seed(self):
+        self.assertEqual(C.scene_seed(1000, 1), 1000 + 7919)
+        self.assertEqual(C.scene_seed(1000, 3), 1000 + 3 * 7919)
+        self.assertEqual(C.scene_seed(2_147_483_000, 2), (2_147_483_000 + 2 * 7919) % 2_147_483_647)       # 範囲に収める
+        self.assertEqual([C.scene_seed(5, i) for i in (1, 2)], [C.scene_seed(5, i) for i in (1, 2)])
+        self.assertNotEqual(C.scene_seed(5, 1), C.scene_seed(6, 1))
+
+    def test_pad_seconds(self):
+        self.assertAlmostEqual(C.pad_seconds(150, 141 / 24), 9 / 24 + 0.25)         # 短い: 足りない分 + 余白
+        self.assertAlmostEqual(C.pad_seconds(130, 141 / 24), 0.25)                  # 長い: 余白だけ(余りは -frames:v が切る)
+        self.assertEqual(C.pad_seconds(130, None), C.PAD_UNKNOWN_S)                 # H3 の長さが分からない
+
+
+class ArgvTest(unittest.TestCase):
+    def test_finish_args_exact(self):
+        argv = C.finish_args("ffmpeg", "raw.mp4", "out.mp4.part", 201, 1024, 576, 24, 0.5)
+        self.assertEqual(argv, ["ffmpeg", "-y", "-v", "error", "-i", "raw.mp4", "-an", "-frames:v", "201", "-r", "24",
+                                "-vf", "scale=1024:576:flags=lanczos,tpad=stop_mode=clone:stop_duration=0.500,format=yuv420p",
+                                "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-f", "mp4", "out.mp4.part"])
+
+    def test_finish_args_without_pad_and_minimum_one_frame(self):
+        argv = C.finish_args("ffmpeg", Path("raw.mp4"), Path("o.part"), 0, 768, 448)
+        self.assertEqual(argv[argv.index("-frames:v") + 1], "1")
+        self.assertEqual(argv[argv.index("-vf") + 1], "scale=768:448:flags=lanczos,format=yuv420p")
+        self.assertNotIn("tpad", " ".join(argv))
+        self.assertEqual(argv[argv.index("-r") + 1], "24")
+
+    def test_concat_list_quotes_and_posix(self):
+        text = C.concat_list([Path("/w/scene_001.mp4"), "/w/it's/scene_002.mp4"])
+        self.assertEqual(text, "file '/w/scene_001.mp4'\nfile '/w/it'\\''s/scene_002.mp4'\n")
+
+    def test_concat_and_mux_args_exact(self):
+        self.assertEqual(C.concat_args("ffmpeg", "list.txt", "v.mp4.part"),
+                         ["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", "-f", "mp4", "v.mp4.part"])
+        self.assertEqual(C.mux_args("ffmpeg", "v.mp4", "song.wav", "mv.mp4.part", 187.23456),
+                         ["ffmpeg", "-y", "-v", "error", "-i", "v.mp4", "-i", "song.wav", "-map", "0:v:0", "-map", "1:a:0", "-t", "187.235",
+                          "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", "-f", "mp4", "mv.mp4.part"])
+
+
+def ffmpeg(*args):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *map(str, args)], check=True)
+
+
+def probe_video(path) -> dict:
+    """映像ストリームの (読んだコマ数, fps, 幅, 高さ, コーデック, ピクセル形式)。"""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries",
+                        "stream=nb_read_frames,r_frame_rate,width,height,codec_name,pix_fmt:format=duration", "-of", "json", str(path)],
+                       capture_output=True, check=True)
+    info = json.loads(r.stdout)
+    st = info["streams"][0]
+    return {"frames": int(st["nb_read_frames"]), "fps": st["r_frame_rate"], "size": (st["width"], st["height"]), "codec": st["codec_name"],
+            "pix_fmt": st["pix_fmt"], "duration": float(info["format"]["duration"])}
+
+
+def has_audio(path) -> bool:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+                       capture_output=True, check=True)
+    return bool(r.stdout.strip())
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg / ffprobe が PATH に無い")
+class RealFfmpegTest(unittest.TestCase):
+    """作った引数を、本物の ffmpeg で動かして確かめる(小さい動画)。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+        # H3 の出力に似せた生のクリップ: 24fps・映像 141 コマ(17n+5)+ 音声つき
+        cls.raw = cls.root / "raw_141.mp4"
+        ffmpeg("-f", "lavfi", "-i", "testsrc=size=96x64:rate=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000",
+               "-frames:v", 141, "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", cls.raw)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def finish(self, frames, size=(96, 64), raw_s=141 / 24, name=None):
+        out = self.root / (name or f"clip_{frames}.mp4")
+        tmp = out.with_name(out.name + ".part")
+        argv = C.finish_args("ffmpeg", self.raw, tmp, frames, size[0], size[1], C.FPS, C.pad_seconds(frames, raw_s))
+        subprocess.run(argv, check=True, capture_output=True)
+        tmp.replace(out)
+        return out
+
+    def test_clip_has_exactly_the_requested_number_of_frames(self):
+        for frames in (150, 141, 130, 24, 1):         # 足りない(最後のコマを複製して足す)/ ちょうど / 長すぎる(切る)
+            info = probe_video(self.finish(frames))
+            self.assertEqual(info["frames"], frames, frames)
+            self.assertEqual((info["fps"], info["codec"], info["pix_fmt"]), ("24/1", "h264", "yuv420p"))
+
+    def test_clip_is_scaled_and_has_no_audio(self):
+        out = self.finish(100, size=(80, 48), name="scaled.mp4")
+        self.assertEqual(probe_video(out)["size"], (80, 48))
+        self.assertTrue(has_audio(self.raw))
+        self.assertFalse(has_audio(out))
+
+    def test_padding_clones_the_last_frame(self):
+        """足した分のコマは、最後のコマと同じ絵(止まる)。元の動きの中のコマとは違う絵。"""
+        from PIL import Image, ImageChops, ImageStat
+        out = self.finish(150, name="pad.mp4")
+
+        def shot(n):
+            png = self.root / f"f{n}.png"
+            ffmpeg("-i", out, "-vf", f"select=eq(n\\,{n})", "-frames:v", 1, png)
+            with Image.open(png) as im:
+                return im.convert("RGB")
+
+        def diff(a, b):
+            return sum(ImageStat.Stat(ImageChops.difference(a, b)).mean)
+        last, padded_end, earlier = shot(140), shot(149), shot(120)       # 元の最後(141 コマ目)/ 足した最後 / 元の途中
+        self.assertLess(diff(last, padded_end), 3.0)
+        self.assertGreater(diff(last, earlier), 3 * diff(last, padded_end) + 1.0)
+
+    def test_concat_and_mux_gives_the_exact_total_and_the_song(self):
+        frames = [150, 130, 141]
+        clips = [self.finish(n) for n in frames]
+        listing, video, final = self.root / "list.txt", self.root / "video.mp4", self.root / "final.mp4"
+        listing.write_text(C.concat_list(clips), encoding="utf-8")
+        subprocess.run(C.concat_args("ffmpeg", listing, video), check=True, capture_output=True)
+        self.assertEqual(probe_video(video)["frames"], sum(frames))
+        song = self.root / "song.wav"
+        ffmpeg("-f", "lavfi", "-i", "sine=frequency=330:sample_rate=44100:duration=20", "-ac", 2, song)
+        duration = sum(frames) / 24
+        subprocess.run(C.mux_args("ffmpeg", video, song, final, duration), check=True, capture_output=True)
+        info = probe_video(final)
+        self.assertEqual(info["frames"], sum(frames))
+        self.assertAlmostEqual(info["duration"], duration, delta=0.05)
+        self.assertTrue(has_audio(final))
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,duration", "-of", "json", str(final)],
+                           capture_output=True, check=True)
+        audio = json.loads(r.stdout)["streams"][0]
+        self.assertEqual(audio["codec_name"], "aac")
+        self.assertAlmostEqual(float(audio["duration"]), duration, delta=0.1)       # 曲は -t で映像の長さに切られる
+
+
+if __name__ == "__main__":
+    unittest.main()

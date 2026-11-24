@@ -76,6 +76,13 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(layers[layers.index("-ngl"):], ["-ngl", "20", "--fit", "off"])
         self.assertNotIn("--fit", llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, False, "auto"))
 
+    def test_build_command_cpu_only(self):
+        cpu = llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, True, "auto", cpu_only=True)
+        self.assertEqual(cpu[cpu.index("-ngl"):], ["-ngl", "0", "--fit", "off"])      # CUDA 版でも、GPU には 1 層も載せない
+        self.assertNotIn("--fit-target", cpu)
+        plain = llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, False, "auto", cpu_only=True)
+        self.assertNotIn("-ngl", plain)                                                # CPU 版には、もともと GPU の指定が無い
+
 
 class FilesTest(unittest.TestCase):
     def setUp(self):
@@ -168,16 +175,10 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
     def make(self, calls=None, **kw) -> Llm:
         return Llm(make_cfg(self.root), transport=chat_transport(calls if calls is not None else []), poll_s=0.01, settle_s=0, **kw)
 
-    async def test_chat_waits_while_generating(self):
-        busy = {"v": True}
-        llm = self.make(busy=lambda: busy["v"])      # すでに別の llama-server が応答している(外部)
-        task = asyncio.create_task(llm.chat("sys", "user"))
-        await asyncio.sleep(0.1)
-        self.assertFalse(task.done())                # 生成中は待つ(GPU で起こさない)
-        self.assertEqual(llm.starts, 0)
-        busy["v"] = False
-        self.assertEqual(await asyncio.wait_for(task, 2), "こんにちは")     # 思考ブロックは取り除く
-        self.assertEqual(llm._users, 0)
+    async def test_chat_does_not_wait_while_generating(self):
+        llm = self.make(busy=lambda: True)           # GPU の仕事が走っている。すでに別の llama-server が応答している(外部)
+        self.assertEqual(await asyncio.wait_for(llm.chat("sys", "user"), 2), "こんにちは")     # 待たずに使う。思考ブロックは取り除く
+        self.assertEqual((llm.starts, llm._users), (0, 0))
 
     async def test_release_stops_cuda_child_and_keeps_cpu_child(self):
         llm = self.make()
@@ -192,6 +193,33 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
             llm._proc, llm._gpu = fake_proc(), False                # CPU だけの子は VRAM を持たないので止めない
             self.assertFalse(await llm.release_before_gpu())
             stop.assert_not_called()
+
+    async def test_release_leaves_cpu_only_child_alone_even_while_in_use(self):
+        llm = self.make()
+        with mock.patch.object(llm_mod.procman, "stop") as stop, mock.patch.object(llm_mod.procman, "is_alive", return_value=True):
+            llm._proc, llm._gpu, llm._cpu_only = fake_proc(), False, True
+            async with llm.session():
+                self.assertFalse(await asyncio.wait_for(llm.release_before_gpu(), 1))     # VRAM を持たない子は、使用中でも待たず、止めない
+            stop.assert_not_called()
+
+    async def test_new_chat_waits_only_while_the_gpu_child_is_being_stopped(self):
+        llm = self.make()
+        with mock.patch.object(llm_mod.procman, "stop") as stop, mock.patch.object(llm_mod.procman, "is_alive", return_value=True):
+            llm._proc, llm._gpu = fake_proc(), True
+
+            async def enter():
+                async with llm.session():
+                    return True
+            async with llm.session():                       # 使用中の chat の終わりを、止める側が待っている
+                releasing = asyncio.create_task(llm.release_before_gpu())
+                await asyncio.sleep(0.05)
+                entering = asyncio.create_task(enter())
+                await asyncio.sleep(0.1)
+                self.assertFalse(entering.done())           # 止まる子には、新しい chat を載せない
+            self.assertTrue(await asyncio.wait_for(releasing, 2))
+            self.assertTrue(await asyncio.wait_for(entering, 2))      # 止まったら入れる(次は CPU 専用の子で動く)
+            stop.assert_called_once()
+            self.assertFalse(llm._releasing)
 
     async def test_release_waits_for_chat_in_progress(self):
         llm = self.make()
@@ -226,6 +254,83 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((started[0].name, started[0].dir.name), ("llm", llm_mod.TAG + "-cuda"))
         self.assertIn("--fit-target", started[0].cmd)
         self.assertTrue(llm._gpu)
+
+    def gpu_files(self):
+        touch(self.root / "tools" / (llm_mod.TAG + "-cuda") / "llama-server")
+        touch(self.root / "tools" / llm_mod.MODEL_FILE)
+
+    def launcher(self, calls, started):
+        def fake_start(spec):
+            started.append(spec)
+            return fake_proc()
+        return (mock.patch.object(llm_mod, "use_gpu", return_value=True), mock.patch.object(llm_mod.procman, "start", fake_start),
+                mock.patch.object(llm_mod.procman, "is_alive", return_value=True), mock.patch.object(llm_mod, "smi_mib", return_value=9000))
+
+    async def test_chat_during_gpu_work_starts_cpu_only_child_instead_of_waiting(self):
+        self.gpu_files()
+        calls, started, busy = [], [], {"v": True}
+        llm = self.make(calls, busy=lambda: busy["v"])
+        llm.transport = chat_transport(calls, health_after=3)
+        patches = self.launcher(calls, started)
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.assertEqual(await asyncio.wait_for(llm.chat("sys", "user"), 5), "こんにちは")      # GPU の仕事が走っていても、待たずに答える
+        (spec,) = started
+        self.assertEqual(spec.cmd[spec.cmd.index("-ngl"):], ["-ngl", "0", "--fit", "off"])
+        self.assertNotIn("--fit-target", spec.cmd)
+        self.assertEqual(spec.env(None, None), {"CUDA_VISIBLE_DEVICES": "-1"})                  # CUDA を隠す(CUDA 版のまま、VRAM を持たない)
+        self.assertEqual((llm._gpu, llm._cpu_only, llm.starts), (False, True, 1))
+        st = llm.status()
+        self.assertEqual((st["gpu"], st["cpu_only"], st["gpu_work"]), (False, True, True))
+        self.assertEqual(await llm.ensure_running(), llm.base_url)                            # GPU の仕事が続くかぎり、そのまま使う
+        self.assertEqual(llm.starts, 1)
+
+    async def test_returns_to_gpu_mode_only_when_no_gpu_work_is_running_or_queued(self):
+        self.gpu_files()
+        calls, started, busy = [], [], {"v": True}
+        llm = self.make(calls, busy=lambda: busy["v"])
+        llm.transport = chat_transport(calls, health_after=3)
+        for p in self.launcher(calls, started):
+            p.start()
+            self.addCleanup(p.stop)
+        await llm.ensure_running()
+        self.assertTrue(llm._cpu_only)
+        with mock.patch.object(llm_mod.procman, "stop") as stop:
+            await llm.ensure_running()                           # まだ仕事が走っている(か、順番を待っている): 戻さない
+            stop.assert_not_called()
+            busy["v"] = False
+            async with llm.session():
+                async with llm.session():                        # ほかの chat が CPU 専用の子を使っている最中も、戻さない
+                    await llm.ensure_running()
+                stop.assert_not_called()
+                self.assertEqual(llm.starts, 1)
+                await llm.ensure_running()                       # 仕事が無く、自分だけなら、GPU 版へ戻す
+            stop.assert_called_once()
+        self.assertEqual(llm.starts, 2)
+        gpu_spec = started[1]
+        self.assertEqual(gpu_spec.cmd[gpu_spec.cmd.index("--fit"):], ["--fit", "on", "--fit-target", "1536"])
+        self.assertEqual(gpu_spec.env(None, None), {})
+        self.assertEqual((llm._gpu, llm._cpu_only), (True, False))
+        busy["v"] = True
+        await llm.ensure_running()                               # GPU 版は、生成が始まっても止めない(止めるのは release_before_gpu だけ)
+        self.assertEqual(llm.starts, 2)
+
+    async def test_gpu_setting_off_never_hides_cuda(self):
+        touch(self.root / "tools" / llm_mod.TAG / "llama-server")
+        touch(self.root / "tools" / llm_mod.MODEL_FILE)
+        calls, started = [], []
+        llm = self.make(calls, busy=lambda: True)
+        llm.transport = chat_transport(calls, health_after=3)
+        for p in self.launcher(calls, started):
+            p.start()
+            self.addCleanup(p.stop)
+        with mock.patch.object(llm_mod, "use_gpu", return_value=False):      # [llm] gpu = "off"(CPU 版)
+            await llm.ensure_running()
+        (spec,) = started
+        self.assertNotIn("-ngl", spec.cmd)
+        self.assertEqual(spec.env(None, None), {})
+        self.assertEqual((llm._gpu, llm._cpu_only), (False, False))
 
     async def test_missing_files_raise_japanese_error(self):
         llm = self.make()

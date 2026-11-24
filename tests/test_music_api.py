@@ -78,13 +78,15 @@ class MusicApiTest(unittest.TestCase):
         self.client.post("/api/music/caption", json={"genre": "Ballad", "thinking": False})
         self.assertIn("3-5 complete English prose sentences", self.llm.calls[1])
 
-    def test_busy_gpu_returns_409_without_touching_the_llm(self):
+    def test_gpu_work_does_not_refuse(self):
+        """GPU で生成している間も、LLM は(CPU 専用で)動くので、「GPU で生成中」と断らない。"""
         self.busy = True
         for path in ("theme", "lyrics", "caption"):
             r = self.client.post(f"/api/music/{path}", json={"genre": "Jazz"})
-            self.assertEqual(r.status_code, 409, path)
-            self.assertIn("生成中", r.json()["detail"])
-        self.assertEqual(self.llm.calls, [])
+            self.assertEqual(r.status_code, 200, path)
+        self.assertEqual(len(self.llm.calls), 3)
+        r = self.client.post("/api/songplan", json={"genre": "Jazz"})
+        self.assertEqual(r.status_code, 200)
 
     def test_llm_errors_become_503(self):
         self.llm.error = LlmError("llama-server を起動できません")
@@ -106,3 +108,16 @@ class MusicApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MusicModelsWhenAceDisabledTest(unittest.TestCase):
+    """ACE を無効にした設定でも、モデル一覧は 404 にせず空で答える(画面のモデル欄が落ちないように)。lifespan は使わない。"""
+
+    def test_disabled_ace_returns_empty_list(self):
+        saved = getattr(main.app.state, "sched", None)
+        self.addCleanup(setattr, main.app.state, "sched", saved)
+        main.app.state.sched = types.SimpleNamespace(comps={})          # [components.ace] enabled = false のとき
+        r = TestClient(main.app).get("/api/music/models")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["models"], [])
+        self.assertIn("無効", r.json()["note"])
