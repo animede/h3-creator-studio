@@ -322,3 +322,19 @@ class FinishedHookTest(JobsBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DisabledComponentTest(unittest.TestCase):
+    """studio.toml で無効にした部品のジョブは、受け付けの時点で分かる文言で断る(載せる段の KeyError にしない)。"""
+
+    def test_submit_for_a_disabled_component_is_refused(self):
+        import types
+        from studio.jobs import Ctx, Handler, JobRunner
+
+        async def noop(job, ctx):
+            return None
+        sched = types.SimpleNamespace(comps={"h3": object()})            # ace が無い = 無効
+        runner = JobRunner(Ctx(sched, None, None), {"ace.simple": Handler(component="ace", normalize=lambda k, p, l: p, run=noop, cancel=noop)})
+        with self.assertRaises(ValueError) as cm:
+            runner.submit("music", "ace.simple", {})
+        self.assertIn("音楽(ACE-Step)の部品は無効", str(cm.exception))

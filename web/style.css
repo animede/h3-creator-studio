@@ -248,6 +248,23 @@ textarea.sm { min-height: 0; }
 .adv-body button.mini { margin-top: 6px; }
 .omk-note { margin: -6px 0 12px; }
 .chips.off { opacity: .4; pointer-events: none; }
+/* ジャンル: 自作のチップ(✦)・「＋ 追加」「✎ 自由に書く」のチップ・追加と自由欄・ジャンルの中身 */
+.chip.mine { border-color: #6b5aa8; }
+.chip.act { border-style: dashed; color: var(--muted); }
+.chip.act.active { border-style: solid; color: #fff; }
+.gform { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #0e1013; }
+.gform[hidden], .gform [hidden] { display: none; }
+.gform > * + * { margin-top: 6px; }
+.gform .inline input[type=text] { flex: 1; min-width: 0; }
+.gbtns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.gbtns .note { flex: 1 1 160px; margin: 0; }
+#mu-genre-edit { margin: 8px 0 0; }
+#mu-genre-edit[hidden] { display: none; }
+#mu-genre-edit .fld .fl { margin-bottom: 3px; }
+.uploading[hidden] { display: none; }
+.gnote { margin-top: 6px; font-size: 12px; color: var(--ok); }
+.gnote.err { color: var(--warn); }
+.gnote[hidden] { display: none; }
 
 /* MV タブ: 左 = 入力(曲・キャラクター画像のドロップ欄)、右上 = いまの制作(進み・最終の動画・シーン)、右下 = 制作の履歴 */
 .note.inl { display: inline; margin-left: 6px; }
@@ -256,7 +273,7 @@ textarea.sm { min-height: 0; }
 .songitem .aicon { font-size: 26px; line-height: 1; }
 .songitem .stext { flex: 1; min-width: 0; }
 .songitem .stitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.songitem .sinfo { font-size: 11px; color: var(--muted); }
+.songitem .sinfo { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .songitem audio { width: 100%; height: 28px; margin-top: 2px; }
 .workspace[data-tab="mv"] .output > .progress, .workspace[data-tab="mv"] .output > .viewer, .workspace[data-tab="mv"] .output > .vmeta { display: none; }
 .workspace:not([data-tab="mv"]) .mvproj { display: none; }

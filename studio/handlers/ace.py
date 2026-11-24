@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .. import media, songplan
+from .. import genres, media, songplan
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from ..llm import LlmError
 from .common import download as _download, error_text as _error_text
@@ -34,6 +34,7 @@ FALLBACK_SLOT = 2           # スロット一覧が取れない古い ACE のと
 SFT_MAX_BATCH = 2           # SFT は CFG ありで実効バッチが倍になるので OOM を避ける
 MIN_SECONDS, MAX_SECONDS = 10, 300
 INSTRUMENTAL_LYRICS = "[Instrumental]"
+CAPTION_MAX = 1000          # 利用者が書くキャプションの文字数の上限(画面の欄・生成のジョブ・テーマ/作詞の API で同じ)
 DEFAULT_NEGATIVE_PROMPT = "low quality, noisy, distorted, muddy, clipping, off-key, out of tune, amateur, poorly mixed"
 
 # 言語の英語名(LLM へ渡す)と ACE の vocal_language。名前でもコードでも受ける
@@ -48,6 +49,14 @@ def _text(params: dict, key: str, limit: int) -> str:
     if len(v) > limit:
         raise ValueError(f"{key} は {limit} 文字以内にしてください")
     return v
+
+
+def _viz(params: dict) -> str:
+    """スペクトラムの雰囲気(自作のジャンルのチップが持つ viz。生成物の params に残り、曲のカードの色になる)。空は指定なし。"""
+    viz = str(params.get("viz") or "").strip().lower()
+    if viz and viz not in genres.VIZ_IDS:
+        raise ValueError("viz は " + ", ".join(genres.VIZ_IDS) + " のいずれかにしてください")
+    return viz
 
 
 def _opt_int(params: dict, key: str, low: int, high: int, label: str):
@@ -108,9 +117,9 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
             raise ValueError("どんな曲か、一言入力してください")
         return {"query": query, **common, "thinking": True}       # おまかせは thinking 固定(Easy Music と同じ)
     caption_auto = params.get("caption_auto")
-    return {"genre": _text(params, "genre", 60) or "J-POP", "theme": _text(params, "theme", 200),
+    return {"genre": genres.clean_genre(params.get("genre")) or "J-POP", "viz": _viz(params), "theme": _text(params, "theme", 200),
             "lyrics": _text(params, "lyrics", 6000), "mood": _text(params, "mood", 100), "vocal": _text(params, "vocal", 100),
-            "caption": _text(params, "caption", 1000), "caption_auto": None if caption_auto is None else bool(caption_auto),
+            "caption": _text(params, "caption", CAPTION_MAX), "caption_auto": None if caption_auto is None else bool(caption_auto),
             **common}
 
 
@@ -165,11 +174,12 @@ async def prepare(job: Job, ctx: Ctx) -> None:
     plan = {"theme": p["theme"], "lyrics": INSTRUMENTAL_LYRICS if inst else p["lyrics"],
             "caption": manual or songplan.template_caption(p["genre"], p["mood"], p["vocal"], inst)}
     chat = ctx.llm.chat if ctx.llm is not None else _no_llm
+    custom = genres.custom_map(ctx.ledger)         # 自作のジャンル(ジャンルが自作の名前なら、その世界観と場面・感情の種を使う)
     if want_plan:
         job.message = "テーマ・歌詞・キャプションを作っています"
         try:
             made = await songplan.make_plan(chat, p["genre"], p["language"], p["mood"], p["vocal"], p["theme"],
-                                            want_lyrics, caption_in_plan)
+                                            want_lyrics, caption_in_plan, custom=custom, user_caption=manual)      # 書いたキャプションだけ(AI が作ったものは渡さない)
             plan["theme"] = made["theme"]
             if caption_in_plan:
                 plan["caption"] = made["caption"]
@@ -183,7 +193,7 @@ async def prepare(job: Job, ctx: Ctx) -> None:
         job.message = "キャプションを作っています"
         try:
             plan["caption"] = await songplan.make_caption(chat, p["genre"], plan["theme"], "" if inst else plan["lyrics"],
-                                                          p["mood"], p["vocal"], p["language"], p["thinking"], inst)
+                                                          p["mood"], p["vocal"], p["language"], p["thinking"], inst, custom=custom)
         except (LlmError, songplan.SongPlanError) as e:
             log.warning("キャプションを作れなかったので、ひな形で続けます: %s", e)
     if inst:

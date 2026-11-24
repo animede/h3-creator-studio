@@ -17,10 +17,11 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import mv_audio, presets, procman
+from . import genres, mv_audio, presets, procman
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .enhance import EnhanceError, enhance_prompt
+from .genres import GenreError
 from .gpu import GpuMonitor
 from .handlers import HANDLERS
 from .jobs import TERMINAL, Ctx, JobRunner
@@ -213,15 +214,33 @@ class SongPlanIn(BaseModel):
     mood: str = ""
     vocal: str = ""
     theme: str = ""
+    caption: str = ""                     # 利用者が書いたキャプション(あれば、AI が作るテーマ・歌詞がその雰囲気に沿う。AI が作ったものは入れない)
     instrumental: bool = False
+
+
+def _genre(text: str) -> str:
+    """ジャンル(チップの名前か、自由に書いた文。1 行にして 200 文字まで)。空なら J-POP。"""
+    try:
+        return genres.clean_genre(text) or "J-POP"
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _caption(text: str) -> str:
+    """利用者が書いたキャプション(テーマ・歌詞を作るときの参考。生成のジョブの caption と同じ 1000 文字まで)。空は ""。"""
+    text = (text or "").strip()
+    if len(text) > ace_handler.CAPTION_MAX:
+        raise HTTPException(400, f"caption は {ace_handler.CAPTION_MAX} 文字以内にしてください")
+    return text
 
 
 @app.post("/api/songplan")
 async def api_songplan(body: SongPlanIn):
-    """テーマ・歌詞・キャプションを LLM で作って返す(生成はしない。「歌詞だけ作る」にも使える)。生成中は LLM が CPU 専用になり、遅くなる。"""
+    """テーマ・歌詞・キャプションを LLM で作って返す(生成はしない。「歌詞だけ作る」にも使える)。生成中は LLM が CPU 専用になり、遅くなる。
+    caption(任意)は、利用者が書いたキャプション。あれば、作るテーマ・歌詞がその雰囲気に沿う。"""
     try:
-        return await make_plan(app.state.llm.chat, body.genre, body.language, body.mood, body.vocal, body.theme.strip(),
-                               want_lyrics=not body.instrumental)
+        return await make_plan(app.state.llm.chat, _genre(body.genre), body.language, body.mood, body.vocal, body.theme.strip(),
+                               want_lyrics=not body.instrumental, custom=genres.custom_map(app.state.ledger), user_caption=_caption(body.caption))
     except (LlmError, SongPlanError) as e:
         raise HTTPException(503, str(e))
 
@@ -233,6 +252,7 @@ class MusicIn(BaseModel):
     language: str = "Japanese"
     theme: str = ""
     lyrics: str = ""
+    caption: str = ""                     # 利用者が書いたキャプション(テーマ・歌詞を作るときだけ使う。あれば、その雰囲気に沿う。AI が作ったものは入れない)
     mood: str = ""
     vocal: str = ""
     thinking: bool = True
@@ -241,9 +261,10 @@ class MusicIn(BaseModel):
 
 @app.post("/api/music/theme")
 async def api_music_theme(body: MusicIn):
-    """ジャンルと言語から、曲のテーマを 1 つ作る。"""
+    """ジャンルと言語から、曲のテーマを 1 つ作る。利用者が書いたキャプション(caption)があれば、その雰囲気に沿わせる。"""
     try:
-        plan = await make_plan(app.state.llm.chat, body.genre, body.language, want_lyrics=False, want_caption=False)
+        plan = await make_plan(app.state.llm.chat, _genre(body.genre), body.language, want_lyrics=False, want_caption=False,
+                               custom=genres.custom_map(app.state.ledger), user_caption=_caption(body.caption))
     except (LlmError, SongPlanError) as e:
         raise HTTPException(503, str(e))
     return {"theme": plan["theme"]}
@@ -251,10 +272,10 @@ async def api_music_theme(body: MusicIn):
 
 @app.post("/api/music/lyrics")
 async def api_music_lyrics(body: MusicIn):
-    """歌詞を作る。テーマがあればそのテーマで書き、無ければテーマも作る。"""
+    """歌詞を作る。テーマがあればそのテーマで書き、無ければテーマも作る。利用者が書いたキャプション(caption)があれば、その雰囲気に沿わせる。"""
     try:
-        plan = await make_plan(app.state.llm.chat, body.genre, body.language, body.mood, body.vocal, body.theme.strip(),
-                               want_lyrics=True, want_caption=False)
+        plan = await make_plan(app.state.llm.chat, _genre(body.genre), body.language, body.mood, body.vocal, body.theme.strip(),
+                               want_lyrics=True, want_caption=False, custom=genres.custom_map(app.state.ledger), user_caption=_caption(body.caption))
     except (LlmError, SongPlanError) as e:
         raise HTTPException(503, str(e))
     return {"theme": plan["theme"], "lyrics": plan["lyrics"], "recommended_duration": plan["recommended_duration"]}
@@ -262,10 +283,10 @@ async def api_music_lyrics(body: MusicIn):
 
 @app.post("/api/music/caption")
 async def api_music_caption(body: MusicIn):
-    """テーマ・歌詞・ムード・ボーカルから、ACE-Step に渡すキャプション(英語)を作る。"""
+    """テーマ・歌詞・ムード・ボーカルから、ACE-Step に渡すキャプション(英語)を作る(書いてあるキャプションは、作り直すものなので使わない)。"""
     try:
-        caption = await make_caption(app.state.llm.chat, body.genre, body.theme.strip(), body.lyrics, body.mood, body.vocal,
-                                     body.language, body.thinking, body.instrumental)
+        caption = await make_caption(app.state.llm.chat, _genre(body.genre), body.theme.strip(), body.lyrics, body.mood, body.vocal,
+                                     body.language, body.thinking, body.instrumental, custom=genres.custom_map(app.state.ledger))
     except (LlmError, SongPlanError) as e:
         raise HTTPException(503, str(e))
     return {"caption": caption}
@@ -278,6 +299,57 @@ async def api_music_models():
         return {"models": [], "default_model": None, "note": "音楽の部品(ACE-Step)は無効になっています"}
     spec = _comp("ace").spec
     return await ace_handler.list_models(spec.base_url, app.state.jobs.ctx.transport)
+
+
+# ---- 音楽タブのジャンル(同梱の 12 と、自作。自作は名前から LLM で定義を作って台帳に保存する) ----
+
+class GenreIn(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None      # 一行の説明(任意。自由に書いた文をジャンルとして保存するときは、その文)
+
+
+class GenrePatch(BaseModel):
+    name: Optional[str] = None
+    vibe: Optional[str] = None
+    settings: Any = None                   # 場面の配列(形の検査は genres.check_seeds。日本語の 400)
+    emotions: Any = None
+    viz: Optional[str] = None
+
+
+@contextlib.contextmanager
+def _genre_errors():
+    """ジャンルの操作の失敗を HTTP のエラーにする(理由は日本語)。"""
+    try:
+        yield
+    except GenreError as e:
+        raise HTTPException(e.status, e.message)
+
+
+@app.get("/api/music/genres")
+def api_music_genres():
+    """同梱のジャンル(builtin: true)、自作のジャンル(作った順)。"""
+    return genres.list_genres(app.state.ledger)
+
+
+@app.post("/api/music/genres")
+async def api_music_genres_create(body: GenreIn):
+    """名前(と任意の説明)から、LLM でジャンルの定義(世界観・場面・感情・スペクトラムの雰囲気)を作って保存し、返す。CPU では 10〜60 秒かかる。"""
+    with _genre_errors():
+        return await genres.create_genre(app.state.ledger, app.state.llm.chat, body.name, body.description)
+
+
+@app.put("/api/music/genres/{gid}")
+def api_music_genres_update(gid: str, body: GenrePatch):
+    """自作のジャンルの、渡した項目だけを書き換える(手での編集)。同梱のジャンルは 400。"""
+    with _genre_errors():
+        return genres.update_genre(app.state.ledger, gid, **{k: v for k, v in body.model_dump().items() if v is not None})
+
+
+@app.delete("/api/music/genres/{gid}")
+def api_music_genres_delete(gid: str):
+    with _genre_errors():
+        genres.delete_genre(app.state.ledger, gid)
+    return {"ok": True}
 
 
 # ---- 音声合成(AivisSpeech) ----

@@ -63,8 +63,9 @@
     if (!song) { body.append(el("div", "refs-empty", "ここに曲をドロップ")); return; }
     const c = el("div", "songitem");
     const text = el("div", "stext");
-    text.append(el("div", "stitle", (song.params && song.params.theme) || song.filename || "曲"),
-      el("div", "sinfo", [song.duration_s ? fmtDur(song.duration_s) : "", song.params && song.params.genre, song.filename].filter(Boolean).join("  ")));
+    const info = el("div", "sinfo", [song.duration_s ? fmtDur(song.duration_s) : "", song.params && song.params.genre, song.filename].filter(Boolean).join("  "));
+    info.title = info.textContent;      // ジャンルが自由に書いた長い文のことがある(1 行に収め、全文は吹き出しに)
+    text.append(el("div", "stitle", (song.params && song.params.theme) || song.filename || "曲"), info);
     const a = el("audio");
     a.controls = true;
     a.src = song.url;

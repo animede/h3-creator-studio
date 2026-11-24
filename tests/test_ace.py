@@ -9,6 +9,7 @@ from unittest import mock
 
 import httpx
 
+from studio import genres
 from studio.handlers import ace
 from studio.jobs import Ctx, Job, JobCancelled, JobFailed, JobRunner
 from studio.ledger import Ledger
@@ -150,6 +151,46 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("始発を待つホーム", out["params"]["lyrics"])
         self.assertIn("bright J-Pop", out["params"]["caption"])
         self.assertNotIn("plan", out["params"]["result"])
+
+    async def test_a_custom_genre_reaches_the_plan_prompts_and_the_viz_is_kept(self):
+        """自作のジャンルの名前で作る: LLM のプロンプトに、そのジャンルの世界観・場面・感情が入る。viz は生成物の params に残る。"""
+        self.ledger.create_genre("和風エレクトロ", "neon shrines, night trains, serene futurism", ["a neon-lit shrine gate at midnight"], ["quiet awe"], "cyber", "和楽器とシンセ")
+        comp, llm = FakeAce([DONE]), FakeLlm()
+        job = self.job(genre="和風エレクトロ", viz="mystical")
+        await self.go(job, comp, llm)
+        user = llm.calls[0]
+        self.assertIn("Genre: 和風エレクトロ", user)
+        self.assertIn("Genre essence: neon shrines, night trains, serene futurism", user)
+        self.assertIn("Scene inspiration: a neon-lit shrine gate at midnight", user)          # 自作の種は 1 つだけなので、必ずそれ
+        self.assertIn("Emotional tone: quiet awe", user)
+        out = self.ledger.get_output(job.outputs[0])
+        self.assertEqual((out["params"]["genre"], out["params"]["viz"]), ("和風エレクトロ", "mystical"))
+        job = self.job(genre="Rock")                                                          # 同梱のジャンルは、これまでどおり
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertNotIn("Genre essence", llm.calls[1])
+        self.assertEqual(self.job().params["viz"], "")                                        # 指定が無ければ空
+
+    async def test_caption_step_gets_the_custom_vibe_too(self):
+        self.ledger.create_genre("Shoegaze", "walls of reverb guitars, hazy melancholy", ["a foggy field"], ["hazy longing"], "dark")
+        llm = FakeLlm("A dreamy track.")
+        job = self.job(genre="shoegaze", theme="朝", lyrics="[Verse]\nあ", caption_auto=True)
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertEqual(len(llm.calls), 1)
+        self.assertIn("Genre/Style: shoegaze", llm.calls[0])
+        self.assertIn("Genre essence: walls of reverb guitars, hazy melancholy", llm.calls[0])        # 名前の大文字小文字は区別しない
+
+    async def test_a_free_text_genre_is_used_as_is(self):
+        free = "90 年代のシティポップに三味線を混ぜた、夏の終わりの切ない曲"
+        llm = FakeLlm()
+        job = self.job(genre=free)
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertIn(f"Genre: {free}", llm.calls[0])
+        self.assertNotIn("Genre essence", llm.calls[0])
+        job = self.job(genre=free, theme="t", lyrics="[Verse]\nあ", caption_auto=False, mood="bright and happy")      # LLM を使わない: 日本語を英語のキャプションに埋め込まない
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), FakeLlm()))
+        self.assertEqual(job.result["plan"]["caption"], "A bright and happy song in the described style with a fitting atmosphere and a fitting vocal.")
+        job = self.job(genre="あ" * 200, theme="t", lyrics="[Verse]\nあ", caption_auto=False)
+        self.assertEqual(job.params["genre"], "あ" * 200)
 
     async def test_lyrics_and_theme_given_skips_the_llm(self):
         comp, llm = FakeAce([DONE]), FakeLlm()
@@ -300,6 +341,72 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("CAPTION:", llm.calls[0])                  # キャプションは頼まない
         self.assertEqual(job.result["plan"]["caption"], "My own caption.")
         self.assertEqual((job.result["plan"]["theme"], job.result["plan"]["lyrics"]), ("朝焼け", "[Verse]\nあ"))
+
+    async def test_a_typed_caption_guides_the_ai_lyrics_and_theme(self):
+        """書いたキャプションは、AI が作るテーマ・歌詞の参考として LLM に渡る(キャプション自体は、書いたまま使う)。ムードのチップがあれば、チップが明示。"""
+        caption = "A wistful, bittersweet piano ballad with a lonely late-night mood."
+        llm = FakeLlm("THEME: 夜明けの駅\n{\"recommended_duration\": 60, \"parts\": {}}\n\n[Verse]\n始発を待つホーム\n[Chorus]\n朝の光が来る\n")
+        job = self.job(caption=caption, language="Japanese")
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertEqual(len(llm.calls), 1)
+        user = llm.calls[0]
+        self.assertIn(f'User\'s caption (their own description of the sound): "{caption}"', user)
+        self.assertIn("Follow the caption's mood, style and atmosphere in the theme and lyrics", user)
+        self.assertIn("never carry its English words into the Japanese theme and lyrics", user)
+        self.assertIn("Mood: as described by the user's caption below", user)
+        self.assertNotIn("CAPTION:", user)                                                      # キャプションは頼まない
+        self.assertEqual(job.result["plan"]["caption"], caption)
+        self.assertEqual((job.result["plan"]["theme"], job.result["plan"]["lyrics"].splitlines()[0]), ("夜明けの駅", "[Verse]"))
+        job = self.job(caption=caption, mood="bright and happy")
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertIn("Mood: bright and happy", llm.calls[1])                                   # チップが明示、キャプションは補足
+        self.assertIn("the Mood above stays explicit", llm.calls[1])
+        job = self.job(caption="  A calm\nsea song  ")                                          # 整えたキャプションを渡す(ACE に渡すものと同じ)
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertIn('"A calm sea song."', llm.calls[2])
+
+    async def test_an_ai_made_caption_is_not_fed_back_to_the_lyrics(self):
+        """キャプションを書いていなければ、AI が(同じ呼び出しで)作るキャプションも、歌詞の参考には渡さない。"""
+        llm = FakeLlm()                                                                         # キャプションの行を含む応答
+        for auto in (True, None):
+            job = self.job(caption_auto=auto)
+            await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+            self.assertNotIn("User's caption", llm.calls[-1])
+            self.assertIn("Mood: match the theme", llm.calls[-1])
+            self.assertIn("CAPTION:", llm.calls[-1])
+            self.assertIn("bright J-Pop", job.result["plan"]["caption"])                         # AI が作ったキャプション
+        job = self.job(theme="海", lyrics="[Verse]\n波", caption_auto=True, thinking=False)       # 別に作るキャプションの呼び出しも
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertNotIn("User's caption", llm.calls[-1])
+
+    async def test_a_typed_caption_guides_the_theme_when_only_the_theme_is_missing(self):
+        caption = "A wistful, bittersweet piano ballad with a lonely late-night mood."
+        llm = FakeLlm("夜行バスの窓の朝焼け")
+        job = self.job(lyrics="[Verse]\nあ", caption=caption)                                    # 歌詞は書いてある: テーマだけの短い呼び出し
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertEqual(len(llm.calls), 1)
+        self.assertIn(f'"{caption}"', llm.calls[0])
+        self.assertIn("Follow the caption's mood, style and atmosphere in the theme:", llm.calls[0])
+        self.assertNotIn("Emotional tone", llm.calls[0])
+        self.assertEqual((job.result["plan"]["theme"], job.result["plan"]["lyrics"], job.result["plan"]["caption"]), ("夜行バスの窓の朝焼け", "[Verse]\nあ", caption))
+        job = self.job(instrumental=True, caption=caption)                                      # インストもテーマだけ
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        self.assertIn("in the theme:", llm.calls[1])
+        plain = FakeLlm("THEME: 朝\nCAPTION: A calm song.")                                     # 書いていなければ、参考は無い
+        await ace.prepare(self.job(lyrics="[Verse]\nあ"), self.ctx(FakeAce([DONE]), plain))
+        self.assertNotIn("User's caption", plain.calls[0])
+
+    async def test_a_typed_caption_guides_regenerated_lyrics_with_the_theme_kept(self):
+        """「歌詞を新しくして生成」: 歌詞は空・テーマはそのまま・書いたキャプションは残る。テーマは固定で、歌詞がキャプションの雰囲気に沿う。"""
+        caption = "A bright, upbeat and happy pop song."
+        llm = FakeLlm("THEME: 勝手なテーマ\n[Verse]\n歌う\n")
+        job = self.job(theme="海辺の町", lyrics="", caption=caption)
+        await ace.prepare(job, self.ctx(FakeAce([DONE]), llm))
+        user = llm.calls[0]
+        self.assertIn("Theme (write this exact theme on the THEME line): 海辺の町", user)
+        self.assertIn(f'"{caption}"', user)
+        self.assertIn("Follow the caption's mood, style and atmosphere in the lyrics:", user)
+        self.assertEqual((job.result["plan"]["theme"], job.result["plan"]["caption"]), ("海辺の町", caption))
 
     async def test_caption_auto_makes_only_the_caption_when_theme_and_lyrics_are_given(self):
         llm = FakeLlm("A mellow song with a warm mood and a clear female vocal")
@@ -498,6 +605,31 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
                        {"model": "a b;c"}, {"steps": 0}, {"batch_size": 5}, {"seed": -1}, {"shift": 9}, {"infer_method": "RK4"}):
             with self.assertRaises(ValueError, msg=str(params)):
                 n("ace.simple", params)
+
+    def test_normalize_genre_accepts_a_free_text_up_to_200_chars(self):
+        n = ace.normalize
+        free = ("90 年代のシティポップに三味線を混ぜた、夏の終わりの切ない曲" + "あ" * 200)[:200]
+        self.assertEqual((len(free), n("ace.simple", {"genre": free})["genre"]), (200, free))
+        self.assertEqual(n("ace.simple", {"genre": "あ" * 200})["genre"], "あ" * 200)
+        with self.assertRaises(ValueError) as cm:
+            n("ace.simple", {"genre": "あ" * 201})
+        self.assertEqual(str(cm.exception), "genre は 200 文字以内にしてください")
+        self.assertEqual(n("ace.simple", {"genre": "  90 年代の\n  シティポップ\t"})["genre"], "90 年代の シティポップ")      # 1 行にそろえる
+        for empty in ("", "   ", None):
+            self.assertEqual(n("ace.simple", {"genre": empty})["genre"], "J-POP", repr(empty))                # 空は J-POP のまま
+
+    def test_normalize_viz_is_one_of_the_ten_themes_or_empty(self):
+        n = ace.normalize
+        self.assertEqual((n("ace.simple", {})["viz"], n("ace.simple", {"viz": ""})["viz"], n("ace.simple", {"viz": None})["viz"]), ("", "", ""))
+        self.assertEqual(n("ace.simple", {"viz": " Cyber "})["viz"], "cyber")
+        for viz in genres.VIZ_IDS:
+            self.assertEqual(n("ace.simple", {"viz": viz})["viz"], viz)
+        self.assertEqual(len(genres.VIZ_IDS), 10)
+        for bad in ("neon", "energetic2", 5, "a b", "__proto__"):
+            with self.assertRaises(ValueError, msg=repr(bad)) as cm:
+                n("ace.simple", {"viz": bad})
+            self.assertIn("viz は energetic, melancholic", str(cm.exception))
+        self.assertNotIn("viz", n("ace.omakase", {"query": "雨の夜"}))                                          # おまかせにはジャンルが無い
 
 
 if __name__ == "__main__":

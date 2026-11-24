@@ -85,6 +85,9 @@ class Handler:
     gpu: bool = True                                                    # GPU を使う(LLM を止めてから ensure する)
 
 
+COMPONENT_NAMES = {"h3": "動画(MiniMax-H3)", "h3image": "画像(MiniMax-H3-Image)", "ace": "音楽(ACE-Step)"}
+
+
 class JobRunner:
     def __init__(self, ctx: Ctx, handlers: dict, step_poll_s: float = 0.3, cpu_slots: int = CPU_SLOTS):
         self.ctx, self.handlers, self.step_poll_s, self.cpu_slots = ctx, handlers, step_poll_s, cpu_slots
@@ -184,6 +187,11 @@ class JobRunner:
         handler = self.handlers.get(kind)
         if handler is None:
             raise ValueError(f"未対応のジョブの種類です: {kind}")
+        comps = getattr(self.ctx.sched, "comps", None)
+        if handler.component and isinstance(comps, dict) and handler.component not in comps:
+            # studio.toml で無効にした部品のジョブは受け付けない(受け付けると、載せる段で KeyError になる)
+            label = COMPONENT_NAMES.get(handler.component, handler.component)
+            raise ValueError(f"{label}の部品は無効になっているため使えません(studio.toml の [components.{handler.component}] の enabled)")
         job = Job(id=uuid.uuid4().hex[:12], tab=tab, kind=kind, params=handler.normalize(kind, params, self.ctx.ledger),
                   lane=handler.component or CPU_LANE)
         self.jobs[job.id] = job

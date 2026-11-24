@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS presets (
     created_at REAL NOT NULL, updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS presets_tab ON presets(tab, created_at);
+CREATE TABLE IF NOT EXISTS genres (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, vibe TEXT NOT NULL, settings_json TEXT NOT NULL, emotions_json TEXT NOT NULL,
+    viz TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL
+);
 """
 MV_FIELDS = ("state", "output_id", "error", "message")     # update_mv_project がそのまま置き換える列
 
@@ -290,3 +294,51 @@ class Ledger:
     def delete_preset(self, pid: str) -> bool:
         with self._lock, self._db:
             return self._db.execute("DELETE FROM presets WHERE id = ?", (pid,)).rowcount > 0
+
+    # ---- ジャンル(音楽タブの自作のジャンル。同梱の 12 は台帳に入れず、songplan.GENRES にある) ----
+
+    @staticmethod
+    def _genre(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["settings"] = json.loads(d.pop("settings_json") or "[]")
+        d["emotions"] = json.loads(d.pop("emotions_json") or "[]")
+        return d
+
+    def create_genre(self, name: str, vibe: str, settings: list, emotions: list, viz: str, description: str = "") -> dict:
+        gid, now = uuid.uuid4().hex[:12], time.time()
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO genres (id, name, vibe, settings_json, emotions_json, viz, description, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (gid, name, vibe, json.dumps(settings, ensure_ascii=False), json.dumps(emotions, ensure_ascii=False), viz, description, now, now))
+        return self.get_genre(gid)
+
+    def get_genre(self, gid: str) -> Optional[dict]:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM genres WHERE id = ?", (gid,)).fetchone()
+        return self._genre(row) if row else None
+
+    def list_genres(self) -> list:
+        """作った順(古いものが先)。"""
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM genres ORDER BY created_at, rowid").fetchall()
+        return [self._genre(r) for r in rows]
+
+    def update_genre(self, gid: str, name: str = None, vibe: str = None, settings: list = None, emotions: list = None,
+                     viz: str = None, description: str = None) -> Optional[dict]:
+        """渡した項目だけを書き換える(updated_at は自動)。無ければ None。"""
+        sets = {"updated_at": time.time()}
+        for key, val in (("name", name), ("vibe", vibe), ("viz", viz), ("description", description)):
+            if val is not None:
+                sets[key] = val
+        for key, val in (("settings_json", settings), ("emotions_json", emotions)):
+            if val is not None:
+                sets[key] = json.dumps(val, ensure_ascii=False)
+        with self._lock, self._db:
+            cur = self._db.execute(f"UPDATE genres SET {', '.join(k + ' = ?' for k in sets)} WHERE id = ?", (*sets.values(), gid))
+            if cur.rowcount == 0:
+                return None
+        return self.get_genre(gid)
+
+    def delete_genre(self, gid: str) -> bool:
+        with self._lock, self._db:
+            return self._db.execute("DELETE FROM genres WHERE id = ?", (gid,)).rowcount > 0

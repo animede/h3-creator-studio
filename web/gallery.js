@@ -93,7 +93,7 @@ function renderHistory() {
 
 // ---- 生成物ビューア ----
 
-// 音楽のカード: スペクトラム(再生中に動く。viz.js)・タイトル(テーマ)・キャプション・プレーヤー・歌詞。色合いは曲のムード、無ければジャンルで決まる
+// 音楽のカード: スペクトラム(再生中に動く。viz.js)・タイトル(テーマ)・キャプション・プレーヤー・歌詞。色合いは、自作のジャンルが持つ雰囲気(viz)、無ければ曲のムード、それも無ければキャプションの言葉、それも無ければジャンルで決まる
 function audioCard(item) {
   const p = item.params || {};
   const box = el("div", "audiocard");
@@ -102,7 +102,7 @@ function audioCard(item) {
   a.src = item.url;
   const head = el("div", "ahead");       // アイコンとタイトルは 1 行に(スペクトラムの高さを確保する)
   head.append(el("div", "aicon", "🎵"), el("div", "atitle", p.theme || item.filename || ""));
-  box.append(vizBox(a, { mood: p.mood, genre: p.genre }), head);
+  box.append(vizBox(a, { viz: p.viz, mood: p.mood, genre: p.genre, caption: p.caption }), head);
   if (p.caption) box.append(el("div", "acap", p.caption));
   box.append(a);
   if (p.lyrics && p.lyrics !== "[Instrumental]") {

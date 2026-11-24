@@ -156,6 +156,37 @@ class LedgerTest(unittest.TestCase):
         self.addCleanup(self.ledger.close)
         self.assertEqual(self.ledger.get_preset(made["id"])["values"], {"seconds": 5})
 
+    def test_genre_crud(self):
+        from unittest import mock
+        with mock.patch("studio.ledger.time.time", side_effect=[100.0, 200.0, 300.0, 400.0]):
+            a = self.ledger.create_genre("和風エレクトロ", "neon shrines", ["a night train", "a lantern bridge"], ["quiet awe"], "cyber", "和楽器とシンセ")
+            b = self.ledger.create_genre("Shoegaze", "walls of guitar", ["a foggy field"], ["hazy longing", "gentle noise"], "mystical")
+            self.ledger.update_genre(a["id"], vibe="changed", emotions=["calm"])
+        self.assertEqual((a["name"], a["vibe"], a["settings"], a["emotions"], a["viz"], a["description"], a["created_at"], a["updated_at"]),
+                         ("和風エレクトロ", "neon shrines", ["a night train", "a lantern bridge"], ["quiet awe"], "cyber", "和楽器とシンセ", 100.0, 100.0))
+        self.assertEqual((b["description"], b["emotions"]), ("", ["hazy longing", "gentle noise"]))                 # 説明は省ける。日本語も英語も、そのまま入る
+        got = self.ledger.get_genre(a["id"])
+        self.assertEqual((got["vibe"], got["emotions"], got["settings"], got["name"], got["created_at"], got["updated_at"]),
+                         ("changed", ["calm"], ["a night train", "a lantern bridge"], "和風エレクトロ", 100.0, 300.0))    # 渡した項目だけ変わる
+        got = self.ledger.update_genre(b["id"], name="Shoegaze2", settings=["x"], viz="dark", description="d")
+        self.assertEqual((got["name"], got["settings"], got["viz"], got["description"], got["vibe"]), ("Shoegaze2", ["x"], "dark", "d", "walls of guitar"))
+        self.assertEqual([g["id"] for g in self.ledger.list_genres()], [a["id"], b["id"]])                         # 作った順
+        self.assertIsNone(self.ledger.update_genre("nope", vibe="x"))
+        self.assertIsNone(self.ledger.get_genre("nope"))
+        self.assertTrue(self.ledger.delete_genre(a["id"]))
+        self.assertFalse(self.ledger.delete_genre(a["id"]))
+        self.assertEqual([g["id"] for g in self.ledger.list_genres()], [b["id"]])
+
+    def test_genre_names_are_unique_and_survive_reopening(self):
+        import sqlite3
+        made = self.ledger.create_genre("A", "v", ["s"], ["e"], "epic")
+        with self.assertRaises(sqlite3.IntegrityError):                       # 重なりの確認は genres.py がするが、台帳も 2 つ目を入れない
+            self.ledger.create_genre("A", "v2", ["s"], ["e"], "epic")
+        self.ledger.close()
+        self.ledger = Ledger(self.root)                                      # 既存の台帳を開き直しても表がある(IF NOT EXISTS)
+        self.addCleanup(self.ledger.close)
+        self.assertEqual(self.ledger.get_genre(made["id"])["vibe"], "v")
+
 
 if __name__ == "__main__":
     unittest.main()

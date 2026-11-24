@@ -4,8 +4,8 @@
 // 元は画面いっぱいの canvas だったので、横長で低いカードに合わせて、スペクトラム・軌道・花火・炎は、寸法を canvas の大きさから決める
 // (マトリックスは、効いていなかった半透明の黒の重ねを省いた)。
 //
-//   attachVisualizer(audio, canvas, { mood, genre, mode })  -> { setMode(m), getMode(), destroy() }
-//   vizBox(audio, { mood, genre })                         -> canvas と表示の選択を入れた枠(音楽のカードに入れる)
+//   attachVisualizer(audio, canvas, { viz, mood, genre, caption, mode })  -> { setMode(m), getMode(), destroy() }
+//   vizBox(audio, { viz, mood, genre, caption })                         -> canvas と表示の選択を入れた枠(音楽のカードに入れる)
 //   detachVisualizers(root)                                -> root の中の分を片付ける(root の中身を入れ替える前に呼ぶ)
 
 const VIZ_MODES = [["spectrum", "スペクトラム"], ["wave", "波形"], ["ring", "リング"], ["particles", "粒子"], ["pulse", "脈動"],
@@ -40,9 +40,39 @@ const GENRE_TO_VIZ = [
   [/hip ?hop|rap|reggaeton|latin/i, "festive"], [/j-?pop|k-?pop|pop|idol/i, "energetic"],
 ];
 
-// 台帳の params(mood, genre)から雰囲気の名前: ムード -> ジャンル -> 既定(energetic)
-function vizThemeId(mood, genre) {
+// キャプション(ACE-Step に渡す音の説明。英語が多いが、日本語もある)の言葉 -> 雰囲気。英語は語頭が合えば当たり(活用・派生も拾う)、日本語は含まれていれば当たり。
+// 当たった語の数が最も多い雰囲気を選び、同数なら下の並びの先(具体的な雰囲気が先で、既定の energetic は最後)。1 つも当たらなければ、ジャンルで決める。
+// 別の意味の語を拾わないよう、fun は funk を、grand は grand piano を、切な は「大切な」を除いてある。g 付きなので、数えるのは String.match で(test では lastIndex が残る)
+const CAPTION_TO_VIZ = [
+  ["melancholic", /\b(?:sad(?:ness|ly)?\b|melanchol|bittersweet|wistful|longing|lonel)|切な[いくさげ]|悲し|寂し|哀愁|孤独|せつな|かなし|さびし|メランコリ/gi],
+  ["healing", /\b(?:calm|gentl|sooth|relax|peace|lo-?fi|chill|ambient)|癒|穏や|安らぎ|静か|落ち着|優し|やさし|おだや|ヒーリング|リラックス/gi],
+  ["epic", /\b(?:epic|grand(?:iose|ly)?\b(?!\s*piano)|heroic|cinematic|orchestr|anthem|intense|dramatic|triumph)|壮大|荘厳|勇壮|エピック|シネマティック|オーケストラ/gi],
+  ["cyber", /\b(?:electro|synth|futuris|cyber|edm\b|techno\b|neon)|電子|サイバー|ネオン|近未来|テクノ|シンセ|エレクトロ/gi],
+  ["romantic", /\b(?:romanti|lov(?:e|ing)|tender|sensual)|恋|愛|ロマンチック|ラブ/gi],
+  ["dark", /\b(?:dark|heavy|gloom|ominous)|暗|闇|ダーク/gi],
+  ["festive", /\b(?:party|festiv|celebrat|danc|playful|fun\b)|祭|楽し|賑やか|たのし|パーティ|ダンス/gi],
+  ["nostalgic", /\b(?:nostalg|retro|vintage|(?:19)?[789]0'?s\b|traditional)|懐かし|レトロ|昭和|[789]0\s*年代|なつかし|ノスタルジ/gi],
+  ["mystical", /\b(?:dream|ethereal|mystic|mysteri|magic|fantas|otherworld)|幻想|神秘|夢|ファンタジー|ミステリアス/gi],
+  ["energetic", /\b(?:upbeat|energ|driving|bright|happy|uplifting|cheer|joy)|元気|明る|軽快|爽やか|げんき|あかる|ハッピー|アップテンポ/gi],
+];
+
+// キャプションの言葉から雰囲気の名前。当たる語が無い(キャプションが無い・文字でない)ときは ""(次の手がかりへ)
+function vizThemeFromCaption(caption) {
+  if (typeof caption !== "string") return "";
+  let best = "", most = 0;
+  for (const [id, re] of CAPTION_TO_VIZ) {
+    const n = (caption.match(re) || []).length;
+    if (n > most) { best = id; most = n; }        // 同数は、先に見た(並びの先の)雰囲気のまま
+  }
+  return best;
+}
+
+// 台帳の params(viz, mood, genre, caption)から雰囲気の名前: viz(自作のジャンルが持つ)-> ムード -> キャプションの言葉 -> ジャンル -> 既定(energetic)
+function vizThemeId(mood, genre, viz, caption) {
+  if (typeof viz === "string" && Object.hasOwn(VIZ_MOOD_THEMES, viz)) return viz;
   if (typeof mood === "string" && Object.hasOwn(MOOD_TO_VIZ, mood)) return MOOD_TO_VIZ[mood];
+  const fromCaption = vizThemeFromCaption(caption);
+  if (fromCaption) return fromCaption;
   for (const [re, id] of GENRE_TO_VIZ) if (re.test(String(genre || ""))) return id;
   return "energetic";
 }
@@ -615,7 +645,7 @@ function detachVisualizers(root) {
 }
 
 // audio の再生に合わせて、canvas にスペクトラムを出す。再生(play)で描画ループを始め、一時停止・終わり・読み直し・タブが隠れたとき・canvas が画面から外れたときに止める。
-// 止まっている間は、静かな 1 コマを出しておく。{ mood, genre } は台帳の params から(色合いが決まる)、mode は VIZ_MODES の値(省略すると、前に選んだもの)。
+// 止まっている間は、静かな 1 コマを出しておく。{ viz, mood, genre, caption } は台帳の params から(色合いが決まる)、mode は VIZ_MODES の値(省略すると、前に選んだもの)。
 function attachVisualizer(audio, canvas, opts = {}) {
   vizSweep();
   if (canvas._viz) canvas._viz.destroy();
@@ -623,7 +653,7 @@ function attachVisualizer(audio, canvas, opts = {}) {
 
   const g2d = canvas.getContext("2d");
   const painter = makeVizPainter();
-  const themeId = vizThemeId(opts.mood, opts.genre);
+  const themeId = vizThemeId(opts.mood, opts.genre, opts.viz, opts.caption);
   painter.setTheme(VIZ_MOOD_THEMES[themeId]);
   let mode = vizIsMode(opts.mode) ? opts.mode : vizLoadMode();
   let shown = null;                 // おまかせのとき、いま出している表示

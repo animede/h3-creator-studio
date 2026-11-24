@@ -8,7 +8,7 @@ import json
 import logging
 import random
 import re
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Mapping, Optional
 
 log = logging.getLogger("studio.songplan")
 
@@ -333,15 +333,43 @@ ANGLES = [
 ]
 
 
-def theme_inspiration(genre: str) -> dict:
-    """ジャンルの世界観と、ランダムな場面・感情・切り口を選ぶ。ジャンル名は部分一致でも引く。"""
+GENRE_NAME_MAX = 40      # ジャンルの名前の長さの上限。これより長いもの(自由に書いた文)は、名前の一部としては探さない
+
+
+def lookup_genre(genre: str, custom: Optional[Mapping] = None) -> tuple:
+    """ジャンルの名前から (定義, 自作か) を探す。名前そのもの(自作 → 同梱。大文字小文字は区別しない)→ 名前の一部(自作 → 同梱)の順で、
+    当たらなければ (DEFAULT_GENRE, False)。custom は自作のジャンル {名前: 定義}(台帳を知らないよう、呼ぶ側が渡す)。
+    長い文(自由に書いたジャンル)は、中に「rock」などが入っていても別のジャンルの種を選ばないよう、名前の一部としては探さない。"""
+    low = (genre or "").strip().lower()
+    pools = ((custom or {}, True), (GENRES, False))
+    for pool, mine in pools:
+        for name, ctx in pool.items():
+            if name.lower() == low:
+                return ctx, mine
+    if low and len(low) <= GENRE_NAME_MAX:
+        for pool, mine in pools:
+            for name, ctx in pool.items():
+                if name.lower() in low or low in name.lower():
+                    return ctx, mine
+    return DEFAULT_GENRE, False
+
+
+def genre_essence(genre: str, custom: Optional[Mapping] = None) -> str:
+    """自作のジャンルの世界観の一行(英語)。同梱のジャンルは LLM が名前から分かり、自由な文は定義が無いので、空(プロンプトに足さない)。"""
+    ctx, mine = lookup_genre(genre or "J-POP", custom)
+    return ctx["vibe"] if mine else ""
+
+
+def theme_inspiration(genre: str, custom: Optional[Mapping] = None) -> dict:
+    """ジャンルの世界観と、ランダムな場面・感情・切り口を選ぶ。ジャンル名は部分一致でも引く(lookup_genre)。
+    essence は自作のジャンルの世界観(genre_essence と同じ。同梱・自由な文は空)。
+    free は、どの定義にも当たらないジャンル(自由に書いた文、知らない名前)。書いた文が様式を言っているので、
+    どのジャンルにも当てはまる既定の世界観・場面・感情(DEFAULT_GENRE)は添えない(添えると、書いた様式から外れたテーマになりやすい)。"""
     key = genre or "J-POP"
-    ctx = GENRES.get(key)
-    if ctx is None:
-        low = key.lower()
-        ctx = next((v for k, v in GENRES.items() if k.lower() in low or low in k.lower()), DEFAULT_GENRE)
-    return {"genre_key": key, "ctx": ctx, "setting": random.choice(ctx["settings"]),
-            "emotion": random.choice(ctx["emotions"]), "angle": random.choice(ANGLES)}
+    ctx, mine = lookup_genre(key, custom)
+    return {"genre_key": key, "ctx": ctx, "essence": ctx["vibe"] if mine else "", "free": ctx is DEFAULT_GENRE,
+            "setting": random.choice(ctx["settings"] or DEFAULT_GENRE["settings"]),
+            "emotion": random.choice(ctx["emotions"] or DEFAULT_GENRE["emotions"]), "angle": random.choice(ANGLES)}
 
 
 # ---- 応答の掃除 ----
@@ -468,31 +496,61 @@ def parse_song_plan(response: str, want_lyrics: bool) -> dict:
 # ---- プランを作る ----
 
 def template_caption(genre: str, mood: str = "", vocal: str = "", instrumental: bool = False) -> str:
-    """LLM を使わないときのキャプション。ACE-Step の thinking が、これを元に詳しく書き広げる。"""
+    """LLM を使わないときのキャプション。ACE-Step の thinking が、これを元に詳しく書き広げる。
+    ジャンルが長い文(自由に書いたもの)や日本語の名前のときは、英語のキャプションに入れられないので「説明どおりの様式」とだけ書く。"""
     kind = "instrumental track" if instrumental else "song"
     tail = "" if instrumental else f" and {vocal or 'a fitting vocal'}"
+    if genre and (len(genre) > GENRE_NAME_MAX or not genre.isascii()):
+        article = "An" if (mood or kind)[0] in "aeiouAEIOU" else "A"
+        return f"{article} {mood + ' ' if mood else ''}{kind} in the described style with a fitting atmosphere{tail}."
     return f"A {mood + ' ' if mood else ''}{genre or 'pop'} {kind} with a fitting atmosphere{tail}."
 
 
+CAPTION_HINT_MAX = 400      # 利用者が書いたキャプションを、テーマ・作詞の参考として LLM に渡すときの長さ(超えれば切る。入力を短く保つ)
+
+
+def caption_context(caption: str, language: str, mood: str = "", what: str = "theme and lyrics") -> list:
+    """利用者が自分で書いたキャプション(ACE-Step に渡す音の説明。英語も日本語もある)を、テーマ・歌詞の参考として LLM に渡す行(無ければ [])。
+    what は、それに沿わせるもの("theme" / "lyrics" / "theme and lyrics")。雰囲気・様式・空気感(言葉選び・情景・感情)に沿わせ、文は写さず、英語の語を歌詞に混ぜない。
+    ムードのチップがあれば、チップが明示でキャプションは補足。AI が作ったキャプションは渡さない(呼ぶ側が、利用者が書いたものだけを渡す)。"""
+    text = " ".join((caption or "").split())[:CAPTION_HINT_MAX].rstrip()
+    if not text or not what:
+        return []
+    leak = "" if (language or "").strip().lower() == "english" else f", and never carry its English words into the {language} {what}"
+    note, wins = ("; the Mood above stays explicit", " If it conflicts with the Mood above, the Mood wins.") if mood else ("", "")
+    return [f'User\'s caption (their own description of the sound{note}): "{text}"',
+            f"Follow the caption's mood, style and atmosphere in the {what}: word choice, imagery, emotional tone.{wins} Do NOT copy or quote it{leak}."]
+
+
 async def make_plan(chat: Chat, genre: str = "J-POP", language: str = "Japanese", mood: str = "", vocal: str = "",
-                    theme: str = "", want_lyrics: bool = True, want_caption: bool = True) -> dict:
+                    theme: str = "", want_lyrics: bool = True, want_caption: bool = True, custom: Optional[Mapping] = None,
+                    user_caption: str = "") -> dict:
     """{"theme", "caption", "lyrics", ...} を作る。歌詞は want_lyrics、キャプションは want_caption のときだけ(要らない項目は空)。
     theme を渡せば、そのテーマで書く。歌詞もキャプションも要らなければ、テーマだけを短い呼び出しで作る。
+    genre は、チップの名前か、自由に書いた文。custom は自作のジャンル {名前: 定義}(あれば、その世界観と場面・感情の種を使う)。
+    user_caption は、利用者が自分で書いたキャプション(AI が作ったものは渡さない)。あれば、AI が書くテーマ・歌詞はその雰囲気に沿う(ムードのチップがあれば、チップが明示)。
 
     出力は THEME: 行、CAPTION: 行、JSON メタ行、歌詞の順。足りなければ 1 回だけ再試行し、
     キャプションだけ足りなければ別の呼び出しで補う。テーマか歌詞が足りなければ SongPlanError。
     """
-    insp = theme_inspiration(genre)
+    insp = theme_inspiration(genre, custom)
     genre_key = insp["genre_key"]
     if not want_lyrics and not want_caption:
-        return {"theme": theme or await _make_theme(chat, insp, language), "caption": "", "lyrics": "",
+        return {"theme": theme or await _make_theme(chat, insp, language, user_caption), "caption": "", "lyrics": "",
                 "recommended_duration": 90, "parts": {}}
-    inspiration = ([f"Theme (write this exact theme on the THEME line): {theme}"] if theme else
-                   [f"Scene inspiration: {insp['setting']}", f"Emotional tone: {insp['emotion']}",
-                    f"Creative approach: {insp['angle']}"])
+    guided = " and ".join(w for w, on in (("theme", not theme), ("lyrics", want_lyrics)) if on)         # AI が書くもの(テーマを渡したときは、テーマは書かない)
+    hint = caption_context(user_caption, language, mood, guided)
+    seeds = []
+    if not insp["free"]:
+        seeds.append(f"Scene inspiration: {insp['setting']}")
+        if not hint:                  # 書いたキャプションがあれば、感情はそれに沿わせる(ジャンルの感情の種が食い違わないよう、添えない)
+            seeds.append(f"Emotional tone: {insp['emotion']}")
+    inspiration = ([f"Theme (write this exact theme on the THEME line): {theme}"] if theme else [*seeds, f"Creative approach: {insp['angle']}"])
+    essence = [f"Genre essence: {insp['essence']}"] if insp["essence"] else []        # 自作のジャンルは、名前だけでは LLM に伝わらないので世界観も渡す
     vocal_part = f'"{vocal}"' if vocal else ("a fitting vocal description" if want_lyrics else "no vocals")
-    parts = ["Create a complete song plan in ONE response.", f"Genre: {genre_key}", f"Style hints: {genre_key}", *inspiration,
-             f"Language of theme and lyrics: {language}", f"Mood: {mood or 'match the theme'}",
+    mood_line = f"Mood: {mood}" if mood else ("Mood: as described by the user's caption below" if hint else "Mood: match the theme")
+    parts = ["Create a complete song plan in ONE response.", f"Genre: {genre_key}", f"Style hints: {genre_key}", *essence, *inspiration,
+             f"Language of theme and lyrics: {language}", mood_line, *hint,
              f"Vocal style: {vocal or 'match the genre'}", "", "OUTPUT FORMAT — exactly these blocks, in this order, nothing else:",
              f"THEME: <one short, vivid, concrete song theme in {language}, 3-10 words, no quotes, no parentheses; avoid overused "
              "words: rain, sunset, cherry blossoms, twilight, starlight, moonlight, silhouette, horizon, nostalgia>"]
@@ -520,15 +578,16 @@ async def make_plan(chat: Chat, genre: str = "J-POP", language: str = "Japanese"
     else:
         raise SongPlanError("LLM が曲のプラン(テーマと歌詞)をうまく作れませんでした。もう一度試すか、歌詞を自分で入力してください")
     if want_caption and not plan["caption"]:
-        plan["caption"] = await _fallback_caption(chat, genre_key, plan["theme"], mood, vocal, not want_lyrics)
+        plan["caption"] = await _fallback_caption(chat, genre_key, plan["theme"], mood, vocal, not want_lyrics, insp["essence"])
     elif want_caption and vocal and vocal.lower() not in plan["caption"].lower():
         plan["caption"] = plan["caption"].rstrip(".") + f", with a {vocal}."
     return plan
 
 
-async def _fallback_caption(chat: Chat, genre: str, theme: str, mood: str, vocal: str, instrumental: bool) -> str:
+async def _fallback_caption(chat: Chat, genre: str, theme: str, mood: str, vocal: str, instrumental: bool, essence: str = "") -> str:
     """プランの応答にキャプションが無かったとき、キャプションだけを別に頼む。それも駄目ならひな形。"""
-    user = (f"Genre: {genre}\nTheme: {theme}\nMood: {mood or 'match the theme'}\n"
+    head = f"Genre: {genre}\n" + (f"Genre essence: {essence}\n" if essence else "")
+    user = (f"{head}Theme: {theme}\nMood: {mood or 'match the theme'}\n"
             f"Vocal: {'no vocals' if instrumental else vocal or 'a fitting vocal'}\nWrite the caption.")
     try:
         caption = clean_caption(await chat(CAPTION_GENERATE_SYSTEM_PROMPT, user, max_tokens=150, temperature=0.7))
@@ -537,11 +596,18 @@ async def _fallback_caption(chat: Chat, genre: str, theme: str, mood: str, vocal
     return caption or template_caption(genre, mood, vocal, instrumental)
 
 
-async def _make_theme(chat: Chat, insp: dict, language: str) -> str:
-    """ジャンルの世界観と、ランダムな場面・感情・切り口から、テーマだけを作る(短い呼び出し)。"""
-    user = (f"Genre: {insp['genre_key']}\nGenre essence: {insp['ctx']['vibe']}\nScene inspiration: {insp['setting']}\n"
-            f"Emotional tone: {insp['emotion']}\nCreative approach: {insp['angle']}\n"
-            f"Write the theme in {language}.\n\nGenerate one original {insp['genre_key']} song theme:")
+async def _make_theme(chat: Chat, insp: dict, language: str, user_caption: str = "") -> str:
+    """ジャンルの世界観と、ランダムな場面・感情・切り口から、テーマだけを作る(短い呼び出し)。
+    user_caption(利用者が書いたキャプション)があれば、その雰囲気に沿わせる(ランダムな感情の種は、食い違わないよう添えない)。"""
+    hint = "".join(line + "\n" for line in caption_context(user_caption, language, what="theme"))
+    if insp["free"]:        # 定義の無いジャンル(自由に書いた文など): それがそのまま様式の説明(既定の世界観・場面・感情は添えない)
+        user = (f"Genre: {insp['genre_key']}\nCreative approach: {insp['angle']}\n{hint}"
+                f"Write the theme in {language}.\n\nGenerate one original song theme in the style described above:")
+    else:
+        emotion = "" if hint else f"Emotional tone: {insp['emotion']}\n"
+        user = (f"Genre: {insp['genre_key']}\nGenre essence: {insp['ctx']['vibe']}\nScene inspiration: {insp['setting']}\n"
+                f"{emotion}Creative approach: {insp['angle']}\n{hint}"
+                f"Write the theme in {language}.\n\nGenerate one original {insp['genre_key']} song theme:")
     theme = clean_theme(await chat(THEME_SYSTEM_PROMPT, user, max_tokens=60, temperature=1.2))
     if not theme:
         raise SongPlanError("LLM がテーマを作れませんでした。もう一度試してください")
@@ -549,11 +615,13 @@ async def _make_theme(chat: Chat, insp: dict, language: str) -> str:
 
 
 async def make_caption(chat: Chat, genre: str, theme: str = "", lyrics: str = "", mood: str = "", vocal: str = "",
-                       language: str = "Japanese", thinking: bool = True, instrumental: bool = False) -> str:
+                       language: str = "Japanese", thinking: bool = True, instrumental: bool = False,
+                       custom: Optional[Mapping] = None) -> str:
     """キャプションだけを作る(Easy Music の generate_caption)。thinking なら 1 文(ACE の LM が書き広げる)、
-    そうでなければ 3〜5 文(楽器・リズムまで書く)。"""
+    そうでなければ 3〜5 文(楽器・リズムまで書く)。genre は、チップの名前か、自由に書いた文。custom は自作のジャンル {名前: 定義}。"""
     vocal = "" if instrumental else vocal
-    content = [f"Theme/Concept: {theme}" if theme else "", f"Genre/Style: {genre}" if genre else "",
+    essence = genre_essence(genre, custom)
+    content = [f"Theme/Concept: {theme}" if theme else "", f"Genre/Style: {genre}" if genre else "", f"Genre essence: {essence}" if essence else "",
                f"Mood: {mood}" if mood else "", "Vocal type: none (instrumental, no vocals)" if instrumental else
                (f"Vocal type: {vocal}" if vocal else "")]
     if lyrics and not instrumental:

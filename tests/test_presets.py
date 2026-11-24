@@ -90,7 +90,9 @@ class BuiltinFilesTest(unittest.TestCase):
                 "match_audio": isinstance(v.get("match_audio"), bool), "vocal_lock": isinstance(v.get("vocal_lock"), bool), "seed": seed_ok}
         elif tab == "music":
             checks = {
-                "mode": v.get("mode") in self.modes("mu-modes"), "genre": v.get("genre") in self.music_list("GENRES"),
+                "mode": v.get("mode") in self.modes("mu-modes"),
+                "genre_mode": v.get("genre_mode") in ("chip", "free"),                            # チップか、自由に書いた文か(無ければチップ。古いプリセットも)
+                "genre": v.get("genre") in self.music_list("GENRES") if v.get("genre_mode") != "free" else self.text_ok(v.get("genre"), "mu-free"),
                 "language": v.get("language") in opt["mu-lang"], "duration": str(v.get("duration")) in opt["mu-dur"],
                 "instrumental": isinstance(v.get("instrumental"), bool),
                 "query": self.text_ok(v.get("query"), "mu-query"), "theme": self.text_ok(v.get("theme"), "mu-theme"),
@@ -136,13 +138,16 @@ class BuiltinFilesTest(unittest.TestCase):
         self.assertEqual(self.problems("video", {"resolution": "768x448"}), ["resolution"])        # 動画の解像度の選択肢に 768×448 は無い
         self.assertEqual(self.problems("image", {"width": 1000, "steps": 4, "bogus": 1}), ["width", "steps", "bogus"])
         self.assertEqual(self.problems("music", {"genre": "Lo-fi", "duration": 45}), ["genre", "duration"])
+        self.assertEqual(self.problems("music", {"genre_mode": "free", "genre": "90 年代のシティポップに三味線を混ぜた曲"}), [])      # 自由に書いた文は、チップの名前でなくてよい
+        self.assertEqual(self.problems("music", {"genre_mode": "free", "genre": "あ" * 201}), ["genre"])
+        self.assertEqual(self.problems("music", {"genre_mode": "tag", "genre": "Rock"}), ["genre_mode"])
         self.assertEqual(self.problems("mv", {"min_s": 9, "max_s": 6}), ["min_s > max_s"])
 
     def test_each_tab_script_saves_and_applies_every_field(self):
         """プリセットの項目の一覧(この検査の field 一覧)が、各タブの getPresetValues と applyPresetValues の両方に出てくる。"""
         fields = {"image": ("mode", "prompt", "width", "height", "steps", "seed"),
                   "video": ("mode", "prompt", "resolution", "seconds", "match_audio", "vocal_lock", "seed"),
-                  "music": ("mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
+                  "music": ("mode", "genre_mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
                             "vocal", "model", "steps", "batch_size", "thinking", "seed", "negative_prompt", "shift", "infer_method"),
                   "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed")}
         files = {"image": "image.js", "video": "video.js", "music": "music.js", "mv": "mv.js"}

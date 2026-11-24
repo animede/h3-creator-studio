@@ -136,8 +136,37 @@
         <span class="note omk-note">ACE-Step の LM が、キャプション・歌詞・BPM・調まで決めます(管理役の LLM は使いません)</span>
       </div>
       <div id="mu-simple-box">
-        <div class="fld"><span class="fl">ジャンル</span>
-          <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル"></div></div>
+        <div class="fld"><span class="fl">ジャンル <small>(✦ は自分で作ったジャンル)</small></span>
+          <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル"></div>
+          <div class="gform" id="mu-genre-add" hidden>
+            <div class="inline"><input id="mu-genre-name" type="text" maxlength="40" placeholder="ジャンルの名前(例: 和風エレクトロ)" aria-label="ジャンルの名前">
+              <button id="mu-genre-add-go" type="button" class="mini" title="AI がジャンルの世界観・場面・感情を作って、チップに加えます">追加</button>
+              <button id="mu-genre-add-cancel" type="button" class="mini x" title="やめる">✕</button></div>
+            <input id="mu-genre-desc" type="text" maxlength="200" placeholder="一言の説明(任意。例: 和楽器とシンセを混ぜた、夜の電子音楽)" aria-label="ジャンルの説明">
+          </div>
+          <div class="gform" id="mu-genre-free" hidden>
+            <textarea id="mu-free" class="sm" rows="2" maxlength="200" placeholder="例: 90 年代のシティポップに三味線を混ぜた、夏の終わりの切ない曲" aria-label="ジャンルを自由に書く"></textarea>
+            <div class="gbtns"><button id="mu-free-save" type="button" class="mini" title="この文に名前を付けて、自分のジャンルのチップとして保存します(AI が定義を作ります)">ジャンルとして保存</button>
+              <span class="note">ジャンルの代わりに、この文を使います(テーマ・歌詞・キャプションを作るときも)</span></div>
+            <div class="inline" id="mu-free-name-row" hidden>
+              <input id="mu-free-name" type="text" maxlength="40" placeholder="短い名前(例: 夏の終わりシティポップ)" aria-label="ジャンルの名前">
+              <button id="mu-free-name-go" type="button" class="mini">保存</button>
+              <button id="mu-free-name-cancel" type="button" class="mini x" title="やめる">✕</button></div>
+          </div>
+          <details class="adv" id="mu-genre-edit" hidden>
+            <summary>ジャンルの中身 <small id="mu-gedit-title"></small></summary>
+            <div class="adv-body">
+              <label class="fld"><span class="fl">名前</span><input id="mu-gedit-name" type="text" maxlength="40"></label>
+              <label class="fld"><span class="fl">世界観 <small>(英語の一行。テーマの種になります)</small></span><input id="mu-gedit-vibe" type="text" maxlength="200"></label>
+              <label class="fld"><span class="fl">場面 <small>(1 行に 1 つ。英語)</small></span><textarea id="mu-gedit-settings" class="sm" rows="6"></textarea></label>
+              <label class="fld"><span class="fl">感情 <small>(1 行に 1 つ。英語)</small></span><textarea id="mu-gedit-emotions" class="sm" rows="5"></textarea></label>
+              <label class="fld"><span class="fl">スペクトラムの雰囲気 <small>(曲のカードの色)</small></span><select id="mu-gedit-viz"></select></label>
+              <div class="gbtns"><button id="mu-gedit-save" type="button" class="mini">保存</button><button id="mu-gedit-del" type="button" class="mini">削除</button>
+                <span class="note">保存すると、次の曲から使われます</span></div>
+            </div>
+          </details>
+          <div class="uploading" id="mu-genre-busy" hidden><span class="spin"></span>ジャンルを作っています…(CPU では 10〜60 秒かかります)</div>
+          <div class="gnote" id="mu-genre-note" hidden></div></div>
       </div>
       <div class="fld two">
         <label><span class="fl">歌の言語</span>
@@ -152,18 +181,18 @@
       <label class="chk fld"><input id="mu-inst" type="checkbox">楽器のみ(歌なし)</label>
       <div id="mu-simple-box2">
         <div class="fld"><div class="lhead"><span class="fl">テーマ / シナリオ <small>(空ならおまかせ)</small></span>
-          <span class="mk"><button id="mu-theme-go" type="button" class="mini" title="ジャンルから、曲のテーマを AI が考えます">✨ テーマを作る</button>
+          <span class="mk"><button id="mu-theme-go" type="button" class="mini" title="ジャンル(と、自分で書いたキャプションの雰囲気)から、曲のテーマを AI が考えます">✨ テーマを作る</button>
             <button id="mu-theme-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
           <textarea id="mu-theme" class="sm" rows="2" maxlength="200" placeholder="例: 夜行バスの窓から見える朝焼け"></textarea></div>
         <div class="fld"><div class="lhead"><span class="fl">歌詞 <small>(空なら AI 作詞。[Verse] [Chorus] などのタグが使えます)</small></span>
-          <span class="mk"><button id="mu-lyrics-go" type="button" class="mini" title="テーマとジャンルから AI が作詞します(テーマが空ならテーマも作ります)">✍️ 作詞する</button>
+          <span class="mk"><button id="mu-lyrics-go" type="button" class="mini" title="テーマとジャンル(と、自分で書いたキャプションの雰囲気)から AI が作詞します(テーマが空ならテーマも作ります)">✍️ 作詞する</button>
             <button id="mu-lyrics-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
           <textarea id="mu-lyrics" rows="6" maxlength="6000" placeholder="自分の歌詞を使うときだけ書きます"></textarea>
           <span class="note" id="mu-lyrics-note"></span></div>
         <div class="fld"><div class="lhead"><span class="fl">キャプション <small>(音の説明。英語)</small></span>
           <span class="mk"><button id="mu-caption-go" type="button" class="mini" title="テーマ・歌詞・ムード・ボーカルから、AI がキャプションを書きます">🎵 キャプションを作る</button>
             <button id="mu-caption-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
-          <textarea id="mu-caption" class="sm" rows="3" maxlength="1000" placeholder="空なら、生成のときに AI が作ります"></textarea>
+          <textarea id="mu-caption" class="sm" rows="3" maxlength="1000" placeholder="空なら、生成のときに AI が作ります" title="自分で書くと、AI が作るテーマ・歌詞もこの雰囲気に沿います"></textarea>
           <label class="chk"><input id="mu-caption-auto" type="checkbox" checked>キャプション自動(空なら生成時に AI が作る)</label></div>
         <div class="fld"><span class="fl">ムード <small>(任意。もう一度押すと外れます)</small></span>
           <div class="chips wrap" id="mu-moods" role="group" aria-label="ムード"></div></div>
