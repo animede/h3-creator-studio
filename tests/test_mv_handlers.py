@@ -732,6 +732,22 @@ class SceneTest(HandlerBase):
         self.assertAlmostEqual(progress, 0.5)
         self.assertEqual(self.h3.downloads, ["/outputs/out_1.mp4"])
 
+    async def test_image_mv_sends_only_the_image_with_seconds_and_mute(self):
+        """歌わせない制作(lipsync=False): ボーカルを切り出さず、画像だけを参照に、シーンの尺を seconds で、mute で頼む。vocals.wav が無くてもよい。"""
+        spy = FfmpegSpy()
+        spy.patch(self)
+        scene_ctx_project(self, aspect="16:9", quality="fast", lipsync=False)
+        (self.work() / "vocals.wav").unlink()
+        job = self.job("mv.scene", scene=2)
+        await mvh.run_scene(job, self.ctx())
+        self.assertEqual([c for c in self.audio.calls if c[0] == "cut"], [])
+        (post,) = self.h3.posts
+        fields = {n: b.decode() for n, f, ct, b in post if not f}
+        self.assertEqual(fields, {"prompt": "prompt 2", "width": "768", "height": "448", "seed": "1002", "seconds": "6", "mute": "true"})   # vocal_lock は送らない
+        self.assertEqual([(n, f) for n, f, ct, b in post if f], [("references", "girl.png")])
+        self.assertEqual(self.proj()["scenes"][1]["status"], "done")
+        self.assertTrue((self.work() / "scene_002.mp4").is_file())
+
     async def test_clip_is_finished_to_the_exact_frame_count(self):
         spy = FfmpegSpy()
         spy.patch(self)

@@ -209,16 +209,20 @@ FRAME_SHOT_PREFIX = {
 
 # ---- H3 公式の Ref2VA 6 セクション形式 ----
 
-def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, character: dict, frame: str = "landscape") -> str:
+def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, character: dict, frame: str = "landscape",
+                                     lipsync: bool = True) -> str:
     """1 つのクリップを、MiniMax H3 公式の Ref2VA の 6 セクション形式に包む。
 
     参照画像は「キーフレーム」ではなく再利用する被写体なので、公式の指針どおり <Picture 1> の単独の保持項目にはせず、
     <Subject 1> の中で引く。1 シーン = H3 への 1 リクエストなので、タイムラインは常にタイムスタンプなしの [Shot 1] が 1 つ。
     歌詞の文字は書かない(Vocal Lock が <Audio 1> から歌の中身を移す。推測した歌詞は公式の指針に反する)。
+    lipsync=False(歌わせないイメージ MV)は、H3 に音声を渡さないので <Audio 1> が無い形(画像だけの参照生成)。音声は結合で曲に差し替える。
     """
     subject = subject_definition(character)
     identity = _single_line(identity_instruction(character))
     direction = _single_line(visual_direction)
+    if not lipsync:
+        return _format_image_mv_prompt(subject, identity, direction, frame)
     singing = float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO
 
     if singing:
@@ -263,10 +267,45 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
     )
 
 
-def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict) -> str:
-    """LLM の後で、人物の同一性と口の見えを守る規則を、必ず当てる。"""
+def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: str) -> str:
+    """歌わせない(イメージ MV)クリップの 6 セクション形式。参照は <Picture 1> だけで、音声の参照は無い。
+    H3 が作る音声は使わない(mute で頼み、結合で曲に差し替える)ので、音の欄は「声も歌も無い」とだけ書く。"""
+    return (
+        "subject_definitions:\n"
+        f"<Subject 1> is the exact character shown in <Picture 1>: {subject}. "
+        "The same identity, facial structure, hair, clothing, and visual style must remain unchanged.\n\n"
+        "summary:\n"
+        "[reference generation] The target video is a single continuous music-video shot in which "
+        "<Subject 1> appears in the scene without singing or speaking; the music is added later in editing.\n\n"
+        "retention_analysis:\n"
+        "<Subject 1> (appears in [Shot 1]): fully_preserved - the referenced character's identity, "
+        f"face, hair, clothing, and visual style are retained exactly: {identity}.\n\n"
+        "detailed_description:\n"
+        "The target video uses a coherent cinematic music-video style while fully preserving the "
+        f"reference character. It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
+        f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{scrub_overlay_text(direction)} "
+        "<Subject 1> (S1) does not sing or speak; the mouth stays naturally closed and relaxed. No text overlay.\n\n"
+        "overall_soundscape:\n"
+        "No dialogue, singing, or vocals; only quiet natural ambience of the location.\n\n"
+        "non_diegetic_music:\n"
+        "N/A"
+    )
+
+
+# 歌わせない(イメージ MV)の、全シーン共通の頭書き
+IMAGE_MV_PREFIX = ("The character does not sing or mouth words in this shot and keeps a naturally closed, relaxed mouth; "
+                   "the music is added later, so the performance is in the eyes, posture, movement and the scene itself. ")
+
+
+def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict, lipsync: bool = True) -> str:
+    """LLM の後で、人物の同一性と口の見えを守る規則を、必ず当てる。
+    lipsync=False(イメージ MV)は、歌の割合を見ずに、どのシーンも「歌わない・口は閉じたまま」にする(口を動かすのは音声の参照そのもので、
+    音声を渡さなければプロンプトの閉口の指示が効く。mv_studio_V3 の 2026-08-26 の実機プローブ)。"""
     identity = identity_instruction(character)
     prompt = str(raw_prompt or "").strip()
+    if not lipsync:
+        return ("Use the exact same person from the reference image; preserve facial identity, hair, outfit, "
+                f"and visual style unchanged: {identity}. " + IMAGE_MV_PREFIX + prompt)
     if float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO:
         # 口の動きを確かめられなくする構図の指示を取り除く
         replacements = {
@@ -337,16 +376,31 @@ def _brief(scene: dict) -> dict:
     return out
 
 
+# シーンごとの演出の依頼のうち、口の扱い。歌わせる(リップシンク)か、歌わせない(イメージ MV)かで入れ替える
+MOUTH_RULE_LIPSYNC = (
+    "For vocal_ratio >= 0.35 use a medium close-up, keep the entire "
+    "face and mouth visible, and explicitly request phoneme-level lip articulation synchronized to "
+    "the supplied vocal. Never use a wide shot, rear view, eye-only shot or obscured mouth for a "
+    "singing scene. For lower vocal_ratio explicitly describe a closed relaxed mouth. ")
+MOUTH_RULE_IMAGE_MV = (
+    "This is an image music video: the character NEVER sings, speaks or mouths words on camera, in any scene, "
+    "whatever vocal_ratio says (the music is added later in editing). Describe cinematic scenes instead: walking, "
+    "gazing, turning, small gestures, light and weather, the place around the character. Any shot size is fine, "
+    "including wide shots and views from behind. Explicitly describe a closed relaxed mouth. ")
+
+
 async def generate_scenario(chat: Chat, scenes: list, concept: str, character: dict, *, frame: str = "landscape",
-                            background_text: str = "auto", on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
+                            background_text: str = "auto", lipsync: bool = True,
+                            on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
     """全体の構成(overview)を 1 回、シーンごとの演出を BATCH_SIZE 個ずつ頼み、整形した最終プロンプトを返す。
     番号と個数が合わなければ 1 回だけ頼み直し、それでも合わなければ ScenarioError。
-    on_progress(終わったシーン数, 全シーン数)は batch が終わるごとに呼ぶ。"""
+    on_progress(終わったシーン数, 全シーン数)は batch が終わるごとに呼ぶ。lipsync=False は歌わせないイメージ MV(口の規則と最終の形が変わる)。"""
     briefs = [_brief(s) for s in scenes]
     facts = json.dumps(character, ensure_ascii=False)
     try:
         overview = await scenario_request(chat, (
-            "Create a coherent MV treatment. Do not change scene times.\n"
+            ("Create a coherent MV treatment. Do not change scene times.\n" if lipsync else
+             "Create a coherent treatment for an image music video in which the character never sings on camera. Do not change scene times.\n") +
             f"USER_CONCEPT: {_single_line(concept) or '(derive from the music and character)'}\n"
             f"CHARACTER_REFERENCE_FACTS: {facts}\n"
             "The reference character's identity, hair, face, outfit and style are immutable. "
@@ -370,10 +424,7 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             "Write one production prompt per fixed scene. Do not add/remove scenes or change times. "
             "Prompts must be English and suitable for MiniMax-H3 ref2va. Keep exactly one character. "
             "Never describe hair color, hairstyle, face, clothing, age or art style differently from "
-            "CHARACTER_REFERENCE_FACTS. For vocal_ratio >= 0.35 use a medium close-up, keep the entire "
-            "face and mouth visible, and explicitly request phoneme-level lip articulation synchronized to "
-            "the supplied vocal. Never use a wide shot, rear view, eye-only shot or obscured mouth for a "
-            "singing scene. For lower vocal_ratio explicitly describe a closed relaxed mouth. "
+            "CHARACTER_REFERENCE_FACTS. " + (MOUTH_RULE_LIPSYNC if lipsync else MOUTH_RULE_IMAGE_MV) +
             "Use restrained camera motion and avoid cuts inside a generated clip. " + NO_OVERLAY_RULE + "\n"
             + FRAME_LLM_GUIDANCE.get(frame, "")
             + BACKGROUND_TEXT_GUIDANCE.get(background_text, "")
@@ -398,10 +449,11 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             raise ScenarioError(f"シーンの番号が合いません: 期待 {expected}、LLM の答え {actual}")
         previous = dict(result[-1])          # 整形前の項目(下で prompt を書き換えても、次の batch に渡す内容は変わらない)
         for scene, item in zip(batch, result, strict=True):
-            direction = enforce_reference_and_lipsync(scene, str(item.get("prompt") or ""), character)
-            item["prompt"] = format_h3_official_ref2va_prompt(scene, direction, character, frame=frame)
+            direction = enforce_reference_and_lipsync(scene, str(item.get("prompt") or ""), character, lipsync=lipsync)
+            item["prompt"] = format_h3_official_ref2va_prompt(scene, direction, character, frame=frame, lipsync=lipsync)
         outputs.extend(result)
         if on_progress is not None:
             on_progress(len(outputs), len(scenes))
-    return {"prompt_format": "MiniMax H3 official Ref2VA six-section format", "character": character,
+    return {"prompt_format": "MiniMax H3 official Ref2VA six-section format" + ("" if lipsync else " (image MV, no audio reference)"),
+            "character": character,
             "overview": overview, "scenes": outputs}

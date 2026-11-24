@@ -53,7 +53,7 @@ RESTART_MESSAGE = "管理役の再起動で一時停止しました"
 # 全体の進みの重み(シーンの生成が、ほぼ全部)。シーンは尺に比例して分ける
 WEIGHT_ANALYZE, WEIGHT_SCRIPT, WEIGHT_SCENES, WEIGHT_ASSEMBLE = 0.04, 0.03, 0.90, 0.03
 INPUT_KEYS = ("song_id", "image_id", "character", "concept", "aspect", "quality", "width", "height", "min_s", "max_s", "seed",
-              "background_text")
+              "background_text", "lipsync")
 
 
 # ---- 作業フォルダ・ファイル名 ----
@@ -157,6 +157,10 @@ def resolve_params(ledger, params: dict) -> dict:
     background_text = str(params.get("background_text") or "auto")
     if background_text not in ("auto", "large", "none"):
         raise ValueError("background_text は auto / large / none のいずれかです")
+    # 歌わせる(リップシンク。ボーカルを H3 に渡して口を合わせる)か、歌わせない(イメージ MV。音声を渡さず、画像とプロンプトだけで作る)か
+    lipsync = params.get("lipsync", True)
+    if not isinstance(lipsync, bool):
+        raise ValueError("lipsync は true / false で指定してください")
     typed_character, image_prompt = _clip(str(params.get("character") or ""), CHARACTER_MAX), _clip(str(image["params"].get("prompt") or ""), CHARACTER_MAX)
     typed_concept, song_concept = _clip(str(params.get("concept") or ""), CONCEPT_MAX), concept_from_song(song["params"])
     character, concept = typed_character or image_prompt, typed_concept or song_concept
@@ -164,7 +168,7 @@ def resolve_params(ledger, params: dict) -> dict:
     title = _clip(str(song["params"].get("theme") or Path(song.get("filename") or "").stem or "MV"), 60) or "MV"
     return {"song_id": song["id"], "image_id": image["id"], "character": character, "concept": concept, "aspect": aspect,
             "quality": quality, "width": width, "height": height, "min_s": min_s, "max_s": max_s, "seed": seed,
-            "background_text": background_text, "title": title,
+            "background_text": background_text, "lipsync": lipsync, "title": title,
             "character_source": "typed" if typed_character else "image" if image_prompt else "",
             "concept_source": "typed" if typed_concept else "song" if song_concept else "", "listen": "" if concept else "pending"}
 
@@ -360,7 +364,7 @@ class Director:
         return {"id": proj["id"], "title": params.get("title") or "MV", "state": proj["state"], "message": self._message(proj, job),
                 "error": proj["error"], "created_at": proj["created_at"], "updated_at": proj["updated_at"],
                 "aspect": params.get("aspect"), "quality": params.get("quality"), "width": params.get("width"),
-                "height": params.get("height"), "scenes": len(proj["scenes"]),
+                "height": params.get("height"), "lipsync": params.get("lipsync", True), "scenes": len(proj["scenes"]),
                 "done": sum(1 for s in proj["scenes"] if s["status"] == "done"), "progress": self._progress(proj, job),
                 "job_id": job.id if job else None, "output": out, "thumb_url": "/outputs/" + thumb if thumb else None}
 

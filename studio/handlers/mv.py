@@ -6,7 +6,9 @@
   listen   : CPU(管理役の LLM)。曲の 30 秒を最大 2 か所聞いて(Gemma の音声入力)言語・ジャンル・雰囲気・楽器・ボーカル・テンポを読み取り、曲の内容・世界観の案を書く。
              曲の台帳に情報が無く、「曲の内容」が空の制作が、分析の後に通る(BPM は分析のもの)。GPU も ACE-Step も使わない
   script   : CPU(管理役の LLM)。人物の説明が空なら、まず画像を見て作る。そのうえで、シーンごとの演出を、H3 公式の Ref2VA 6 セクション形式で書く
-  scene    : H3。そのシーンのボーカルを切り出し、キャラクター画像と一緒に Ref2VA + Vocal Lock で生成 → ちょうどの尺のクリップに整える
+  scene    : H3。そのシーンのボーカルを切り出し、キャラクター画像と一緒に Ref2VA + Vocal Lock で生成 → ちょうどの尺のクリップに整える。
+             歌わせない制作(params.lipsync = False、イメージ MV)は音声を渡さず、画像だけを参照に seconds(シーンの尺)と mute で頼む
+             (口を動かすのは音声の参照そのもので、音声が無ければプロンプトの閉口が効く。mv_studio_V3 の 2026-08-26 の実機プローブ)
   assemble : CPU。クリップをつなぎ、元の曲に差し替えた MP4 を作ってギャラリーに載せる
 作業のファイルは outputs/mv/<制作の ID>/ に置く(song.wav・vocals.wav・scene_NNN.mp4 など)。
 """
@@ -219,7 +221,7 @@ async def _script(job: Job, ctx: Ctx) -> None:
         job.message = f"演出を書いています 0 / {len(scenes)} シーン"
         result = await mvscript.generate_scenario(
             ctx.llm.chat, scenes, p.get("concept") or "", character, frame=mvscript.frame_kind(p["width"], p["height"]),
-            background_text=p.get("background_text") or "auto", on_progress=on_progress)
+            background_text=p.get("background_text") or "auto", lipsync=bool(p.get("lipsync", True)), on_progress=on_progress)
     except LlmError as e:
         raise JobFailed(e.message) from e
     except mvscript.ScenarioError as e:
@@ -246,21 +248,31 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
         raise JobFailed("このシーンの演出がまだありません(演出の作成からやり直してください)")
     tag = f"シーン {index} / {len(scenes)}"
     work = work_dir(ctx.outputs_dir, pid)
+    lipsync = bool(p.get("lipsync", True))
     vocals, raw, clip, thumb = work / "vocals.wav", work / f"scene_{index:03d}_raw.mp4", work / scene_clip_name(index), work / scene_thumb_name(index)
-    if not vocals.is_file():
+    if lipsync and not vocals.is_file():
         raise JobFailed("分離したボーカルが見つかりません(分析からやり直してください)")
     started = time.monotonic()
-    job.progress, job.message = 0.0, f"{tag}: ボーカルを切り出しています"
-    try:
-        wav = await mv_audio.cut(vocals, scene["start"], scene["end"], work / scene_vocals_name(index), rate=H3_AUDIO_RATE, channels=1,
-                                 pad_to=H3_MIN_AUDIO_S)
-    except mv_audio.MvAudioError as e:
-        raise JobFailed(e.message, e.log_tail) from e
-    if job.cancel_requested:
-        raise JobCancelled()
-    # 参照は、キャラクター画像(<Picture 1>)、そのシーンのボーカル(<Audio 1>)の順。秒数は送らない(= 音声の長さ)
-    files = await asyncio.to_thread(lambda: [h3._load_file(ctx, "references", p["image_id"], "キャラクター画像"), h3._file_part("references", wav)])
-    data = {"prompt": scene["prompt"], "width": str(p["width"]), "height": str(p["height"]), "vocal_lock": "true"}
+    data = {"prompt": scene["prompt"], "width": str(p["width"]), "height": str(p["height"])}
+    if lipsync:
+        job.progress, job.message = 0.0, f"{tag}: ボーカルを切り出しています"
+        try:
+            wav = await mv_audio.cut(vocals, scene["start"], scene["end"], work / scene_vocals_name(index), rate=H3_AUDIO_RATE, channels=1,
+                                     pad_to=H3_MIN_AUDIO_S)
+        except mv_audio.MvAudioError as e:
+            raise JobFailed(e.message, e.log_tail) from e
+        if job.cancel_requested:
+            raise JobCancelled()
+        # 参照は、キャラクター画像(<Picture 1>)、そのシーンのボーカル(<Audio 1>)の順。秒数は送らない(= 音声の長さ)
+        files = await asyncio.to_thread(lambda: [h3._load_file(ctx, "references", p["image_id"], "キャラクター画像"), h3._file_part("references", wav)])
+        data["vocal_lock"] = "true"
+    else:
+        # 歌わせない: 参照はキャラクター画像だけ。音声が無いと H3 は尺を決められないので、シーンの尺を seconds で送る(H3 が 17n+5 コマに丸めて短く
+        # 返した分は、下の tpad で足す)。H3 が作る音声は使わない(結合で曲に差し替える)ので mute
+        job.progress, job.message = 0.0, f"{tag}: 準備しています"
+        files = await asyncio.to_thread(lambda: [h3._load_file(ctx, "references", p["image_id"], "キャラクター画像")])
+        data["seconds"] = f"{max(H3_MIN_AUDIO_S, float(scene['duration'])):g}"
+        data["mute"] = "true"
     if scene.get("seed") is not None:
         data["seed"] = str(scene["seed"])
     try:

@@ -108,7 +108,8 @@ class BuiltinFilesTest(unittest.TestCase):
             checks = {
                 "character": self.text_ok(v.get("character"), "mv-char"), "concept": self.text_ok(v.get("concept"), "mv-concept"),
                 "aspect": v.get("aspect") in opt["mv-aspect"], "quality": v.get("quality") in opt["mv-quality"],
-                "min_s": self.number_ok(v.get("min_s"), "mv-min"), "max_s": self.number_ok(v.get("max_s"), "mv-max"), "seed": seed_ok}
+                "min_s": self.number_ok(v.get("min_s"), "mv-min"), "max_s": self.number_ok(v.get("max_s"), "mv-max"), "seed": seed_ok,
+                "lipsync": isinstance(v.get("lipsync"), bool)}
         # 書かれている項目だけを確かめる(プリセットは、一部の項目だけを持ってよい)
         bad = [k for k in v if k in checks and not checks[k]] + [k for k in v if k not in checks]
         if tab == "mv" and "min_s" in v and "max_s" in v and v["min_s"] > v["max_s"]:
@@ -149,7 +150,7 @@ class BuiltinFilesTest(unittest.TestCase):
                   "video": ("mode", "prompt", "resolution", "seconds", "match_audio", "vocal_lock", "seed"),
                   "music": ("mode", "genre_mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
                             "vocal", "model", "steps", "batch_size", "thinking", "seed", "negative_prompt", "shift", "infer_method"),
-                  "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed")}
+                  "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed", "lipsync")}
         files = {"image": "image.js", "video": "video.js", "music": "music.js", "mv": "mv.js"}
         for tab, keys in fields.items():
             src = (WEB / files[tab]).read_text(encoding="utf-8")

@@ -258,6 +258,10 @@
   mvp("aspect").onchange = renderSize;
   mvp("quality").onchange = () => { qualityTouched = true; renderSize(); };
   mvp("random").onchange = () => { mvp("seed").disabled = mvp("random").checked; };
+  // 歌わせないときだけ、「曲の内容」に出したくないものを書く案内を出す(プリセットの反映は change を飛ばすので、ここで追従する)
+  const renderLipsyncNote = () => { mvp("lipsync-note").hidden = mvp("lipsync").value !== "false"; };
+  mvp("lipsync").onchange = renderLipsyncNote;
+  renderLipsyncNote();
 
   // 既定の画質: VRAM が 16GiB 未満なら高速、それ以上なら標準(利用者が選んだ後は触らない)
   async function pickQuality() {
@@ -292,7 +296,8 @@
     updateGo();
     try {
       const js = await api("/api/mv", "POST", { song_id: song.id, image_id: image.id, character: mvp("char").value.trim(), concept: mvp("concept").value.trim(),
-        aspect: mvp("aspect").value, quality: mvp("quality").value, min_s: min, max_s: max, seed, background_text: mvp("bgtext").value });
+        aspect: mvp("aspect").value, quality: mvp("quality").value, min_s: min, max_s: max, seed, background_text: mvp("bgtext").value,
+        lipsync: mvp("lipsync").value !== "false" });
       await select(js.id);
     } catch (e) {
       showMsg(`MV を始められませんでした: ${e.message || e}`);
@@ -310,7 +315,8 @@
 
   function getPresetValues() {
     return { character: typed(mvp("char")), concept: typed(mvp("concept")), aspect: mvp("aspect").value, quality: mvp("quality").value,
-      min_s: +mvp("min").value, max_s: +mvp("max").value, seed: presetGetSeed(mvp("seed"), mvp("random")), background_text: mvp("bgtext").value };
+      min_s: +mvp("min").value, max_s: +mvp("max").value, seed: presetGetSeed(mvp("seed"), mvp("random")), background_text: mvp("bgtext").value,
+      lipsync: mvp("lipsync").value !== "false" };
   }
 
   // 書かれている項目だけ反映する(知らない項目は無視)。人物の説明・曲の内容は空でなければ置き換える(自分で書いた扱いなので、曲や画像を落としても消えない)
@@ -319,6 +325,7 @@
     for (const [key, id] of [["character", "char"], ["concept", "concept"]]) if (typeof v[key] === "string" && v[key].trim()) presetSet(mvp(id), v[key]);
     for (const [key, label] of [["aspect", "投稿先"], ["quality", "画質"]]) if (key in v && !presetSet(mvp(key), v[key])) skipped.push(label);      // change で寸法の表示が合う
     if ("background_text" in v && !presetSet(mvp("bgtext"), v.background_text)) skipped.push("背景の文字");
+    presetSet(mvp("lipsync"), String(v.lipsync !== false));      // 無ければ歌わせる(歌わせ方はプリセットが必ず決める。イメージ MV の後に別のを選んだら戻る)
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(mvp(id), v[key]);
     if ("seed" in v) presetSetSeed(mvp("seed"), mvp("random"), v.seed);
     return skipped;
@@ -611,8 +618,8 @@
     ui.bar.classList.toggle("ok", v.state === "completed");
     ui.bar.title = `${p}%`;
     const a = v.analysis, pr = v.params;
-    ui.meta.textContent = [`${p}%`, `${pr.width}×${pr.height}(${pr.aspect})`, v.scenes.length ? `${v.scenes.filter((s) => s.status === "done").length} / ${v.scenes.length} シーン` : "",
-      a ? `曲 ${fmtDur(a.duration)}${a.bpm ? ` · BPM ${Math.round(a.bpm)}` : ""}${a.has_vocals === false ? " · 歌なし(口は閉じたまま)" : ""}` : "",
+    ui.meta.textContent = [`${p}%`, `${pr.width}×${pr.height}(${pr.aspect})`, pr.lipsync === false ? "歌わせない(イメージ MV)" : "", v.scenes.length ? `${v.scenes.filter((s) => s.status === "done").length} / ${v.scenes.length} シーン` : "",
+      a ? `曲 ${fmtDur(a.duration)}${a.bpm ? ` · BPM ${Math.round(a.bpm)}` : ""}${a.has_vocals === false && pr.lipsync !== false ? " · 歌なし(口は閉じたまま)" : ""}` : "",
       live ? `経過 ${fmtElapsed(v.created_at)}` : ""].filter(Boolean).join("  ");
     renderAuto(v);
     if (v.error) { ui.err.hidden = false; ui.err.textContent = `失敗: ${v.error}`; }

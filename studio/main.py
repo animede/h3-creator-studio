@@ -390,6 +390,7 @@ class MvIn(BaseModel):
     max_s: float = 10.0
     seed: Optional[int] = None
     background_text: str = "auto"  # 背景の文字の扱い: auto / large / none(画面には出さない)
+    lipsync: bool = True           # 歌わせる(リップシンク)か、歌わせない(イメージ MV。H3 に音声を渡さない)か
 
 
 class MvRetryIn(BaseModel):

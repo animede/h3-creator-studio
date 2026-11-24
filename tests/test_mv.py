@@ -790,7 +790,7 @@ class ViewTest(MvBase):
         v = self.director.view(pid)
         self.assertEqual(v["params"], {"song_id": self.song["id"], "image_id": self.image["id"], "character": "a girl", "concept": "dawn",
                                        "aspect": "9:16", "quality": "standard", "width": 576, "height": 1024, "min_s": 5.0, "max_s": 10.0,
-                                       "seed": 5, "background_text": "auto"})
+                                       "seed": 5, "background_text": "auto", "lipsync": True})
         self.assertEqual((v["state"], v["error"], v["title"], v["output"], v["assembled"]), ("generating", None, "夜明けの駅", None, False))
         self.assertEqual(v["analysis"], {"duration": 21.0, "bpm": 120.0, "has_vocals": True, "scenes": 3})
         self.assertEqual(v["script"], {"title": "T"})
@@ -898,7 +898,7 @@ class ResolveParamsTest(MvBase):
             ({"aspect": "3:2"}, "投稿先は 16:9 / 9:16 / 1:1 / 4:5 のいずれかです"), ({"quality": "ultra"}, "画質は fast / standard / high のいずれかです"),
             ({"min_s": 4}, "シーンの長さは 5〜10 秒"), ({"max_s": 11}, "シーンの長さは 5〜10 秒"), ({"min_s": "abc"}, "シーンの最短 は数字"),
             ({"min_s": 9, "max_s": 6}, "シーンの最短は最長より長くできません"), ({"seed": "abc"}, "seed は整数"),
-            ({"background_text": "huge"}, "background_text は auto / large / none"),
+            ({"background_text": "huge"}, "background_text は auto / large / none"), ({"lipsync": "yes"}, "lipsync は true / false"),
         ]
         for extra, word in cases:
             with self.assertRaises(ValueError, msg=str(extra)) as cm:

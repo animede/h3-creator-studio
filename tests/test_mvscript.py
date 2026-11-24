@@ -132,6 +132,41 @@ class EnforceTest(unittest.TestCase):
         self.assertTrue(out.endswith("Wide shot of the empty stage"))
 
 
+class ImageMvTest(unittest.IsolatedAsyncioTestCase):
+    """歌わせない(lipsync=False): 歌の割合を見ず、音声の参照が無い形にする。"""
+
+    def test_enforce_ignores_vocal_ratio_and_keeps_wide_shots(self):
+        out = M.enforce_reference_and_lipsync(scene(1, 0.9), "Wide shot from behind on the beach", {"subject": "a girl"}, lipsync=False)
+        self.assertTrue(out.startswith("Use the exact same person from the reference image;"))
+        self.assertIn("does not sing or mouth words", out)
+        self.assertTrue(out.endswith("Wide shot from behind on the beach"))          # 口を隠す構図の書き換えはしない
+        self.assertNotIn("articulate every phoneme", out)
+
+    def test_format_has_no_audio_reference(self):
+        text = M.format_h3_official_ref2va_prompt(scene(1, 0.9), "She walks along the shore.", {"subject": "a girl"}, frame="portrait", lipsync=False)
+        self.assertNotIn("<Audio 1>", text)
+        self.assertNotIn("Vocal", text)
+        for section in ("subject_definitions:", "summary:", "retention_analysis:", "detailed_description:", "overall_soundscape:", "non_diegetic_music:"):
+            self.assertIn(section, text)
+        self.assertIn("[reference generation] ", text)
+        self.assertIn("without singing or speaking", text)
+        self.assertIn("Vertical frame composition", text)
+        self.assertIn("She walks along the shore <Subject 1> (S1) does not sing", text)      # 末尾の . は _single_line が落とす(歌わせる形と同じ)
+        self.assertIn("No dialogue, singing, or vocals", text)
+
+    async def test_generate_scenario_tells_the_llm_not_to_sing(self):
+        chat = FakeChat([OVERVIEW, items([1, 2])])
+        result = await M.generate_scenario(chat, [scene(1, 0.9), scene(2, 0.1)], "", {}, lipsync=False)
+        self.assertIn("image music video in which the character never sings on camera", chat.calls[0]["user"])
+        batch = chat.calls[1]["user"]
+        self.assertIn("NEVER sings, speaks or mouths words", batch)
+        self.assertNotIn("phoneme-level lip articulation", batch)
+        self.assertIn("image MV, no audio reference", result["prompt_format"])
+        for it in result["scenes"]:
+            self.assertNotIn("<Audio 1>", it["prompt"])
+            self.assertIn("does not sing or speak", it["prompt"])
+
+
 class ScenarioRequestTest(unittest.IsolatedAsyncioTestCase):
     async def test_valid_json_is_one_call(self):
         chat = FakeChat(['```json\n{"a": 1}\n```'])

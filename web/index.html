@@ -32,7 +32,7 @@
   <button class="tab active" data-tab="image" role="tab">画像</button>
   <button class="tab" data-tab="video" role="tab">動画</button>
   <button class="tab" data-tab="music" role="tab">音楽</button>
-  <button class="tab" data-tab="mv" role="tab">MV(リップシンク)</button>
+  <button class="tab" data-tab="mv" role="tab">MV</button>
 </nav>
 
 <main class="workspace" id="workspace" data-tab="image">
@@ -266,6 +266,11 @@
             <div class="li-note">曲の一部を聞いて読み取った、おおまかな内容です(聞き間違えることがあります)。歌詞は聞き取っていません</div>
           </div>
         </details></div>
+      <label class="fld"><span class="fl">歌わせ方</span>
+        <select id="mv-lipsync" title="歌わせる: シーンのボーカルを H3 に渡して口を合わせます。歌わせない: 音声を渡さず、歌わないイメージ映像(いわゆるイメージ PV)にします。曲は結合で付きます">
+          <option value="true">歌わせる(リップシンク MV)</option><option value="false">歌わせない(イメージ MV)</option></select>
+        <span class="note" id="mv-lipsync-note" hidden>口は動きませんが、演出はマイクやステージなど「歌う場面」を選ぶことがあります。景色や日常だけの映像にしたいときは、「曲の内容」に
+          <b>「マイクやステージは出さない。歌う場面は無い」</b>のように、出したくないものを書いてください(演出を書く LLM に、そのまま渡ります)</span></label>
       <div class="fld two">
         <label><span class="fl">投稿先</span>
           <select id="mv-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
