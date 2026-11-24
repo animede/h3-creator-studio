@@ -45,6 +45,7 @@ SEED_MOD = 2_147_483_647
 
 RUNNING = ("analyzing", "scripting", "generating", "assembling")
 STATES = (*RUNNING, "paused", "completed", "failed", "cancelled")
+FINISHED = ("completed", "cancelled")           # 終わった制作。これ以外(一時停止・失敗も)は続きがあるので、曲と画像を使い続ける
 STAGE_STATE = {"mv.analyze": "analyzing", "mv.script": "scripting", "mv.scene": "generating", "mv.assemble": "assembling"}
 STAGE_LABEL = {"mv.analyze": "曲の分析", "mv.script": "演出の作成", "mv.scene": "シーンの生成", "mv.assemble": "結合"}
 RESTART_MESSAGE = "管理役の再起動で一時停止しました"
@@ -295,6 +296,11 @@ class Director:
         else:
             self._active.pop(pid, None)
         await asyncio.to_thread(shutil.rmtree, work_dir(self.outputs_dir, pid), True)
+
+    def output_ids(self, pid: str) -> list:
+        """この制作の MV(動画)の生成物の ID(新しい順)。結合し直すたびに残る前の版も含む(生成物の params.project_id がこの制作のもの)。制作が無ければ LookupError。"""
+        self._get(pid)
+        return [o["id"] for o in self.ledger.list_outputs(limit=100000) if o["params"].get("project_id") == pid]
 
     # ---- 見せる ----
 

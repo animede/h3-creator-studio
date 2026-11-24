@@ -79,11 +79,14 @@ function addRef(item) {
 }
 
 studio.actions.image = (item) => (item.kind === "image" ? [{ label: "参照に使う", run: () => { setTab("image"); setMode("edit"); addRef(item); } }] : []);
-studio.on.items.push(() => {       // ギャラリーから消された画像は参照から外す
+// 消された画像は参照から外す(消したとき(studio-deleted)と、一覧を読み直したらギャラリーに無かったとき)
+function dropGone(gone) {
   const before = refs.length;
-  for (let i = refs.length - 1; i >= 0; i--) if (!byId(refs[i].id)) refs.splice(i, 1);
+  for (let i = refs.length - 1; i >= 0; i--) if (gone(refs[i].id)) refs.splice(i, 1);
   if (refs.length !== before) renderRefs();
-});
+}
+studio.on.items.push(() => dropGone((id) => !byId(id)));
+document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
 async function uploadAndAdd(files) {
   try {

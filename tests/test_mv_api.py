@@ -67,9 +67,9 @@ class MvApiTest(unittest.TestCase):
         self.song = self.add("audio", "song.mp3", {"theme": "夜明けの駅", "genre": "Ballad"})
         self.image = self.add("image", "girl.png", {"prompt": "a girl with silver hair"})
         self.runner = StubRunner()
-        self.saved = getattr(main.app.state, "mv", None)
-        self.addCleanup(lambda: setattr(main.app.state, "mv", self.saved))
-        main.app.state.mv = mv.Director(self.runner, self.ledger, self.root)
+        self.saved = {k: getattr(main.app.state, k, None) for k in ("mv", "ledger", "jobs")}
+        self.addCleanup(lambda: [setattr(main.app.state, k, v) for k, v in self.saved.items()])
+        main.app.state.mv, main.app.state.ledger, main.app.state.jobs = mv.Director(self.runner, self.ledger, self.root), self.ledger, self.runner
         self.client = TestClient(main.app)
 
     def add(self, kind, name, params):
@@ -259,6 +259,68 @@ class MvApiTest(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/mv/{pid}").status_code, 404)
         self.assertIsNotNone(self.ledger.get_output(out_id))
         self.assertEqual(self.client.delete(f"/api/mv/{pid}").status_code, 404)
+
+    def add_mv(self, pid: str) -> dict:
+        """結合し直す前の版など、その制作の MV(動画)をもう 1 本ギャラリーに足す(生成物の params.project_id がその制作)。"""
+        dest = self.root / "video" / f"mv_{pid}_old.mp4"
+        dest.parent.mkdir(exist_ok=True)
+        dest.write_bytes(b"mp4")
+        return self.ledger.add_output("video", dest, "mv", None, dest.name, {"project_id": pid}, width=768, height=448, duration_s=21.0)
+
+    def test_delete_keeps_every_mv_unless_asked(self):
+        for query in ("", "?with_output=0", "?with_output=false"):
+            pid = self.with_scenes(state="completed")
+            current, old = self.ledger.get_mv_project(pid)["output_id"], self.add_mv(pid)
+            r = self.client.delete(f"/api/mv/{pid}{query}")
+            self.assertEqual((r.status_code, r.json()), (200, {"ok": True}), query)
+            self.assertIsNone(self.ledger.get_mv_project(pid))
+            for oid in (current, old["id"]):
+                self.assertTrue(self.ledger.abs_path(self.ledger.get_output(oid)["path"]).is_file(), query)
+
+    def test_delete_with_output_also_removes_every_mv_of_the_project(self):
+        pid = self.with_scenes(state="completed")
+        other = self.with_scenes(state="completed")                          # 別の制作の MV は残す
+        current, other_out = (self.ledger.get_mv_project(p)["output_id"] for p in (pid, other))
+        old = self.add_mv(pid)                                                # 結合し直す前の版
+        paths = [self.ledger.abs_path(self.ledger.get_output(i)["path"]) for i in (current, old["id"])]
+        (self.root / "mv" / pid).mkdir(parents=True, exist_ok=True)
+        (self.root / "mv" / pid / "scene_001.mp4").write_bytes(b"clip")
+        r = self.client.delete(f"/api/mv/{pid}?with_output=1")
+        self.assertEqual(r.status_code, 200, r.text)
+        js = r.json()
+        self.assertEqual((js["ok"], js["missing"], js["refused"]), (True, [], []))
+        self.assertCountEqual(js["deleted"], [current, old["id"]])
+        self.assertIsNone(self.ledger.get_mv_project(pid))
+        self.assertFalse((self.root / "mv" / pid).exists())
+        self.assertFalse(any(p.exists() for p in paths))
+        self.assertTrue(all(self.ledger.get_output(i) is None for i in (current, old["id"])))
+        self.assertIsNotNone(self.ledger.get_mv_project(other))
+        self.assertTrue(self.ledger.get_output(other_out) and self.ledger.abs_path(self.ledger.get_output(other_out)["path"]).is_file())
+
+    def test_delete_with_output_keeps_a_mv_that_a_job_is_still_using(self):
+        pid = self.with_scenes(state="completed")
+        current = self.ledger.get_mv_project(pid)["output_id"]
+        old = self.add_mv(pid)
+        self.runner.jobs["ref"] = types.SimpleNamespace(id="ref", status="queued", params={"prompt": "x", "references": [old["id"]]})      # 前の版を動画の参照に使う、順番待ちのジョブ
+        js = self.client.delete(f"/api/mv/{pid}?with_output=1").json()
+        self.assertEqual(js, {"ok": True, "deleted": [current], "missing": [], "refused": [{"id": old["id"], "reason": "実行中・順番待ちのジョブで使っています"}]})
+        self.assertIsNone(self.ledger.get_mv_project(pid))                    # 制作は消える
+        self.assertIsNone(self.ledger.get_output(current))
+        self.assertTrue(self.ledger.abs_path(self.ledger.get_output(old["id"])["path"]).is_file())
+
+    def test_delete_with_output_when_there_is_no_mv_yet_or_no_such_project(self):
+        pid = self.create()["id"]
+        self.assertEqual(self.client.delete(f"/api/mv/{pid}?with_output=1").json(), {"ok": True, "deleted": [], "missing": [], "refused": []})
+        kept = self.with_scenes(state="completed")
+        self.assertEqual(self.client.delete("/api/mv/nope?with_output=1").status_code, 404)
+        self.assertIsNotNone(self.ledger.get_output(self.ledger.get_mv_project(kept)["output_id"]))      # 断ったら何も消さない
+
+    def test_delete_while_running_cancels_the_job_instead_of_refusing(self):
+        pid = self.create()["id"]                                             # 分析中(ジョブは順番待ち)
+        r = self.client.delete(f"/api/mv/{pid}")
+        self.assertEqual((r.status_code, r.json()), (200, {"ok": True}))
+        self.assertEqual(self.runner.cancelled, ["job1"])
+        self.assertEqual(self.client.get(f"/api/mv/{pid}").status_code, 404)
 
     def test_jobs_api_does_not_take_mv_jobs(self):
         """MV のジョブは Director が入れる。/api/jobs の tab に mv は増やしていない(そのまま 422)。"""

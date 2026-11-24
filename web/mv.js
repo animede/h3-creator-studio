@@ -124,10 +124,14 @@
   wireDrop(mvp("song"), { zone: mvp("song-fld"), active, msg: showMsg, onItem: setSong, onFiles: (files) => upload(files, mvp("song"), "audio", setSong) });
   wireDrop(mvp("image"), { zone: mvp("image-fld"), active, msg: showMsg, onItem: setImage, onFiles: (files) => upload(files, mvp("image"), "image", setImage) });
 
-  studio.on.items.push(() => {       // ギャラリーから消されたものは入力欄から外す
-    if (song && !byId(song.id)) { song = null; renderSong(); }
-    if (image && !byId(image.id)) { image = null; renderImage(); }
-  });
+  // 消された曲・画像は入力欄から外す。自動で入れた説明の文(曲の内容・人物の説明)も、自分で書き直していなければ外す
+  // (消したとき(studio-deleted)と、一覧を読み直したらギャラリーに無かったとき)
+  function dropGone(gone) {
+    if (song && gone(song.id)) { song = null; fill(mvp("concept"), ""); renderSong(); }
+    if (image && gone(image.id)) { image = null; fill(mvp("char"), ""); renderImage(); }
+  }
+  studio.on.items.push(() => dropGone((id) => !byId(id)));
+  document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
   // ---- 入力: 投稿先・画質・シード ----
 
@@ -259,12 +263,46 @@
     schedule();
   }
 
-  async function remove(id, title) {
-    if (!confirm(`「${title}」の制作を削除しますか?\nシーンのクリップも消えます。完成した MV はギャラリーに残ります。`)) return;
-    try { await api(`/api/mv/${id}`, "DELETE"); } catch (e) { alert(`削除できませんでした: ${e.message || e}`); return; }
-    if (current === id) { current = null; view = null; }
+  // 確認の小窓(index.html の <dialog>)。mvs は消す制作にある完成した MV の数で、あれば「完成した MV も削除する」を選べる。やめたら null、続けるなら { out: MV も消すか }
+  function askDelete(text, mvs) {
+    const d = mvp("del");
+    mvp("del-text").textContent = text;
+    mvp("del-out").checked = false;
+    mvp("del-out-fld").hidden = !mvs;
+    mvp("del-out-text").textContent = `完成した MV も削除する(${mvs} 本)`;
+    d.returnValue = "";
+    return new Promise((resolve) => {
+      d.addEventListener("close", () => resolve(d.returnValue === "ok" ? { out: mvp("del-out").checked } : null), { once: true });      // Esc で閉じても close になる
+      d.showModal();
+    });
+  }
+
+  // その制作の完成した MV(動画)の ID。サーバが消す対象と同じで、結合し直す前の版(生成物の params.project_id がその制作のもの)も入る
+  const mvOutputs = (p) => [...studio.items.filter((i) => i.params && i.params.project_id === p.id).map((i) => i.id), ...(p.output ? [p.output.id] : [])];
+
+  // 制作を消す(1 件でも、まとめてでも)。完成した MV は、選べばいっしょに消す。消したら true、やめたら false
+  async function removeProjects(ids) {
+    const list = ids.map((id) => projects.find((p) => p.id === id) || { id, title: "MV" });
+    const what = list.length === 1 ? `「${list[0].title}」の制作` : `${list.length} 件の制作`;
+    const ask = await askDelete(`${what}を削除しますか?\nシーンのクリップも消えます。`, new Set(list.flatMap(mvOutputs)).size);
+    if (!ask) return false;
+    const gone = [], refused = [], failed = [];
+    for (const p of list) {
+      try {
+        const js = await api(`/api/mv/${p.id}${ask.out ? "?with_output=1" : ""}`, "DELETE");
+        gone.push(...(js.deleted || []), ...(js.missing || []));
+        refused.push(...(js.refused || []));
+      } catch (e) { failed.push(`${p.title}: ${e.message || e}`); }
+    }
+    if (list.some((p) => p.id === current)) { current = null; view = null; }
     await refresh();
+    if (gone.length) await forget(gone);
     schedule();
+    const notes = [];
+    if (failed.length) notes.push(`${failed.length} 件の制作は削除できませんでした。\n${failed.join("\n")}`);
+    if (refused.length) notes.push(refusedText(refused, "使っているものがあるので、完成した MV の一部は残しました。"));
+    if (notes.length) alert(notes.join("\n\n"));
+    return true;
   }
 
   // ---- 右上: いまの制作 ----
@@ -304,7 +342,7 @@
       resume: button("再開", () => act(`/api/mv/${v.id}/resume`), "できているところから続けます"),
       cancel: button("中止", () => act(`/api/mv/${v.id}/cancel`), "走っている仕事を止めます(あとで再開できます)"),
       reassemble: button("結合し直す", () => act(`/api/mv/${v.id}/reassemble`), "いまのクリップをつなぎ直して、新しい MV を作ります"),
-      remove: button("削除", () => remove(v.id, ui.title || "MV"), "この制作とクリップを消します(完成した MV はギャラリーに残ります)"),
+      remove: button("削除", () => removeProjects([v.id]), "この制作とクリップを消します(完成した MV も消すかは、確認で選べます)"),
     };
     const head = el("div", "mvhead");
     const title = el("div", "mvtitle");
@@ -420,7 +458,6 @@
     const v = view;
     if ((v ? v.id : null) !== ui.id) buildProject(v);
     if (!v) return;
-    ui.title = v.title;
     ui.name.textContent = v.title;
     ui.badge.className = "badge " + v.state;
     ui.badge.textContent = STATE_LABEL[v.state] || v.state;
@@ -482,11 +519,12 @@
     }
     t.append(el("span", "tbadge top", p.title));
     t.append(el("span", "tbadge state", `${STATE_LABEL[p.state] || p.state}${ACTIVE.includes(p.state) ? ` ${pct(p.progress)}%` : ""}`));
-    t.classList.toggle("sel", p.id === current);
+    t.classList.toggle("sel", !studio.select.on && p.id === current);
+    if (studio.select.on) { pickable(t, p.id); return t; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
     t.onclick = () => select(p.id);
     const x = el("button", "tdel", "×");
     x.title = "削除";
-    x.onclick = (e) => { e.stopPropagation(); remove(p.id, p.title); };
+    x.onclick = (e) => { e.stopPropagation(); removeProjects([p.id]); };
     t.append(x);
     if (p.output) makeDraggable(t, p.output.id);      // 完成した MV は、ふつうの動画として他のタブへ落とせる
     return t;
@@ -501,8 +539,9 @@
     if (!force && sig === cardsSig) return;
     cardsSig = sig;
     grid.replaceChildren();
-    if (!projects.length) { grid.append(el("div", "placeholder", "作った MV(制作)がここに並びます")); return; }
+    if (!projects.length) grid.append(el("div", "placeholder", "作った MV(制作)がここに並びます"));
     for (const p of projects) grid.append(projectNode(p));
+    renderSelectBar();       // 選んでいた制作が消えていたら、数を合わせる
   }
 
   // 生成物ビューアと履歴を、この画面で自前に描く(gallery.js の studio.own)。ギャラリーで MV を選んだら、それを作った制作を開く
@@ -512,6 +551,8 @@
       const pid = item.params && item.params.project_id;
       if (pid && projects.some((p) => p.id === pid)) select(pid);
     },
+    ids: () => projects.map((p) => p.id),
+    remove: removeProjects,
   };
 
   studio.on.tab.push((tab) => {

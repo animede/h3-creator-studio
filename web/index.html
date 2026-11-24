@@ -253,13 +253,15 @@
     <div class="viewer" id="viewer"><div class="placeholder">まだ生成物がありません</div></div>
     <div class="vmeta" id="vmeta" hidden>
       <span class="vname" id="vname"></span><span class="vinfo" id="vinfo"></span>
-      <span class="vbtns"><a id="vsave" class="btn" download>保存</a><span id="vacts"></span></span>
+      <span class="vbtns"><a id="vsave" class="btn" download>保存</a><button id="vdel" type="button" title="この生成物を削除します(ファイルも消え、元に戻せません)">削除</button><span id="vacts"></span></span>
     </div>
     <div class="mvproj" id="mv-project"></div>
   </section>
 
   <section class="panel history" id="history" aria-label="履歴">
-    <div class="phead"><h2>履歴</h2><button id="to-gallery">ギャラリー</button></div>
+    <div class="phead"><h2>履歴</h2>
+      <span class="selbar" hidden><span class="selcount"></span><button class="selall" type="button">すべて選択</button><button class="seldel" type="button">削除</button><button class="selend" type="button">やめる</button></span>
+      <span class="pbtns"><button class="seltoggle" type="button" title="サムネイルを選んで、まとめて削除します">選択</button><button id="to-gallery">ギャラリー</button></span></div>
     <div class="thumbs" id="hist-grid"></div>
   </section>
 
@@ -269,11 +271,20 @@
         <button class="chip active" data-kind="all">全て</button><button class="chip" data-kind="image">画像</button>
         <button class="chip" data-kind="video">動画</button><button class="chip" data-kind="audio">音楽</button>
       </div>
-      <button id="from-gallery">戻る</button>
+      <span class="selbar" hidden><span class="selcount"></span><button class="selall" type="button">すべて選択</button><button class="seldel" type="button">削除</button><button class="selend" type="button">やめる</button></span>
+      <span class="pbtns"><button class="seltoggle" type="button" title="サムネイルを選んで、まとめて削除します">選択</button><button id="from-gallery">戻る</button></span>
     </div>
     <div class="thumbs big" id="gal-grid"></div>
   </section>
 </main>
+<dialog id="mv-del">
+  <form method="dialog">
+    <div class="dtext" id="mv-del-text"></div>
+    <div class="fld" id="mv-del-out-fld"><label class="chk"><input id="mv-del-out" type="checkbox"><span id="mv-del-out-text"></span></label>
+      <span class="note">チェックしないと、完成した MV はギャラリーに残ります</span></div>
+    <div class="actions"><button value="ok" class="primary">削除</button><button value="cancel" autofocus>やめる</button></div>
+  </form>
+</dialog>
 <script src="app.js"></script>
 <script src="gallery.js"></script>
 <script src="dnd.js"></script>

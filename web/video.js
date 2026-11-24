@@ -152,12 +152,15 @@
 
   wireDrop(vd("refs"), { zone: vd("refs-fld"), active: () => studio.tab === "video" && hasRefs(), msg: showMsg, onItem: addRef, onFiles: uploadRefs });
 
-  studio.on.items.push(() => {       // ギャラリーから消されたものは入力欄から外す
+  // 消されたものは入力欄から外す(消したとき(studio-deleted)と、一覧を読み直したらギャラリーに無かったとき)
+  function dropGone(gone) {
     let changed = false;
-    for (let i = refs.length - 1; i >= 0; i--) if (!byId(refs[i].id)) { refs.splice(i, 1); changed = true; }
-    for (const w of ["first", "last"]) if (frames[w] && !byId(frames[w].id)) { frames[w] = null; changed = true; }
+    for (let i = refs.length - 1; i >= 0; i--) if (gone(refs[i].id)) { refs.splice(i, 1); changed = true; }
+    for (const w of ["first", "last"]) if (frames[w] && gone(frames[w].id)) { frames[w] = null; changed = true; }
     if (changed) render();
-  });
+  }
+  studio.on.items.push(() => dropGone((id) => !byId(id)));
+  document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
   // 生成物ビューアのボタン
   studio.actions.video = (item) => [

@@ -15,7 +15,7 @@ from typing import Any, Literal, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import mv_audio, presets, procman
 from .components import ComponentNotInstalled, all_specs
@@ -23,10 +23,10 @@ from .config import REPO_ROOT, settings
 from .enhance import EnhanceError, enhance_prompt
 from .gpu import GpuMonitor
 from .handlers import HANDLERS
-from .jobs import Ctx, JobRunner
+from .jobs import TERMINAL, Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
-from .mv import Director
+from .mv import FINISHED, Director
 from .presets import PresetError
 from .scheduler import Scheduler
 from .handlers import ace as ace_handler
@@ -405,11 +405,13 @@ async def api_mv_retry_scene(pid: str, index: int, body: Optional[MvRetryIn] = N
 
 
 @app.delete("/api/mv/{pid}")
-async def api_mv_delete(pid: str):
-    """制作を消す(作業フォルダごと)。ギャラリーの最終の MV は残る。"""
+async def api_mv_delete(pid: str, with_output: bool = False):
+    """制作を消す(作業フォルダごと。走っていれば、ジョブを中止して)。ギャラリーの最終の MV は残る。
+    with_output=1 なら、その制作の MV(結合し直す前の版も)もギャラリーから消す。まだ要るものは消さず、結果の refused に理由を入れる。"""
     with _mv_errors():
+        ids = app.state.mv.output_ids(pid) if with_output else []
         await app.state.mv.delete(pid)
-    return {"ok": True}
+    return {"ok": True, **(await asyncio.to_thread(_delete_outputs, ids) if with_output else {})}
 
 
 # ---- プリセット(各タブの入力欄の値に名前を付けたもの) ----
@@ -500,9 +502,73 @@ def api_gallery(kind: str = "all", tab: str = None, limit: int = 200):
     return [_public(r) for r in recs]
 
 
+JOB_IN_USE = "実行中・順番待ちのジョブで使っています"
+MV_IN_USE = "MV の制作(一時停止中など)で使っています。先に制作を削除してください"
+DELETE_MAX = 500          # 一度に消せる数(画面のギャラリーが読む数)
+
+
+def _strings(value):
+    """params の中の文字列の値(入れ子のリスト・辞書の中も)。"""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _strings(v)
+
+
+def _in_use(ids) -> dict:
+    """ids のうち、まだ要る生成物の ID -> 消せない理由。順番待ち・準備中・実行中のジョブが params で使っているもの(references・first_image・
+    last_image など。入れ子の中も見る)と、続きのある MV の制作(完成・中止以外)が曲・画像に使っているもの。"""
+    ids, busy = set(ids), {}
+    for job in list(app.state.jobs.jobs.values()):
+        if job.status not in TERMINAL:
+            for s in _strings(job.params):
+                if s in ids:
+                    busy.setdefault(s, JOB_IN_USE)
+    for proj in app.state.ledger.list_mv_projects(limit=100000):
+        if proj["state"] not in FINISHED:
+            for key in ("song_id", "image_id"):
+                if proj["params"].get(key) in ids:
+                    busy.setdefault(proj["params"][key], MV_IN_USE)
+    return busy
+
+
+def _delete_outputs(ids: list) -> dict:
+    """生成物を消す(ファイルとサムネイルも)。同じ ID が重なっていても 1 回だけ。
+    {"deleted": 消した ID, "missing": もう無かった ID, "refused": [{"id", "reason"}](まだ要るので消さなかったもの)}"""
+    ledger, ids = app.state.ledger, list(dict.fromkeys(ids))
+    found = {oid for oid in ids if ledger.get_output(oid) is not None}
+    busy = _in_use(found)
+    out = {"deleted": [], "missing": [], "refused": []}
+    for oid in ids:
+        if oid in busy:
+            out["refused"].append({"id": oid, "reason": busy[oid]})
+        elif oid in found and ledger.delete_output(oid):
+            out["deleted"].append(oid)
+        else:
+            out["missing"].append(oid)       # 調べてから消すまでの間に、別の操作で消えたものもここ
+    return out
+
+
+class GalleryDeleteIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=DELETE_MAX)
+
+
+@app.post("/api/gallery/delete")
+def api_gallery_delete_many(body: GalleryDeleteIn):
+    """生成物をまとめて消す。まだ要るもの(使っているジョブや、続きのある MV の制作があるもの)は消さずに、理由を返す。"""
+    return _delete_outputs(body.ids)
+
+
 @app.delete("/api/gallery/{output_id}")
 def api_gallery_delete(output_id: str):
-    if not app.state.ledger.delete_output(output_id):
+    res = _delete_outputs([output_id])
+    if res["refused"]:
+        raise HTTPException(409, res["refused"][0]["reason"])
+    if res["missing"]:
         raise HTTPException(404, "その生成物は見つかりません")
     return {"ok": True}
 

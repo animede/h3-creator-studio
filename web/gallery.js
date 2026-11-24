@@ -9,7 +9,8 @@ const studio = {
   viewing: {},               // タブ -> 生成物ビューアに出している ID(未指定なら、そのタブの最新)
   galleryKind: "all",
   actions: {},               // タブ -> (生成物) => [{label, run}]  生成物ビューアに出すボタン(各タブの js が入れる)
-  own: {},                   // タブ -> {history(grid), open(生成物)}  右側の生成物ビューアと履歴を自前で描くタブ(MV タブ)。open はギャラリーでクリックされたとき
+  own: {},                   // タブ -> {history(grid), open(生成物), ids(), remove(ids)}  右側の生成物ビューアと履歴を自前で描くタブ(MV タブ)。open はギャラリーでクリックされたとき、ids と remove は選択モードで、履歴の ID の一覧と、選んだものの削除(消したら true)
+  select: { on: false, ids: new Set() },     // 選択モード(履歴とギャラリーで共通): 選んでいる ID。MV タブの履歴では制作の ID
   on: { tab: [], items: [] },   // 各タブの js が入れる: タブが変わったとき / 一覧が更新されたとき
 };
 
@@ -24,6 +25,7 @@ async function loadGallery() {
   renderHistory();
   renderGallery();
   renderViewer();
+  renderSelectBar();
   studio.on.items.forEach((f) => f());
 }
 
@@ -58,6 +60,7 @@ function thumbNode(item, onClick, onDelete) {
     const d = item.duration_s ? " " + fmtDur(item.duration_s) : "";
     t.append(el("span", "tbadge", (item.kind === "video" ? "▶" : "🎵") + d));
   }
+  if (studio.select.on) { pickable(t, item.id); return t; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
   t.onclick = () => onClick(item);
   if (onDelete) {
     const x = el("button", "tdel", "×");
@@ -82,8 +85,8 @@ function renderHistory() {
   grid.replaceChildren();
   if (!list.length) { grid.append(el("div", "placeholder", "このタブで作ったものがここに並びます")); return; }
   for (const it of list) {
-    const t = thumbNode(it, (x) => { studio.viewing[studio.tab] = x.id; renderHistory(); renderViewer(); });
-    t.classList.toggle("sel", !!shown && shown.id === it.id);
+    const t = thumbNode(it, (x) => { studio.viewing[studio.tab] = x.id; renderHistory(); renderViewer(); }, deleteItem);
+    t.classList.toggle("sel", !studio.select.on && !!shown && shown.id === it.id);
     grid.append(t);
   }
 }
@@ -160,15 +163,18 @@ function renderViewer() {
 // ---- ギャラリー(右側 2 枚を 1 枚に切り替える) ----
 
 function setGalleryView(on) {
+  if (studio.select.on) setSelecting(false);      // 選んだものは、履歴とギャラリーの間で持ち越さない
   $("workspace").classList.toggle("show-gallery", on);
   $("gallery").hidden = !on;
   if (on) loadGallery();
 }
 
+const galleryItems = () => studio.items.filter((i) => studio.galleryKind === "all" || i.kind === studio.galleryKind);
+
 function renderGallery() {
   const grid = $("gal-grid");
   grid.replaceChildren();
-  const list = studio.items.filter((i) => studio.galleryKind === "all" || i.kind === studio.galleryKind);
+  const list = galleryItems();
   if (!list.length) { grid.append(el("div", "placeholder", "まだ何もありません")); return; }
   for (const it of list) {
     grid.append(thumbNode(it, (x) => {      // クリック: その生成物を、いまのタブの生成物ビューアで開く(MV タブは、その MV を作った制作を開く)
@@ -182,13 +188,112 @@ function renderGallery() {
   }
 }
 
-async function deleteItem(item) {
-  if (!confirm(`「${item.filename || item.id}」を削除しますか?\nファイルも消え、元に戻せません。`)) return;
-  const r = await fetch(`/api/gallery/${item.id}`, { method: "DELETE" });
-  if (!r.ok && r.status !== 404) { alert("削除できませんでした"); return; }
-  for (const k of Object.keys(studio.viewing)) if (studio.viewing[k] === item.id) delete studio.viewing[k];
+// ---- 削除(1 件でも、まとめてでも) ----
+
+// 生成物をサーバに消してもらう(1 回の通信)。まだ要るもの(使っているジョブや MV の制作があるもの)は断られるので、その理由を 1 回だけ知らせる
+async function removeOutputs(items) {
+  let js;
+  try {
+    const r = await fetch("/api/gallery/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: items.map((i) => i.id) }) });
+    js = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "入力を確認してください");
+  } catch (e) { alert(`削除できませんでした: ${e.message || e}`); return; }
+  await forget([...js.deleted, ...js.missing]);
+  if (js.refused.length) alert(refusedText(js.refused));
+}
+
+// 断られた生成物を、理由ごとにまとめた文(1 回の alert で足りるように)
+function refusedText(refused, head = `${refused.length} 件は削除できませんでした。`) {
+  const by = new Map();
+  for (const f of refused) {
+    const it = byId(f.id);
+    by.set(f.reason, [...(by.get(f.reason) || []), (it && (it.filename || it.id)) || f.id]);
+  }
+  return `${head}\n` + [...by].map(([reason, names]) => `・${reason}\n  ${names.slice(0, 5).join("、")}${names.length > 5 ? ` ほか ${names.length - 5} 件` : ""}`).join("\n");
+}
+
+// 消えた生成物の後始末: ビューアで見ていたものは外し(そのタブの、次に新しいものか、無ければ空の表示になる)、各タブの入力欄の参照も外させて、一覧を読み直す
+async function forget(ids) {
+  for (const k of Object.keys(studio.viewing)) if (ids.includes(studio.viewing[k])) delete studio.viewing[k];
+  document.dispatchEvent(new CustomEvent("studio-deleted", { detail: { ids } }));
   await loadGallery();
 }
+
+async function deleteItem(item) {
+  if (!confirm(`「${item.filename || item.id}」を削除しますか?\nファイルも消え、元に戻せません。`)) return;
+  await removeOutputs([item]);
+}
+
+// 選んだものをまとめて消す(確認は 1 回)。消したら true、やめたら false
+async function deleteItems(items) {
+  if (!confirm(`${items.length} 件を削除しますか?\nファイルも消え、元に戻せません。`)) return false;
+  await removeOutputs(items);
+  return true;
+}
+
+$("vdel").onclick = () => { const item = currentItem(); if (item) deleteItem(item); };
+
+// ---- 選択モード(履歴・ギャラリー共通): サムネイルを選んで、まとめて消す ----
+
+// サムネイルを選べるようにする: クリックで選び直し、選んでいるものに ✓ を出す。ドラッグ元にはしない(MV タブの制作のカードも使う)
+function pickable(node, id) {
+  node.classList.add("picking");
+  node.classList.toggle("picked", studio.select.ids.has(id));
+  node.append(el("span", "tcheck", "✓"));
+  node.onclick = () => {
+    const ids = studio.select.ids;
+    if (!ids.delete(id)) ids.add(id);
+    node.classList.toggle("picked", ids.has(id));
+    renderSelectBar();
+  };
+}
+
+// いま見えているグリッドの ID(ギャラリー、または履歴。MV タブの履歴は制作の ID)
+function shownIds() {
+  const own = studio.own[studio.tab];
+  if ($("gallery").hidden && own) return own.ids();
+  return ($("gallery").hidden ? tabItems() : galleryItems()).map((i) => i.id);
+}
+
+const pickedIds = () => shownIds().filter((id) => studio.select.ids.has(id));       // 選んでいるもののうち、いま見えているもの(絞り込みで隠れたものは数えない)
+
+// 見出しの「選択」と、選択モードの「N 件を選択 / すべて選択 / 削除 / やめる」の切り替え
+function renderSelectBar() {
+  const on = studio.select.on, n = pickedIds().length;
+  document.querySelectorAll(".seltoggle").forEach((b) => { b.hidden = on; });
+  document.querySelectorAll(".selbar").forEach((bar) => {
+    bar.hidden = !on;
+    bar.querySelector(".selcount").textContent = `${n} 件を選択`;
+    bar.querySelector(".seldel").disabled = !n;
+  });
+}
+
+function setSelecting(on) {
+  studio.select.on = on;
+  studio.select.ids.clear();
+  renderSelectBar();
+  renderHistory();
+  renderGallery();
+}
+
+async function deleteSelected() {
+  const ids = pickedIds(), own = studio.own[studio.tab];
+  if (!ids.length) return;
+  const done = $("gallery").hidden && own ? await own.remove(ids) : await deleteItems(ids.map(byId));
+  if (done) setSelecting(false);
+}
+
+document.querySelectorAll(".seltoggle").forEach((b) => { b.onclick = () => setSelecting(true); });
+document.querySelectorAll(".selend").forEach((b) => { b.onclick = () => setSelecting(false); });
+document.querySelectorAll(".seldel").forEach((b) => { b.onclick = deleteSelected; });
+document.querySelectorAll(".selall").forEach((b) => {
+  b.onclick = () => {
+    shownIds().forEach((id) => studio.select.ids.add(id));
+    renderHistory();
+    renderGallery();
+    renderSelectBar();
+  };
+});
 
 $("to-gallery").onclick = () => setGalleryView(true);
 $("from-gallery").onclick = () => setGalleryView(false);
@@ -196,12 +301,14 @@ document.querySelectorAll("#g-chips .chip").forEach((c) => c.addEventListener("c
   studio.galleryKind = c.dataset.kind;
   document.querySelectorAll("#g-chips .chip").forEach((x) => x.classList.toggle("active", x === c));
   renderGallery();
+  renderSelectBar();      // 絞り込みで見えなくなったものは、選んだ数に入れない
 }));
 
 // ---- タブ ----
 
 function setTab(tab) {
   studio.tab = tab;
+  if (studio.select.on) setSelecting(false);      // 選択モードは、タブを越えて続けない
   $("workspace").dataset.tab = tab;
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
   document.querySelectorAll(".tabpanel").forEach((p) => { p.hidden = p.id !== "tab-" + tab; });
