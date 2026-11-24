@@ -40,7 +40,7 @@ class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
               "/api/components/", "/api/mv", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
-              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/dnd.js", "/favicon.ico")
+              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/dnd.js", "/viz.js", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()

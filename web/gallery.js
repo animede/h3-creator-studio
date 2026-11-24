@@ -93,15 +93,17 @@ function renderHistory() {
 
 // ---- 生成物ビューア ----
 
-// 音楽のカード: タイトル(テーマ)・キャプション・プレーヤー・歌詞
+// 音楽のカード: スペクトラム(再生中に動く。viz.js)・タイトル(テーマ)・キャプション・プレーヤー・歌詞。色合いは曲のムード、無ければジャンルで決まる
 function audioCard(item) {
   const p = item.params || {};
   const box = el("div", "audiocard");
-  box.append(el("div", "aicon", "🎵"), el("div", "atitle", p.theme || item.filename || ""));
-  if (p.caption) box.append(el("div", "acap", p.caption));
   const a = el("audio");
   a.controls = true;
   a.src = item.url;
+  const head = el("div", "ahead");       // アイコンとタイトルは 1 行に(スペクトラムの高さを確保する)
+  head.append(el("div", "aicon", "🎵"), el("div", "atitle", p.theme || item.filename || ""));
+  box.append(vizBox(a, { mood: p.mood, genre: p.genre }), head);
+  if (p.caption) box.append(el("div", "acap", p.caption));
   box.append(a);
   if (p.lyrics && p.lyrics !== "[Instrumental]") {
     const d = el("details", "alyrics");
@@ -122,11 +124,12 @@ function renderViewer() {
   const v = $("viewer"), meta = $("vmeta");
   meta.hidden = !item;
   if (!item) {
-    if (v.dataset.id !== "none") { v.dataset.id = "none"; v.replaceChildren(el("div", "placeholder", "まだ生成物がありません")); }
+    if (v.dataset.id !== "none") { v.dataset.id = "none"; detachVisualizers(v); v.replaceChildren(el("div", "placeholder", "まだ生成物がありません")); }
     return;
   }
   if (v.dataset.id !== item.id) {       // 同じものを出し直さない(動画の再生が途切れないように)
     v.dataset.id = item.id;
+    detachVisualizers(v);                // 外す音楽のカードのスペクトラム(ループと音の経路)を片付ける
     let m;
     if (item.kind === "audio") { m = audioCard(item); }
     else {

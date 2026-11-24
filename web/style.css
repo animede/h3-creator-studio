@@ -116,14 +116,21 @@ button.primary:hover:not(:disabled) { filter: brightness(1.1); }
 .viewer { position: relative; flex: 1; min-height: 0; background: #0e1013; border-radius: 4px; overflow: hidden; }
 .viewer img, .viewer video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .viewer > audio { position: absolute; left: 10%; right: 10%; top: 50%; width: 80%; transform: translateY(-50%); }
-.audiocard { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px 10%; text-align: center; }
-.audiocard .aicon { font-size: 40px; line-height: 1; }
+.audiocard { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; justify-content: safe center; gap: 8px; padding: 16px; text-align: center; }
+.audiocard .ahead { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; }
+.audiocard .aicon { font-size: 28px; line-height: 1; }
 .audiocard .atitle { font-size: 18px; font-weight: 600; }
 .audiocard .acap { color: var(--muted); font-size: 12px; max-width: 640px; }
 .audiocard audio { width: 100%; max-width: 640px; margin-top: 6px; }
 .alyrics { width: 100%; max-width: 640px; text-align: left; color: var(--muted); font-size: 12px; }
 .alyrics summary { cursor: pointer; text-align: center; }
 .alyrics pre { margin: 6px 0 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font: inherit; }
+/* 音楽のカードのスペクトラム(viz.js): 幅いっぱい、高さ 180px(ビューアが低いときは縮む)。表示の選択は右上に重ねる */
+.vizbox { position: relative; align-self: stretch; flex: 0 1 180px; min-height: 72px; }
+.vizbox[hidden] { display: none; }
+.vizbox canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.vizbox .vizmode { position: absolute; right: 4px; top: 4px; width: auto; padding: 1px 4px; font-size: 12px; background: rgba(14,16,19,.75); opacity: .55; }
+.vizbox:hover .vizmode, .vizbox .vizmode:focus { opacity: 1; }
 .viewer .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0; }
 .vmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: 13px; }
 .vmeta[hidden] { display: none; }
