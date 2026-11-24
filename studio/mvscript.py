@@ -178,6 +178,23 @@ BACKGROUND_TEXT_GUIDANCE = {
     ),
 }
 
+# 画面に文字を重ねない(テロップ・字幕・歌詞の文字・タイトル・ロゴ・透かし)。H3 は MV らしい場面に字幕を描くことがあった(2026-11-24、利用者の報告)。
+# 背景の文字(看板など)とは別に、すべてのシーンに必ず入れる。H3 には否定の指示(negative prompt)が無いので、肯定の文で書く
+NO_OVERLAY_TEXT = ("The picture is clean: no subtitles, captions, lyric text, karaoke text, title cards, credits, logos, "
+                   "watermarks or any other text overlay appear anywhere in the frame.")
+NO_OVERLAY_RULE = ("Never describe subtitles, captions, lyrics or any words shown on screen, title cards, credits, logos or "
+                   "watermarks; the picture has no text overlay. ")
+# LLM が書いてしまった「画面の文字」の文は、機械的に取り除く
+_OVERLAY_WORDS = re.compile(r"subtitle|caption|lyric[s]? (?:text|appear|scroll|display|on screen|overlay)|karaoke|text overlay|"
+                            r"on-?screen text|title card|credits? roll|watermark|telop", re.IGNORECASE)
+
+
+def scrub_overlay_text(text: str) -> str:
+    """演出の文から、画面に文字を重ねる文(字幕・テロップ・歌詞の表示など)を文ごと取り除く。"""
+    sentences = re.split(r"(?<=[.!?])\s+", str(text or "").strip())
+    return " ".join(s for s in sentences if s and not _OVERLAY_WORDS.search(s))
+
+
 # [Shot 1] の冒頭に置く構図文。H3 は文頭の指示が最も効く。横長は LLM の構図に任せる。
 FRAME_SHOT_PREFIX = {
     "portrait": (
@@ -208,8 +225,8 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
         performance = (
             "<Subject 1> (S1) physically performs the supplied vocal. The full face and "
             "unobstructed mouth remain visible, and the lips, jaw, and facial muscles articulate "
-            "every audible phoneme in precise synchronization with <Audio 1>. No lyrics are "
-            "written or inferred because the exact source words are not supplied."
+            "every audible phoneme in precise synchronization with <Audio 1>. The sung content "
+            "comes only from <Audio 1>."
         )
         summary_action = "performs the supplied vocal with clearly visible synchronized lip movement"
     else:
@@ -236,8 +253,8 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
         "audio track.\n\n"
         "detailed_description:\n"
         "The target video uses a coherent cinematic music-video style while fully preserving the "
-        "reference character. It contains one continuous shot with no internal cut.\n"
-        f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{direction} {performance}\n\n"
+        f"reference character. It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
+        f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{scrub_overlay_text(direction)} {performance} No text overlay.\n\n"
         "overall_soundscape:\n"
         "No additional dialogue, ambience, crowd voices, or sound effects are introduced; the "
         "synchronized vocal content comes only from <Audio 1>.\n\n"
@@ -357,7 +374,7 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             "face and mouth visible, and explicitly request phoneme-level lip articulation synchronized to "
             "the supplied vocal. Never use a wide shot, rear view, eye-only shot or obscured mouth for a "
             "singing scene. For lower vocal_ratio explicitly describe a closed relaxed mouth. "
-            "Use restrained camera motion and avoid cuts inside a generated clip.\n"
+            "Use restrained camera motion and avoid cuts inside a generated clip. " + NO_OVERLAY_RULE + "\n"
             + FRAME_LLM_GUIDANCE.get(frame, "")
             + BACKGROUND_TEXT_GUIDANCE.get(background_text, "")
             + f"CHARACTER_REFERENCE_FACTS: {facts}\n"

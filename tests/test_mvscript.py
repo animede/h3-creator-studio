@@ -272,3 +272,27 @@ class CharacterFactsTest(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("呼ばれないはず")
         self.assertEqual(await M.character_facts(chat, ""), {"subject": M.DEFAULT_SUBJECT})
         self.assertEqual(await M.character_facts(chat, M.DEFAULT_SUBJECT), {"subject": M.DEFAULT_SUBJECT})
+
+
+class NoOverlayTextTest(unittest.IsolatedAsyncioTestCase):
+    """MV のシーンに字幕・テロップ・歌詞の文字を出さない(H3 が MV らしい場面に字幕を描くことがあった)。"""
+
+    def test_every_scene_prompt_asks_for_a_clean_picture(self):
+        for ratio in (0.9, 0.0):
+            out = M.format_h3_official_ref2va_prompt(scene(1, ratio), "Medium shot under neon lights.", {"subject": "a girl"})
+            self.assertIn(M.NO_OVERLAY_TEXT, out)
+            self.assertIn("No text overlay.", out)
+            self.assertNotIn("No lyrics are written", out)          # 「歌詞を書く」を連想させる言い回しは使わない
+
+    def test_overlay_sentences_from_the_llm_are_removed(self):
+        text = ("Close-up of the singer. Subtitles appear at the bottom with the lyrics. Warm light. "
+                "The lyrics text scrolls across. Karaoke text fades in! A title card reads LOVE. Neon city behind her.")
+        self.assertEqual(M.scrub_overlay_text(text), "Close-up of the singer. Warm light. Neon city behind her.")
+        out = M.format_h3_official_ref2va_prompt(scene(1, 0.9), "Close-up. Subtitles appear at the bottom. Warm light.", {"subject": "a girl"})
+        self.assertNotIn("Subtitles appear", out)
+        self.assertIn("[Shot 1] Close-up. Warm light ", out)                  # 文末の「.」は移植元どおり落ちる
+
+    async def test_the_scene_llm_is_told_not_to_write_on_screen_text(self):
+        chat = FakeChat([OVERVIEW, items([1, 2])])
+        await M.generate_scenario(chat, [scene(1, 0.9), scene(2, 0.0)], "", {"subject": "a girl"})
+        self.assertIn(M.NO_OVERLAY_RULE.strip(), chat.calls[1]["user"])

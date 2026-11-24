@@ -292,7 +292,7 @@
     updateGo();
     try {
       const js = await api("/api/mv", "POST", { song_id: song.id, image_id: image.id, character: mvp("char").value.trim(), concept: mvp("concept").value.trim(),
-        aspect: mvp("aspect").value, quality: mvp("quality").value, min_s: min, max_s: max, seed });
+        aspect: mvp("aspect").value, quality: mvp("quality").value, min_s: min, max_s: max, seed, background_text: mvp("bgtext").value });
       await select(js.id);
     } catch (e) {
       showMsg(`MV を始められませんでした: ${e.message || e}`);
@@ -310,7 +310,7 @@
 
   function getPresetValues() {
     return { character: typed(mvp("char")), concept: typed(mvp("concept")), aspect: mvp("aspect").value, quality: mvp("quality").value,
-      min_s: +mvp("min").value, max_s: +mvp("max").value, seed: presetGetSeed(mvp("seed"), mvp("random")) };
+      min_s: +mvp("min").value, max_s: +mvp("max").value, seed: presetGetSeed(mvp("seed"), mvp("random")), background_text: mvp("bgtext").value };
   }
 
   // 書かれている項目だけ反映する(知らない項目は無視)。人物の説明・曲の内容は空でなければ置き換える(自分で書いた扱いなので、曲や画像を落としても消えない)
@@ -318,6 +318,7 @@
     const skipped = [];
     for (const [key, id] of [["character", "char"], ["concept", "concept"]]) if (typeof v[key] === "string" && v[key].trim()) presetSet(mvp(id), v[key]);
     for (const [key, label] of [["aspect", "投稿先"], ["quality", "画質"]]) if (key in v && !presetSet(mvp(key), v[key])) skipped.push(label);      // change で寸法の表示が合う
+    if ("background_text" in v && !presetSet(mvp("bgtext"), v.background_text)) skipped.push("背景の文字");
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(mvp(id), v[key]);
     if ("seed" in v) presetSetSeed(mvp("seed"), mvp("random"), v.seed);
     return skipped;
