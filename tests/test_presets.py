@@ -109,6 +109,7 @@ class BuiltinFilesTest(unittest.TestCase):
                 "aspect": v.get("aspect") in opt["sh-aspect"], "quality": v.get("quality") in opt["sh-quality"],
                 "min_s": self.number_ok(v.get("min_s"), "sh-min"), "max_s": self.number_ok(v.get("max_s"), "sh-max"), "seed": seed_ok,
                 "background_text": v.get("background_text") in opt["sh-bgtext"], "final_audio": v.get("final_audio") in opt["sh-final"],
+                "subtitles": isinstance(v.get("subtitles"), bool),
                 "length_s": isinstance(v.get("length_s"), (int, float)) and not isinstance(v.get("length_s"), bool)
                 and v.get("length_s", 0) >= float(f.attrs["sh-length"]["min"]),             # 長さは下限だけ(上限は設けない)
                 "speaker_id": v.get("speaker_id") is None or (isinstance(v.get("speaker_id"), int) and not isinstance(v.get("speaker_id"), bool))}
@@ -163,7 +164,7 @@ class BuiltinFilesTest(unittest.TestCase):
                   "music": ("mode", "genre_mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
                             "vocal", "model", "steps", "batch_size", "thinking", "seed", "negative_prompt", "shift", "infer_method"),
                   "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed", "lipsync"),
-                  "short": ("aspect", "quality", "min_s", "max_s", "seed", "background_text", "final_audio", "length_s", "speaker_id")}
+                  "short": ("aspect", "quality", "min_s", "max_s", "seed", "background_text", "final_audio", "length_s", "speaker_id", "subtitles")}
         files = {"image": "image.js", "video": "video.js", "music": "music.js", "mv": "mv.js", "short": "short.js"}
         for tab, keys in fields.items():
             src = (WEB / files[tab]).read_text(encoding="utf-8")

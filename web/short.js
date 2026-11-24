@@ -361,7 +361,7 @@
       const js = await api("/api/short", "POST", { story, song_id: song ? song.id : "", narration, speaker_id: narration ? +sh("speaker").value : null,
         images: images.map((r) => ({ id: r.item.id, role: r.role, description: "" })), length_s: t === "free" ? length : null,
         character: person() ? sh("char").value.trim() : "", aspect: sh("aspect").value, quality: sh("quality").value, min_s: min, max_s: max, seed,
-        background_text: sh("bgtext").value, final_audio: sh("final").value });
+        background_text: sh("bgtext").value, final_audio: sh("final").value, subtitles: sh("subs").checked });
       await select(js.id);
     } catch (e) {
       showMsg(`ショート動画を始められませんでした: ${e.message || e}`);
@@ -377,7 +377,8 @@
   function getPresetValues() {
     return { aspect: sh("aspect").value, quality: sh("quality").value, min_s: +sh("min").value, max_s: +sh("max").value,
       seed: presetGetSeed(sh("seed"), sh("random")), background_text: sh("bgtext").value, final_audio: sh("final").value,
-      length_s: +sh("length").value >= LENGTH_MIN ? +sh("length").value : 60, speaker_id: sh("speaker").value === "" ? null : +sh("speaker").value };
+      length_s: +sh("length").value >= LENGTH_MIN ? +sh("length").value : 60, speaker_id: sh("speaker").value === "" ? null : +sh("speaker").value,
+      subtitles: sh("subs").checked };
   }
 
   // 書かれている項目だけ反映する(知らない項目は無視)。選べない値は入れず、そのままにした項目として知らせる
@@ -387,6 +388,7 @@
       if (key in v && !presetSet(sh(id), v[key])) skipped.push(label);      // change で寸法の表示が合う
     }
     if ("background_text" in v && !presetSet(sh("bgtext"), v.background_text)) skipped.push("背景の文字");
+    if (typeof v.subtitles === "boolean") presetSet(sh("subs"), v.subtitles);
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
     if (Number.isFinite(v.length_s) && v.length_s >= LENGTH_MIN) presetSet(sh("length"), v.length_s);      // input で警告が合う
     if ("seed" in v) presetSetSeed(sh("seed"), sh("random"), v.seed);
@@ -407,13 +409,14 @@
 
   const panel = makeProjectPanel({
     tab: "short", base: "/api/short", noun: "ショート動画", root: $("short-project"), dialog: "proj", cardLabel: "ショート", outName: "short.mp4", finalAudio: true,
+    subtitles: true,
     placeholder: "ショート動画を作ると、ここに進み具合とシーンが並びます", scenesPlaceholder: "音声の準備(シーン割り)が終わると、シーンがここに並びます",
     historyPlaceholder: "作ったショート動画(制作)がここに並びます",
     meta: (v, m) => {
       const a = v.analysis, pr = v.params;
       const dur = a && a.duration ? ` ${fmtDur(a.duration)}` : pr.timeline === "free" && pr.length_s ? ` ${fmtDur(pr.length_s)}` : "";
       return [m.pct, m.size, pr.timeline ? `時間軸: ${TIMELINE_LABEL[pr.timeline] || pr.timeline}${dur}${pr.timeline === "speech" && pr.song_id ? " + 曲(BGM)" : ""}` : "", m.scenes,
-        `最終の音声: ${pr.final_audio === "none" ? "音声なし" : "自動"}`, m.elapsed];
+        `最終の音声: ${pr.final_audio === "none" ? "音声なし" : "自動"}`, pr.timeline === "speech" && pr.subtitles ? "テロップあり" : "", m.elapsed];
     },
     autoRows,
     kindBadge: (v, s) => (v.params.timeline === "free" ? null : v.params.timeline === "speech" ? { text: "セリフ", title: "読み上げに口を合わせます" }

@@ -50,6 +50,7 @@ mode = "auto"
 # MV タブ(リップシンク MV)の音声処理(Demucs のボーカル分離、シーン分割)を動かす Python。
 # 空なら setup --mv が作る components/mvtools/.venv を使う。すでに Demucs と librosa の入った環境があれば、その python を書く。
 # device = ボーカルの分離(Demucs)を動かす装置。空なら CPU("cuda" で GPU。GPU の仕事と VRAM を取り合うので、空きに余裕があるときだけ)。
+# subtitle_font = ショート動画のセリフのテロップ(字幕)の字体の名前。空なら Noto Sans CJK JP(無ければ libass が同じ文字を持つ字体に置き換える。Windows は Meiryo など)。
 [mv]
 tools_python = ""
 device = ""

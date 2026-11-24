@@ -28,6 +28,7 @@ async function apiJson(url, method = "GET", body) {
 //   kindBadge(v, s)      : シーンの種類の札 {text, title}(null なら出さない)。既定は歌唱 / 器楽
 //   rowInfo(v, s)        : シーンの行の補足 [{label, text}](あれば行に出す)
 //   finalAudio           : true なら、「結合し直す」の横に最終の音声(自動 / 音声なし)の選びを出して、結合し直しに渡す
+//   subtitles            : true なら、「結合し直す」の横にテロップ(字幕)の印を出して(セリフの制作だけ)、結合し直しに渡す。最終の動画に SRT があればリンクを出す
 //   onOpen()             : タブを開いたとき(制作の一覧を読む前)
 // 戻り値: { select(id) } — 作った制作を開く
 function makeProjectPanel(cfg) {
@@ -189,7 +190,8 @@ function makeProjectPanel(cfg) {
       pause: button("一時停止", () => act(`${base}/pause`), "走っている仕事は終わるまで続け、順番待ちの仕事は取り下げて止めます"),
       resume: button("再開", () => act(`${base}/resume`), "できているところから続けます"),
       cancel: button("中止", () => act(`${base}/cancel`), "走っている仕事を止めます(あとで再開できます)"),
-      reassemble: button("結合し直す", () => act(`${base}/reassemble`, "POST", cfg.finalAudio ? { final_audio: ui.audio.value } : undefined),
+      reassemble: button("結合し直す", () => act(`${base}/reassemble`, "POST", cfg.finalAudio || cfg.subtitles
+        ? { ...(cfg.finalAudio ? { final_audio: ui.audio.value } : {}), ...(cfg.subtitles && !ui.subs.hidden ? { subtitles: ui.subs.firstChild.checked } : {}) } : undefined),
         `いまのクリップをつなぎ直して、新しい ${cfg.noun} を作ります`),
       remove: button("削除", () => removeProjects([v.id]), `この制作とクリップを消します(完成した ${cfg.noun} も消すかは、確認で選べます)`),
     };
@@ -205,8 +207,17 @@ function makeProjectPanel(cfg) {
       ui.audioTouched = false;
       ui.audio.onchange = () => { ui.audioTouched = true; };
     }
+    if (cfg.subtitles) {       // 結合し直すときのテロップ(セリフの制作だけ。制作の設定。結合し直すと書き換わる)
+      const box = el("input");
+      box.type = "checkbox";
+      ui.subs = el("label", "chk");
+      ui.subs.append(box, "テロップ");
+      ui.subs.title = "セリフのテロップ(字幕)を焼き込む";
+      ui.subsTouched = false;
+      box.onchange = () => { ui.subsTouched = true; };
+    }
     const b = ui.btns;
-    btns.append(b.pause, b.resume, b.cancel, ...(ui.audio ? [ui.audio] : []), b.reassemble, b.remove);
+    btns.append(b.pause, b.resume, b.cancel, ...(ui.audio ? [ui.audio] : []), ...(ui.subs ? [ui.subs] : []), b.reassemble, b.remove);
     head.append(title, ui.msg, ui.bar, ui.meta, ui.err, ui.actionErr, ui.auto, btns);
 
     ui.final = el("div", "mvfinal");
@@ -219,8 +230,11 @@ function makeProjectPanel(cfg) {
     ui.finfo = el("span");
     ui.save = el("a", "btn", "保存");
     ui.save.download = "";
+    ui.srt = el("a", "btn", "SRT");
+    ui.srt.title = "テロップの SRT(投稿サイトの字幕用)";
+    ui.srt.hidden = true;
     const fbar = el("div", "fbar");
-    fbar.append(ui.save, ui.finfo, ui.fnote);
+    fbar.append(ui.save, ui.srt, ui.finfo, ui.fnote);
     ui.final.append(ui.video, fbar);
 
     ui.scenes = el("div", "mvscenes");
@@ -387,6 +401,10 @@ function makeProjectPanel(cfg) {
       ui.audio.hidden = b.reassemble.hidden;
       if (!ui.audioTouched) ui.audio.value = pr.final_audio === "none" ? "none" : "auto";      // 触るまでは、この制作の設定に合わせる
     }
+    if (ui.subs) {
+      ui.subs.hidden = b.reassemble.hidden || pr.timeline !== "speech";
+      if (!ui.subsTouched) ui.subs.firstChild.checked = !!pr.subtitles;
+    }
     // 最終の動画
     ui.final.hidden = !v.output;
     if (v.output) {
@@ -397,6 +415,9 @@ function makeProjectPanel(cfg) {
       }
       ui.save.href = v.output.url;
       ui.save.download = v.output.filename || cfg.outName;
+      const srt = v.output.params && v.output.params.srt;
+      ui.srt.hidden = !srt;
+      if (srt) { ui.srt.href = v.output.url.replace(/[^/]+$/, srt); ui.srt.download = srt; }
       ui.finfo.textContent = [v.output.width ? `${v.output.width}×${v.output.height}` : "", v.output.duration_s ? fmtSec(v.output.duration_s) : ""].filter(Boolean).join("  ");
       ui.fnote.hidden = v.assembled;
     }

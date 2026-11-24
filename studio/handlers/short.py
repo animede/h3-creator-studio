@@ -24,7 +24,7 @@ import time
 import wave
 from pathlib import Path
 
-from .. import mv_audio, mvclip, mvscript, shortscript
+from .. import config, mv_audio, mvclip, mvscript, mvsub, shortscript
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from ..llm import LlmError
 from ..mv import concept_from_song, scene_clip_name, scene_thumb_name, scene_vocals_name
@@ -336,7 +336,16 @@ async def run_assemble(job: Job, ctx: Ctx) -> None:
                 raise JobFailed("曲のファイルが見つかりません")
             song_s = (rec or {}).get("duration_s")
     listing, video_only, dest = work / "concat.txt", work / "video_only.mp4", mvh.final_path(ctx.outputs_dir, pid, "short")
-    final_concat = narration is None and song is None          # 音声を足さない(音声なし・free)なら、つないだものがそのまま最終の動画
+    # セリフのテロップ(字幕): 読み上げの文の時刻から ASS(焼き込み)と SRT(配布用)を作る。セリフが無い制作では何もしない
+    ass = srt = None
+    if timeline == "speech" and p.get("subtitles"):
+        sentences = _load_sentences(work)
+        if not sentences:
+            raise JobFailed("読み上げの文の時刻が見つかりません(分析からやり直してください)")
+        ass, srt = work / "subtitles.ass", work / "subtitles.srt"
+        count = await asyncio.to_thread(mvsub.write_subtitles, sentences, p["width"], p["height"], ass, srt, _subtitle_font())
+        log.info("ショート動画 %s: テロップを %d 枚作りました", pid, count)
+    final_concat = narration is None and song is None and ass is None     # 音声もテロップも足さない(音声なし・free)なら、つないだものがそのまま最終の動画
     try:
         job.progress, job.message = 0.1, "シーンをつないでいます"
         await asyncio.to_thread(listing.write_text, mvclip.concat_list(clips), "utf-8")
@@ -345,25 +354,40 @@ async def run_assemble(job: Job, ctx: Ctx) -> None:
         if not final_concat:
             if job.cancel_requested:
                 raise JobCancelled()
+            what = "(テロップを焼き込みながら)" if ass is not None else ""
             if narration is not None and song is not None:
-                job.progress, job.message = 0.6, "読み上げに曲(BGM)を混ぜて載せています"
-                await mvh._ffmpeg(lambda exe, tmp: mvclip.mix_args(exe, video_only, narration, song, tmp, duration, song_s), dest, "読み上げと曲の混合")
+                job.progress, job.message = 0.6, f"読み上げに曲(BGM)を混ぜて載せています{what}"
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.mix_args(exe, video_only, narration, song, tmp, duration, song_s, ass=ass), dest, "読み上げと曲の混合")
             elif narration is not None:
-                job.progress, job.message = 0.6, "読み上げを載せています"
-                await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, narration, tmp, duration), dest, "読み上げの差し替え")
-            else:
+                job.progress, job.message = 0.6, f"読み上げを載せています{what}"
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, narration, tmp, duration, ass=ass), dest, "読み上げの差し替え")
+            elif song is not None:
                 job.progress, job.message = 0.6, "元の曲を載せています"
                 await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, song, tmp, duration), dest, "曲の差し替え")
+            else:
+                job.progress, job.message = 0.6, "テロップを焼き込んでいます"
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.burn_args(exe, video_only, ass, tmp), dest, "テロップの焼き込み")
     finally:
         listing.unlink(missing_ok=True)
         video_only.unlink(missing_ok=True)
+    srt_name = None
+    if srt is not None:
+        srt_name = dest.with_suffix(".srt").name                # 最終の動画の隣に SRT も置く(配布・投稿サイトの字幕用)
+        await asyncio.to_thread(shutil.copyfile, srt, dest.with_suffix(".srt"))
     job.progress, job.message = 0.95, "ギャラリーに登録しています"
-    meta = {"project_id": pid, "kind": job.kind, "timeline": timeline, "final_audio": final_audio, "aspect": p.get("aspect"),
+    meta = {"project_id": pid, "kind": job.kind, "timeline": timeline, "final_audio": final_audio, "subtitles": ass is not None, "srt": srt_name,
+            "aspect": p.get("aspect"),
             "quality": p.get("quality"), "scenes": len(scenes), "song_id": p.get("song_id"), "images": [it["id"] for it in p.get("images") or []],
             "width": p.get("width"), "height": p.get("height")}
     await mvh.register_video(job, ctx, pid, dest, _name(p), meta, p, duration)
     log.info("ショート動画 %s: %d シーンを結合しました(音声: %s)→ %s(%.1f 秒)", pid, len(scenes),
-             "なし" if final_audio == "none" else {"speech": "読み上げ" + ("+BGM" if song else ""), "music": "曲", "free": "H3 の音"}[timeline], dest.name, duration)
+             "なし" if final_audio == "none" else {"speech": "読み上げ" + ("+BGM" if song else ""), "music": "曲", "free": "H3 の音"}[timeline]
+             + ("、テロップあり" if ass is not None else ""), dest.name, duration)
+
+
+def _subtitle_font() -> str:
+    """テロップの字体([mv] subtitle_font。空なら mvsub の既定)。"""
+    return str(config.settings.mv.get("subtitle_font") or "").strip()
 
 
 HANDLERS = {

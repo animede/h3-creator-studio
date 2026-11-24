@@ -552,11 +552,13 @@ class ShortIn(BaseModel):
     seed: Optional[int] = None
     background_text: str = "auto"
     final_audio: str = "auto"      # auto / none(映像だけ)
+    subtitles: bool = False        # セリフのテロップ(字幕)を焼き込む(セリフがあるときだけ意味がある)
     character: str = ""            # 人物の説明(空なら、画像のプロンプト → 画像を見て作る)
 
 
 class ShortReassembleIn(BaseModel):
     final_audio: Optional[str] = None      # 渡せば、制作の設定を書き換えてから結合し直す
+    subtitles: Optional[bool] = None       # 同上(セリフのテロップの焼き込み)
 
 
 class DescribeNarrationIn(BaseModel):
@@ -618,9 +620,9 @@ async def api_short_cancel(pid: str):
 
 @app.post("/api/short/{pid}/reassemble")
 async def api_short_reassemble(pid: str, body: Optional[ShortReassembleIn] = None):
-    """結合し直す。body の final_audio(auto / none)があれば、制作の設定を書き換えてから。前の動画はギャラリーに残る。"""
+    """結合し直す。body の final_audio(auto / none)・subtitles があれば、制作の設定を書き換えてから。前の動画はギャラリーに残る。"""
     with _mv_errors():
-        return _mv_public(app.state.short.reassemble(pid, body.final_audio if body else None))
+        return _mv_public(app.state.short.reassemble(pid, body.final_audio if body else None, body.subtitles if body else None))
 
 
 @app.post("/api/short/{pid}/scenes/{index}/retry")

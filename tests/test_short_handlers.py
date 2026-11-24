@@ -13,7 +13,7 @@ from unittest import mock
 import httpx
 from PIL import Image
 
-from studio import media, mv, mv_audio, mvclip, mvscript, short
+from studio import mvsub, media, mv, mv_audio, mvclip, mvscript, short
 from studio.handlers import h3
 from studio.handlers import mv as mvh
 from studio.handlers import short as sh
@@ -879,6 +879,47 @@ class AssembleTest(HandlerBase):
         self.assertIn("afade=t=out:st=28.000:d=2.000", graph)
         self.assertNotIn("aloop", graph)
         self.assertNotIn("stream_loop", " ".join(self.calls()[1][0]))
+
+    async def test_speech_with_subtitles_writes_ass_and_srt_and_burns_them_in(self):
+        """subtitles=True(セリフ): sentences.json から ASS と SRT を作り、読み上げを載せる ffmpeg に ass フィルタを通す(映像は copy でなく H.264)。SRT は最終の動画の隣。"""
+        self.setup_done("speech")
+        self.ledger.update_mv_project("proj1", params_patch={"subtitles": True})
+        (self.work() / "sentences.json").write_text(json.dumps({"duration": 20.5, "sentences": [
+            {"index": 1, "text": "今日は、少しだけ早く学校を出た。", "start": 0.0, "end": 2.8, "duration": 2.8},
+            {"index": 2, "text": "夕焼けの道は、いつもより長く見える。", "start": 2.8, "end": 5.9, "duration": 3.1}]}, ensure_ascii=False), "utf-8")
+        job = await self.run_it()
+        ass, srt = self.work() / "subtitles.ass", self.work() / "subtitles.srt"
+        self.assertTrue(ass.is_file() and srt.is_file())
+        self.assertIn("Dialogue: 0,0:00:00.00,0:00:02.80,Caption,,0,0,0,,今日は、少しだけ早く学校を出た。", ass.read_text("utf-8"))
+        self.assertIn("1\n00:00:00,000 --> 00:00:02,800\n今日は、少しだけ早く学校を出た。", srt.read_text("utf-8"))
+        concat, mux = self.calls()
+        argv = mux[0]
+        self.assertEqual(mux[2], "読み上げの差し替え")
+        self.assertEqual(argv[argv.index("-vf") + 1], "ass=" + mvsub.filter_path(ass))
+        self.assertEqual(argv[argv.index("-c:v") + 1], "libx264")
+        self.assertNotIn("copy", argv[:argv.index("-c:a")])
+        self.assertTrue(Path(self.dest()).with_suffix(".srt").is_file())              # 配布用の SRT が最終の動画の隣に
+        rec = self.ledger.get_output(self.proj()["output_id"])
+        self.assertEqual((rec["params"]["subtitles"], rec["params"]["srt"]), (True, Path(self.dest()).with_suffix(".srt").name))
+        self.assertRegistered(job, "speech", "auto")
+
+    async def test_subtitles_with_no_audio_burn_into_the_concatenated_video(self):
+        self.setup_done("speech")
+        self.ledger.update_mv_project("proj1", params_patch={"subtitles": True, "final_audio": "none"})
+        (self.work() / "sentences.json").write_text(json.dumps({"duration": 20.5, "sentences": [
+            {"index": 1, "text": "こんにちは。", "start": 0.0, "end": 2.0, "duration": 2.0}]}, ensure_ascii=False), "utf-8")
+        await self.run_it()
+        concat, burn = self.calls()
+        self.assertEqual((concat[1], burn[1], burn[2]), (self.work() / "video_only.mp4", self.dest(), "テロップの焼き込み"))
+        self.assertIn("-vf", burn[0])
+
+    async def test_subtitles_are_ignored_without_narration(self):
+        self.setup_done("music")
+        self.ledger.update_mv_project("proj1", params_patch={"subtitles": True})
+        await self.run_it()
+        concat, mux = self.calls()
+        self.assertNotIn("-vf", mux[0])
+        self.assertFalse((self.work() / "subtitles.ass").exists())
 
     async def test_music_muxes_the_song_like_mv(self):
         self.setup_done("music")

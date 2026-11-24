@@ -28,7 +28,7 @@ STAGE_LABEL = {**mv.STAGE_LABEL, "analyze": "音声の準備"}
 TEXT = {"analyze": "音声を準備します", "plan": "物語からシーンに分けます", "script": "演出を書きます", "assemble": "シーンを結合します",
         "done": "ショート動画ができました"}
 PARAM_KEYS = ("kind", "story", "song_id", "narration", "speaker_id", "images", "length_s", "timeline", "aspect", "quality", "width", "height",
-              "min_s", "max_s", "seed", "background_text", "final_audio", "character", "character_source", "character_note", "title")
+              "min_s", "max_s", "seed", "background_text", "final_audio", "subtitles", "character", "character_source", "character_note", "title")
 SCENE_KEYS = (*Director.SCENE_KEYS, "place", "summary", "refs", "speech", "text")
 
 
@@ -105,6 +105,9 @@ def resolve_params(ledger, params: dict) -> dict:
     final_audio = str(params.get("final_audio") or "auto")
     if final_audio not in FINAL_AUDIOS:
         raise ValueError("最終の音声は " + " / ".join(FINAL_AUDIOS) + " のいずれかです")
+    subtitles = params.get("subtitles", False)          # セリフのテロップ(字幕)を焼き込む。セリフが無ければ何もしない
+    if not isinstance(subtitles, bool):
+        raise ValueError("subtitles は true / false で指定してください")
     fmt = resolve_format(params)
     typed_character = _clip(str(params.get("character") or ""), CHARACTER_MAX) or (person["description"] if person and person["_typed"] else "")
     character = typed_character or (person["_prompt"] if person else "")
@@ -113,7 +116,7 @@ def resolve_params(ledger, params: dict) -> dict:
              or first_sentence(narration) or "ショート動画")
     return {"kind": KIND, "story": story, "song_id": song["id"] if song else None, "narration": narration, "speaker_id": speaker_id,
             "images": [{k: it[k] for k in ("id", "role", "description")} for it in images], "length_s": length_s, "timeline": timeline, **fmt,
-            "final_audio": final_audio, "character": character, "character_source": "typed" if typed_character else "image" if character else "",
+            "final_audio": final_audio, "subtitles": subtitles, "character": character, "character_source": "typed" if typed_character else "image" if character else "",
             "character_note": "", "title": title}
 
 
@@ -233,20 +236,24 @@ class ShortDirector(Director):
         return {**{k: params.get(k) for k in PARAM_KEYS}, "outline": params.get("outline")}
 
     def _summary_extra(self, params: dict) -> dict:
-        return {"timeline": params.get("timeline"), "final_audio": params.get("final_audio") or "auto"}
+        return {"timeline": params.get("timeline"), "final_audio": params.get("final_audio") or "auto", "subtitles": bool(params.get("subtitles"))}
 
     def _cover_id(self, params: dict):
         images = params.get("images") or []
         return images[0]["id"] if images else None
 
-    def reassemble(self, pid: str, final_audio: str = None) -> dict:
-        """結合し直す。final_audio(auto / none)を渡せば、制作の設定を書き換えてから(前の動画はギャラリーに残る)。"""
+    def reassemble(self, pid: str, final_audio: str = None, subtitles: bool = None) -> dict:
+        """結合し直す。final_audio(auto / none)・subtitles(テロップの焼き込み)を渡せば、制作の設定を書き換えてから(前の動画はギャラリーに残る)。"""
         self._check_reassemble(pid)
         patch = {"assembled": False}
         if final_audio not in (None, ""):
             if final_audio not in FINAL_AUDIOS:
                 raise ValueError("最終の音声は " + " / ".join(FINAL_AUDIOS) + " のいずれかです")
             patch["final_audio"] = final_audio
+        if subtitles is not None:
+            if not isinstance(subtitles, bool):
+                raise ValueError("subtitles は true / false で指定してください")
+            patch["subtitles"] = subtitles
         self.ledger.update_mv_project(pid, params_patch=patch)
         return self._start(pid)
 

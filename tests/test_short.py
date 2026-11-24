@@ -171,6 +171,13 @@ class ResolveParamsTest(LedgerBase):
         self.assertIsNone(self.resolve(story="x", song_id="")["song_id"])
         self.assertIsNone(self.resolve(story="x", song_id=None)["song_id"])
 
+    def test_subtitles_is_a_bool_and_defaults_to_false(self):
+        self.assertFalse(self.resolve(story="x")["subtitles"])
+        self.assertTrue(self.resolve(narration="こんにちは。", speaker_id=1, images=[self.person()], subtitles=True)["subtitles"])
+        with self.assertRaises(ValueError) as cm:
+            self.resolve(story="x", subtitles="yes")
+        self.assertIn("subtitles は true / false", str(cm.exception))
+
     def test_title_comes_from_the_story_then_the_song_then_the_narration(self):
         self.assertEqual(self.resolve(story="雨の街で\n二行目")["title"], "雨の街で")
         self.assertEqual(self.resolve(story="雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る")["title"], "雨の駅で、旅立つ友人を見送る少女")      # 最初の文まで

@@ -84,17 +84,31 @@ def concat_args(exe: str, listing, tmp, drop_audio: bool = False, faststart: boo
     return argv + ["-f", "mp4", str(tmp)]
 
 
-def mux_args(exe: str, video, song, tmp, duration: float) -> list:
-    """映像(つないだもの)に、元の曲を差し替えて載せる。長さは曲の長さ(duration 秒)まで、音声は AAC 256k、先頭にメタデータ(+faststart)。"""
+def video_args(ass=None) -> list:
+    """最終の動画の映像の引数。テロップ(ASS)を焼き込むときは ass フィルタを通して H.264(crf 18)で作り直し、無ければそのまま(copy)。"""
+    if ass is None:
+        return ["-c:v", "copy"]
+    from .mvsub import filter_path
+    return ["-vf", f"ass={filter_path(ass)}", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"]
+
+
+def burn_args(exe: str, video, ass, tmp) -> list:
+    """映像(音声があればそのまま)にテロップを焼き込む(音声を足さないとき用)。"""
+    return [exe, "-y", "-v", "error", "-i", str(video), *video_args(ass), "-c:a", "copy", "-movflags", "+faststart", "-f", "mp4", str(tmp)]
+
+
+def mux_args(exe: str, video, song, tmp, duration: float, ass=None) -> list:
+    """映像(つないだもの)に、元の曲を差し替えて載せる。長さは曲の長さ(duration 秒)まで、音声は AAC 256k、先頭にメタデータ(+faststart)。
+    ass を渡せばテロップを焼き込む。"""
     return [exe, "-y", "-v", "error", "-i", str(video), "-i", str(song), "-map", "0:v:0", "-map", "1:a:0",
-            "-t", f"{duration:.3f}", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", "-f", "mp4", str(tmp)]
+            "-t", f"{duration:.3f}", *video_args(ass), "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", "-f", "mp4", str(tmp)]
 
 
 BGM_DB = -14                  # 読み上げの下に敷く曲の音量(dB)
 BGM_FADE_S = 2.0              # 曲の終わりのフェードアウト(秒)
 
 
-def mix_args(exe: str, video, narration, song, tmp, duration: float, song_s: Optional[float] = None) -> list:
+def mix_args(exe: str, video, narration, song, tmp, duration: float, song_s: Optional[float] = None, ass=None) -> list:
     """映像(つないだもの)に、読み上げを主、曲を BGM(-14 dB)にして混ぜて載せる。長さは読み上げの長さ(duration 秒)まで。
     曲は先頭から使い、duration(曲が短ければ song_s)で切って、終わりの 2 秒をフェードアウトする。曲が読み上げより短くても繰り返さない
     (そこで BGM が終わる)。読み上げの音量は変えない(amix の normalize=0)。音声は AAC 256k、先頭にメタデータ(+faststart)。"""
@@ -105,5 +119,5 @@ def mix_args(exe: str, video, narration, song, tmp, duration: float, song_s: Opt
              f"afade=t=out:st={bgm_s - fade_s:.3f}:d={fade_s:.3f}[bgm];"
              f"[nar][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]")
     return [exe, "-y", "-v", "error", "-i", str(video), "-i", str(narration), "-i", str(song), "-filter_complex", graph,
-            "-map", "0:v:0", "-map", "[a]", "-t", f"{duration:.3f}", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k",
+            "-map", "0:v:0", "-map", "[a]", "-t", f"{duration:.3f}", *video_args(ass), "-c:a", "aac", "-b:a", "256k",
             "-movflags", "+faststart", "-f", "mp4", str(tmp)]
