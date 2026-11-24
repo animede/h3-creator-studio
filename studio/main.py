@@ -27,7 +27,8 @@ from .handlers import HANDLERS
 from .jobs import TERMINAL, Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
-from .mv import FINISHED, Director
+from .mv import FINISHED, Director, pick_image, pick_song, song_has_info
+from .mvdescribe import describe_character, listen_song, propose_concept
 from .presets import PresetError
 from .scheduler import Scheduler
 from .handlers import ace as ace_handler
@@ -423,6 +424,45 @@ def api_mv_tools():
     if hint is None and shutil.which("ffmpeg") is None:
         hint = "ffmpeg が見つかりません(PATH に入れてください)"
     return {"available": hint is None, "hint": hint}
+
+
+class DescribeImageIn(BaseModel):
+    image_id: str = ""
+
+
+class DescribeSongIn(BaseModel):
+    song_id: str = ""
+
+
+@app.post("/api/mv/describe/image")
+async def api_mv_describe_image(body: DescribeImageIn):
+    """画像を管理役の LLM(Gemma 4 の画像入力)が見て、人物の説明(日本語の 1 行。見た目だけ)を作る。入力欄を埋める用で、制作は作らない。
+    {text, facts(英語の特徴), source, note}。source は vision(画像を見た)/ prompt(画像を読めなかったので、画像の台帳のプロンプトから)/
+    default(どちらも無く、text は空。理由は note)。生成中は LLM が CPU 専用になり、遅くなる(CPU では 10〜60 秒ほど)。"""
+    with _mv_errors():
+        rec = pick_image(app.state.ledger, body.image_id)
+    try:
+        return await describe_character(app.state.llm, app.state.ledger.abs_path(rec["path"]), str(rec["params"].get("prompt") or ""))
+    except LlmError as e:
+        raise HTTPException(503, e.message)
+
+
+@app.post("/api/mv/describe/song")
+async def api_mv_describe_song(body: DescribeSongIn):
+    """曲の内容・世界観の案(日本語 2〜3 文)を作る。入力欄を埋める用で、制作は作らない。{text, source, listen}。
+    音楽タブの曲(台帳にテーマ・キャプション・ジャンルがある)は、聞かずに、その params から書く(source = "params"、listen は無い)。
+    外から持ち込んだ曲は、管理役の LLM(Gemma 4 の音声入力)が曲の 30 秒を最大 2 か所聞いて、言語・ジャンル・雰囲気・楽器・ボーカル・テンポを読み取り
+    (listen。歌詞は聞き取らない)、そこから書く(source = "listen")。生成中は LLM が CPU 専用になり、遅くなる(CPU では 20〜60 秒ほど)。GPU も ACE-Step も使わない。"""
+    with _mv_errors():
+        rec = pick_song(app.state.ledger, body.song_id)
+    params = rec["params"]
+    try:
+        if song_has_info(params):
+            return {"text": await propose_concept(app.state.llm, {}, params), "source": "params", "listen": None}
+        heard = await listen_song(app.state.llm, app.state.ledger.abs_path(rec["path"]), rec.get("duration_s"))
+        return {"text": await propose_concept(app.state.llm, heard, params), "source": "listen", "listen": heard}
+    except (LlmError, mv_audio.MvAudioError) as e:
+        raise HTTPException(503, e.message)
 
 
 @app.get("/api/mv")

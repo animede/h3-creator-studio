@@ -3,8 +3,8 @@
 # format_h3_official_ref2va_prompt / enforce_reference_and_lipsync / generate_scenario。プロンプトの文言と整形の規則はそのままで、
 # modified: (1) 管理役の LLM(Llm.chat は system と user の 1 往復)を呼ぶ非同期にした。JSON の修復の 1 回は、前の答えを会話に足さず、
 # 同じ依頼に「JSON だけで答え直す」指示を足して頼み直す。(2) JSON の取り出しは、地の文の中の小さな JSON(「[1, 2, 3]」など)を飛ばして、
-# オブジェクトかオブジェクトの配列を優先する。(3) 読み上げ動画(narration)の分岐と analyze_character は移植しない
-# (人物の特徴は文章の説明から来る)。(4) 全体の構成(overview)が読めなくても、空のまま進める。(5) 次の batch に渡す PREVIOUS は、
+# オブジェクトかオブジェクトの配列を優先する。(3) 読み上げ動画(narration)の分岐と analyze_character は、ここには移植しない
+# (人物の特徴は文章の説明から来る。画像を見る analyze_character は mvdescribe.py)。(4) 全体の構成(overview)が読めなくても、空のまま進める。(5) 次の batch に渡す PREVIOUS は、
 # 整形前の項目にする(整形後の定型文を小さなモデルが真似ないように)。(6) 配列の代わりに {"scenes": [...]} で返されても読む。
 # SPDX-License-Identifier: Apache-2.0
 """MV のシーンごとの演出を、管理役の LLM に書かせる(H3 公式の Ref2VA 6 セクション形式のプロンプトにして返す)。

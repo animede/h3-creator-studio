@@ -119,6 +119,43 @@ class FakeAudio:
             test.addCleanup(p.stop)
 
 
+CONCEPT_TEXT = "雨の窓辺で過去を想うピアノバラード。セピアの色調で、孤独から安らぎへ向かう物語。"
+VISION_JA = "長い銀髪、青い瞳、青いセーラー服の少女。アニメ調"
+VISION_REPLY = json.dumps({"subject": "a young anime-style girl", "face": "blue eyes", "hair": "long silver hair", "outfit": "blue sailor uniform",
+                           "style": "anime cel shading", "identity_anchor": "A young anime girl with long silver hair", "description_ja": VISION_JA}, ensure_ascii=False)
+HEARD = {"language": "Japanese", "genre": "J-Pop, Ballad", "mood": "Melancholy, nostalgic", "instruments": "Piano, strings", "vocal": "female", "tempo": "slow"}
+HEARD_REPLY = json.dumps(HEARD)
+
+
+class SmartVision:
+    """Llm.chat_image の代わり: 画像を見て、人物の見た目の JSON(日本語の 1 行つき)を返す。呼ばれた中身は calls に残す。"""
+
+    def __init__(self, reply=VISION_REPLY, error=None):
+        self.calls, self.reply, self.error = [], reply, error
+
+    async def __call__(self, system, user, image_bytes, mime="image/png", max_tokens=0, temperature=0):
+        self.calls.append({"system": system, "user": user, "image": image_bytes, "mime": mime})
+        if self.error:
+            raise self.error
+        return self.reply
+
+
+class SmartAudio:
+    """Llm.chat_audio の代わり: 曲を聞いて、聞き取りの JSON を返す(replies があれば、それを順に。Exception なら投げる)。呼ばれた中身は calls に残す。"""
+
+    def __init__(self, replies=None):
+        self.calls, self.replies, self.hold = [], list(replies) if replies is not None else None, None
+
+    async def __call__(self, system, user, clips, max_tokens=0, temperature=0):
+        self.calls.append({"system": system, "user": user, "clips": list(clips)})
+        if self.hold is not None:
+            await self.hold.wait()
+        reply = self.replies.pop(0) if self.replies else HEARD_REPLY
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
 class SmartChat:
     """管理役の LLM の代わり: 概要の依頼には概要を、batch の依頼には頼まれた番号どおりの演出を返す。"""
 
@@ -131,6 +168,10 @@ class SmartChat:
             raise self.error
         if self.hold is not None:
             await self.hold.wait()
+        if "song content and world" in user:                          # 曲の内容・世界観の案
+            return CONCEPT_TEXT
+        if "ONE compact Japanese line" in user:                       # 英語の特徴を、日本語の 1 行に
+            return "長い銀髪の少女。アニメ調"
         if "fixed visual appearance" in user:                         # 人物の見た目の抜き出し: 説明をそのまま subject に
             return json.dumps({"subject": user.rsplit("DESCRIPTION: ", 1)[-1].strip(), "face": "", "hair": "", "outfit": "", "style": ""})
         if "MV treatment" in user:
@@ -218,6 +259,8 @@ class HandlerBase(unittest.IsolatedAsyncioTestCase):
         self.song = self.add("audio", "song.mp3", {"theme": "夜明けの駅", "genre": "Ballad"})
         self.image = self.add("image", "girl.png", {"prompt": "a girl with silver hair"})
         self.chat = SmartChat()
+        self.vision = SmartVision()
+        self.hearing = SmartAudio()
         self.h3 = FakeH3()
 
     def add(self, kind, name, params):
@@ -230,7 +273,8 @@ class HandlerBase(unittest.IsolatedAsyncioTestCase):
         async def release_before_gpu():
             pass
         return Ctx(FakeSched(), self.ledger, self.root, transport=httpx.MockTransport(self.h3),
-                   llm=types.SimpleNamespace(chat=self.chat, release_before_gpu=release_before_gpu) if llm == "default" else llm)
+                   llm=types.SimpleNamespace(chat=self.chat, chat_image=self.vision, chat_audio=self.hearing, release_before_gpu=release_before_gpu)
+                   if llm == "default" else llm)
 
     def project(self, state="analyzing", scenes=None, analysis=True, pid="proj1", song=None, **params) -> str:
         resolved = mv.resolve_params(self.ledger, {"song_id": (song or self.song)["id"], "image_id": self.image["id"], **params})
@@ -270,9 +314,18 @@ class NormalizeTest(HandlerBase):
                 mvh.normalize(kind, params, self.ledger)
             self.assertIn(word, str(cm.exception))
 
+    def test_listen_takes_a_project_like_the_other_stages(self):
+        pid = self.project(scenes=self.scenes())
+        self.assertEqual(mvh.normalize("mv.listen", {"project_id": pid, "song_id": "ignored", "junk": 1}, self.ledger), {"project_id": pid})
+        for params in ({}, {"project_id": "nope"}, {"song_id": self.song["id"]}):             # 曲だけでは頼めない(画面の「曲から作る」はジョブにしない)
+            with self.assertRaises(ValueError, msg=str(params)) as cm:
+                mvh.normalize("mv.listen", params, self.ledger)
+            self.assertIn("制作が見つかりません", str(cm.exception))
+
     def test_registered_with_the_declared_lanes(self):
         from studio.handlers import HANDLERS
-        for kind, component, gpu in (("mv.analyze", None, False), ("mv.script", None, False), ("mv.scene", "h3", True), ("mv.assemble", None, False)):
+        for kind, component, gpu in (("mv.analyze", None, False), ("mv.listen", None, False), ("mv.script", None, False), ("mv.scene", "h3", True),
+                                     ("mv.assemble", None, False)):
             self.assertEqual((HANDLERS[kind].component, HANDLERS[kind].gpu), (component, gpu), kind)
             self.assertIs(HANDLERS[kind], mvh.HANDLERS[kind])
         self.assertIs(HANDLERS["mv.scene"].cancel, h3.cancel)           # シーンの中止は、H3 の interrupt
@@ -387,6 +440,123 @@ class AnalyzeTest(HandlerBase):
         self.assertEqual(self.audio.calls, [])
 
 
+class ListenTest(HandlerBase):
+    """mv.listen(制作の中だけ): 曲の 30 秒を最大 2 か所 LLM に聞かせ(Gemma の音声入力)、聞き取りから曲の内容・世界観の案を書く。CPU のレーン。"""
+
+    def setUp(self):
+        super().setUp()
+        self.ext = self.add("audio", "external.mp3", {"uploaded": True})           # 外から持ち込んだ曲(台帳に曲の手がかりが無い)
+
+    def external_project(self, analysis=True, **kw) -> str:
+        return self.project(state="analyzing", song=self.ext, analysis=analysis, scenes=self.scenes(prompts=False, seeds=False), **kw)
+
+    def cuts(self) -> list:
+        return [c for c in self.audio.calls if c[0] == "cut"]
+
+    async def test_the_concept_is_filled_from_what_the_llm_heard_and_the_next_step_is_the_script(self):
+        pid = self.external_project()
+        self.assertEqual((self.proj()["params"]["concept"], self.proj()["params"]["listen"]), ("", "pending"))
+        self.assertEqual(mv.next_step(self.proj()), ("listen",))
+        self.ledger.update_mv_project(pid, params_patch={"analysis": {"duration": 100.0, "bpm": 118.5, "has_vocals": True, "scenes": 3}})
+        job = self.job("mv.listen", pid)
+        await mvh.run_listen(job, self.ctx())
+        song = self.ledger.abs_path(self.ext["path"])
+        self.assertEqual([(c[1], c[2], c[3], c[5], c[6]) for c in self.cuts()], [(song, 25.0, 55.0, 16000, 1), (song, 60.0, 90.0, 16000, 1)])     # 長さ 100 秒の 25% と 60% から、16kHz モノラル
+        self.assertEqual(len(self.hearing.calls), 2)                                       # 1 か所ずつ聞く
+        self.assertTrue(all(c["clips"] == [b"RIFFscene"] for c in self.hearing.calls))
+        params = self.proj()["params"]
+        self.assertEqual((params["concept"], params["concept_source"], params["listen"]), (CONCEPT_TEXT, "listen", "done"))
+        self.assertEqual(job.result, {"text": CONCEPT_TEXT, **HEARD})
+        self.assertEqual(mv.next_step(self.proj()), ("script",))
+        prompt = self.chat.calls[-1]
+        for word in ("Genre: J-Pop, Ballad", "Mood: Melancholy, nostalgic", "Instruments: Piano, strings", "slow / 118.5 BPM", "Vocal language: Japanese"):
+            self.assertIn(word, prompt)                                                    # BPM は、MV の分析のもの
+        self.assertNotIn("lyrics\"", self.hearing.calls[0]["user"])                         # 歌詞は聞き取らない
+
+    async def test_without_the_analysis_the_length_comes_from_the_ledger_and_no_bpm_is_given(self):
+        pid = self.external_project(analysis=False)
+        await mvh.run_listen(self.job("mv.listen", pid), self.ctx())
+        self.assertEqual([c[2:4] for c in self.cuts()], [(0.0, 30.0)])                      # 台帳の長さ 30 秒: 先頭の 1 か所
+        self.assertNotIn("BPM", self.chat.calls[-1].split("SONG INFO", 1)[1])
+
+    async def test_failures_become_job_failed_and_leave_the_project_alone(self):
+        pid = self.external_project()
+        self.hearing.replies = [LlmError("この LLM は音声を読めません")]
+        with self.assertRaises(JobFailed) as cm:
+            await mvh.run_listen(self.job("mv.listen", pid), self.ctx())
+        self.assertEqual(cm.exception.message, "この LLM は音声を読めません")
+        self.hearing.replies = ["no json", "no json"]
+        with self.assertRaises(JobFailed) as cm:
+            await mvh.run_listen(self.job("mv.listen", pid), self.ctx())
+        self.assertIn("曲を聞き取れませんでした", cm.exception.message)
+        self.audio.error["cut"] = mv_audio.MvAudioError("音声の切り出しに失敗しました(ffmpeg): x", "tail")
+        with self.assertRaises(JobFailed) as cm:
+            await mvh.run_listen(self.job("mv.listen", pid), self.ctx())
+        self.assertEqual((cm.exception.message, cm.exception.log_tail), ("音声の切り出しに失敗しました(ffmpeg): x", "tail"))
+        self.audio.error.clear()
+        self.hearing.replies = None
+        self.chat.error = LlmError("llama-server を起動できません")
+        with self.assertRaises(JobFailed) as cm:
+            await mvh.run_listen(self.job("mv.listen", pid), self.ctx())
+        self.assertEqual(cm.exception.message, "llama-server を起動できません")
+        with self.assertRaises(JobFailed) as cm:
+            await mvh.run_listen(self.job("mv.listen", pid), self.ctx(llm=None))
+        self.assertIn("LLM が設定されていません", cm.exception.message)
+        self.ledger.delete_output(self.ext["id"])
+        with self.assertRaises(JobFailed) as cm:
+            await mvh.run_listen(self.job("mv.listen", pid), self.ctx())
+        self.assertIn("曲が見つかりません", cm.exception.message)
+        params = self.proj()["params"]
+        self.assertEqual((params["concept"], params["listen"]), ("", "pending"))             # 失敗は、Director が受けて決める(ここでは何も書かない)
+
+    async def test_cancel_before_it_starts(self):
+        pid = self.external_project()
+        job = self.job("mv.listen", pid)
+        job.cancel_requested = True
+        with self.assertRaises(JobCancelled):
+            await mvh.run_listen(job, self.ctx())
+        self.assertEqual((self.cuts(), self.hearing.calls), ([], []))
+
+    async def runner_job(self):
+        pid = self.external_project()
+        runner = JobRunner(self.ctx(), {"mv.listen": mvh.HANDLERS["mv.listen"]}, step_poll_s=0.01)
+        runner.start()
+        self.addAsyncCleanup(runner.stop)
+        return runner, runner.submit("mv", "mv.listen", {"project_id": pid})
+
+    async def wait_for(self, cond, what):
+        for _ in range(500):
+            if cond():
+                return
+            await asyncio.sleep(0.01)
+        self.fail(f"待っても {what} にならない")
+
+    async def test_cancel_while_the_llm_is_listening(self):
+        self.hearing.hold = asyncio.Event()                                                # 聞いている途中で止まる
+        runner, job = await self.runner_job()
+        await self.wait_for(lambda: self.hearing.calls, "LLM が曲を聞き始める")
+        self.assertEqual(job.message, "曲を聞いています")
+        await runner.cancel(job.id)
+        await self.wait_for(lambda: job.status == "cancelled", "ジョブが中止される")
+        self.assertEqual(self.chat.calls, [])                                              # 案は書かない
+        self.assertEqual(self.proj()["params"]["listen"], "pending")
+
+    async def test_cancel_while_the_llm_is_writing_the_proposal(self):
+        self.chat.hold = asyncio.Event()
+        runner, job = await self.runner_job()
+        await self.wait_for(lambda: self.chat.calls, "LLM が案を書き始める")
+        self.assertEqual(job.message, "曲の内容を考えています")
+        await runner.cancel(job.id)
+        await self.wait_for(lambda: job.status == "cancelled", "ジョブが中止される")
+        self.assertEqual(self.proj()["params"]["listen"], "pending")
+
+    async def test_runs_on_the_cpu_lane_and_the_job_carries_the_result(self):
+        runner, job = await self.runner_job()
+        await self.wait_for(lambda: job.status == "completed", "ジョブが完了する")
+        self.assertEqual((job.lane, job.tab, job.progress), ("cpu", "mv", 1.0))           # GPU も ACE-Step も使わない(載せ替えなし)
+        self.assertEqual(job.result["text"], CONCEPT_TEXT)
+
+
 class ScriptTest(HandlerBase):
     async def test_prompts_seeds_and_overview_are_stored(self):
         self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False), seed=100, character="a girl in a red coat", concept="dawn")
@@ -408,8 +578,9 @@ class ScriptTest(HandlerBase):
         self.assertNotIn("VERTICAL frame", self.chat.calls[2])          # 16:9 は横長
 
     async def test_portrait_frame_and_default_seed_and_default_subject(self):
-        self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False), aspect="9:16", character="")
-        self.ledger.update_mv_project("proj1", params_patch={"character": ""})
+        plain = self.add("image", "plain.png", {"uploaded": True})            # 画像のプロンプトも無く、画像を見ることもできない(下で断る)
+        self.vision.error = LlmError("この LLM は画像を読めません")
+        self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False), aspect="9:16", image_id=plain["id"])
         await mvh.run_script(self.job("mv.script"), self.ctx())
         proj = self.proj()
         base = int(hashlib.sha256(b"proj1").hexdigest()[:8], 16)           # seed 未指定なら、制作の ID から決める(同じ制作は毎回同じ)
@@ -453,6 +624,79 @@ class ScriptTest(HandlerBase):
             await asyncio.sleep(0.01)
         self.assertEqual(job.status, "cancelled")
         self.assertTrue(all(not s["prompt"] for s in self.proj()["scenes"]))
+
+
+class ScriptVisionTest(HandlerBase):
+    """人物の説明が空の制作は、mv.script の最初に、画像を見て人物の説明を作り(制作に残し)、そのうえで見た目を抜き出して演出を書く。"""
+
+    def plain_project(self, **kw) -> str:
+        self.plain = self.add("image", "plain.png", {"uploaded": True})            # 外から持ち込んだ画像(台帳に画像のプロンプトが無い)
+        return self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False), image_id=self.plain["id"], **kw)
+
+    async def test_empty_character_is_described_from_the_image_and_stored(self):
+        self.plain_project()
+        job = self.job("mv.script")
+        await mvh.run_script(job, self.ctx())
+        (call,) = self.vision.calls
+        self.assertEqual(call["image"], (self.root / "uploads" / "plain.png").read_bytes())
+        self.assertEqual(call["mime"], "image/png")
+        params = self.proj()["params"]
+        self.assertEqual((params["character"], params["character_source"], params["character_note"]), (VISION_JA, "vision", ""))
+        self.assertIn(f"DESCRIPTION: {VISION_JA}", self.chat.calls[0])                       # 作った説明は、書いた説明と同じに見た目の抜き出しへ
+        self.assertEqual(params["character_facts"], {"subject": VISION_JA})
+        for s in self.proj()["scenes"]:
+            self.assertIn(f"<Subject 1> is the exact character shown in <Picture 1>: {VISION_JA}.", s["prompt"])
+
+    async def test_a_written_description_or_a_ledger_prompt_never_calls_vision(self):
+        self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False), character="a girl in a red coat")
+        await mvh.run_script(self.job("mv.script"), self.ctx())
+        self.assertEqual(self.vision.calls, [])
+        self.assertEqual(self.proj()["params"]["character_source"], "typed")
+        self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False), pid="proj2")          # 画像のプロンプト(画像タブの画像)
+        await mvh.run_script(self.job("mv.script", "proj2"), self.ctx())
+        self.assertEqual(self.vision.calls, [])
+        self.assertEqual((self.proj("proj2")["params"]["character_source"], self.proj("proj2")["params"]["character"]), ("image", "a girl with silver hair"))
+
+    async def test_unreadable_image_keeps_the_neutral_subject_and_is_not_asked_again(self):
+        self.vision.error = LlmError("画像を読む投影ファイル(mmproj)を取得できませんでした")
+        self.plain_project()
+        await mvh.run_script(self.job("mv.script"), self.ctx())
+        params = self.proj()["params"]
+        self.assertEqual((params["character"], params["character_source"]), ("", "none"))
+        self.assertIn("投影ファイル", params["character_note"])
+        self.assertIn("visible in the image", self.proj()["scenes"][0]["prompt"])           # 中立の文で、演出は書く
+        self.assertEqual(len(self.vision.calls), 1)
+        self.ledger.update_mv_project("proj1", scene_patches={s["index"]: {"prompt": ""} for s in self.proj()["scenes"]})
+        await mvh.run_script(self.job("mv.script"), self.ctx())                              # やり直しても、また画像を頼まない
+        self.assertEqual(len(self.vision.calls), 1)
+
+    async def test_vision_unavailable_falls_back_to_the_ledger_prompt(self):
+        self.vision.error = LlmError("この LLM は画像を読めません")
+        self.project(state="scripting", scenes=self.scenes(prompts=False, seeds=False))
+        self.ledger.update_mv_project("proj1", params_patch={"character": ""})              # 画面の説明が空で、台帳のプロンプトだけがある
+        await mvh.run_script(self.job("mv.script"), self.ctx())
+        params = self.proj()["params"]
+        self.assertEqual((params["character"], params["character_source"]), ("長い銀髪の少女。アニメ調", "image"))
+        self.assertIn("画像のプロンプトから見た目を抜き出しました", params["character_note"])
+
+    async def test_the_description_survives_a_failure_after_it_and_is_not_made_again(self):
+        self.plain_project()
+        self.chat.error = LlmError("llama-server を起動できません")
+        with self.assertRaises(JobFailed):
+            await mvh.run_script(self.job("mv.script"), self.ctx())
+        params = self.proj()["params"]
+        self.assertEqual((params["character"], params["character_source"]), (VISION_JA, "vision"))      # 見た結果は残る(再開で、また見ない)
+        self.chat.error = None
+        await mvh.run_script(self.job("mv.script"), self.ctx())
+        self.assertEqual(len(self.vision.calls), 1)
+        self.assertTrue(all(s["prompt"] for s in self.proj()["scenes"]))
+
+    async def test_image_gone_skips_vision(self):
+        self.plain_project()
+        self.ledger.delete_output(self.plain["id"])
+        await mvh.run_script(self.job("mv.script"), self.ctx())
+        self.assertEqual(self.vision.calls, [])
+        self.assertIn("visible in the image", self.proj()["scenes"][0]["prompt"])
 
 
 def scene_ctx_project(test, **kw) -> str:
@@ -800,6 +1044,12 @@ class EndToEndTest(HandlerBase):
         r.start()
         self.addCleanup(r.stop)
 
+    def external_song(self, name: str) -> dict:
+        """外から持ち込んだ曲(台帳に曲の手がかりが無い)。中身は本物の音声(曲を聞くときに、本物の ffmpeg が切り出す)。"""
+        rec = self.add("audio", name, {"uploaded": True})
+        self.ledger.abs_path(rec["path"]).write_bytes(self.song_wav.read_bytes())
+        return rec
+
     async def run_all(self):
         from studio.handlers import HANDLERS
         runner = JobRunner(self.ctx(), HANDLERS, step_poll_s=0.01)
@@ -815,6 +1065,41 @@ class EndToEndTest(HandlerBase):
                 return v
             await asyncio.sleep(0.02)
         self.fail(f"状態が {states} にならない: {director.view(pid)['state']} {director.view(pid)['message']} {director.view(pid)['error']}")
+
+    async def test_external_song_and_image_get_automatic_descriptions_all_the_way(self):
+        """画像のプロンプトも曲の手がかりも無い入力で「作る」: 分析 →(LLM が曲を聞く)→ 演出(画像を見た人物の説明つき)→ シーン → 結合。"""
+        runner, director = await self.run_all()
+        ext_song, ext_image = self.external_song("ext.mp3"), self.add("image", "ext.png", {"uploaded": True})
+        pid = director.create({"song_id": ext_song["id"], "image_id": ext_image["id"], "aspect": "16:9", "quality": "fast"})["id"]
+        self.assertEqual(director.view(pid)["sources"], {"character": "", "concept": ""})
+        view = await self.until_state(director, pid, "completed", "failed")
+        self.assertEqual((view["state"], view["error"]), ("completed", None))
+        self.assertEqual([j.kind for j in runner.jobs.values() if j.tab == "mv"],
+                         ["mv.analyze", "mv.listen", "mv.script", "mv.scene", "mv.scene", "mv.scene", "mv.assemble"])      # 分析の次に、曲を聞く
+        self.assertEqual([j.lane for j in runner.jobs.values() if j.kind == "mv.listen"], ["cpu"])                          # GPU も ACE-Step も使わない
+        self.assertEqual(view["sources"], {"character": "vision", "concept": "listen"})
+        self.assertEqual((view["params"]["character"], view["params"]["concept"]), (VISION_JA, CONCEPT_TEXT))
+        self.assertEqual(view["source_notes"], {"character": "", "concept": ""})
+        self.assertEqual(len(self.hearing.calls), 1)                                                                        # 分析の長さは 20 秒: 先頭の 1 か所
+        self.assertTrue(self.hearing.calls[0]["clips"][0].startswith(b"RIFF"))                                              # 本物の ffmpeg で切り出した WAV
+        self.assertEqual(len(self.vision.calls), 1)
+        treatment = next(c for c in self.chat.calls if "MV treatment" in c)
+        self.assertIn(f"USER_CONCEPT: {CONCEPT_TEXT}", treatment)                               # 聞いて作った案が、演出の材料になる
+        self.assertIn(VISION_JA, treatment)                                                      # 画像を見て作った説明も
+        scenes = self.ledger.get_mv_project(pid)["scenes"]
+        self.assertIn(f"<Subject 1> is the exact character shown in <Picture 1>: {VISION_JA}.", scenes[0]["prompt"])
+
+    async def test_a_song_the_llm_cannot_hear_does_not_stop_the_mv(self):
+        runner, director = await self.run_all()
+        self.hearing.replies = [LlmError("この LLM は音声を読めません(投影ファイル mmproj が読み込まれていません)")]
+        pid = director.create({"song_id": self.external_song("ext.mp3")["id"], "image_id": self.image["id"]})["id"]
+        view = await self.until_state(director, pid, "completed", "failed")
+        self.assertEqual((view["state"], view["error"]), ("completed", None))                    # 曲の内容なしで、最後まで作る
+        self.assertEqual(view["sources"]["concept"], "")
+        self.assertIn("音声を読めません", view["source_notes"]["concept"])
+        self.assertEqual(view["params"]["concept"], "")
+        treatment = next(c for c in self.chat.calls if "MV treatment" in c)
+        self.assertIn("USER_CONCEPT: (derive from the music and character)", treatment)
 
     async def test_whole_pipeline_makes_an_mv_of_the_exact_length(self):
         runner, director = await self.run_all()

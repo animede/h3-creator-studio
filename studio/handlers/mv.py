@@ -1,9 +1,11 @@
-"""MV(リップシンク)のハンドラ: mv.analyze / mv.script / mv.scene / mv.assemble。
+"""MV(リップシンク)のハンドラ: mv.analyze / mv.listen / mv.script / mv.scene / mv.assemble。
 
 どのジョブをいつ入れるか(順番・一時停止・やり直し)は mv.Director が決める。ここは 1 つのジョブの仕事だけをして、結果を台帳の mv_projects に書く
 (シーンを「生成中」にするのと、失敗・中止の記録は Director の仕事)。ジョブの params は {"project_id", ("scene")} だけで、中身はその都度台帳から読む。
   analyze  : CPU。音声を 44.1kHz にそろえ → Demucs でボーカルを分け → 曲をシーンに分ける(道具用の Python の子プロセス)
-  script   : CPU(管理役の LLM)。シーンごとの演出を、H3 公式の Ref2VA 6 セクション形式で書く
+  listen   : CPU(管理役の LLM)。曲の 30 秒を最大 2 か所聞いて(Gemma の音声入力)言語・ジャンル・雰囲気・楽器・ボーカル・テンポを読み取り、曲の内容・世界観の案を書く。
+             曲の台帳に情報が無く、「曲の内容」が空の制作が、分析の後に通る(BPM は分析のもの)。GPU も ACE-Step も使わない
+  script   : CPU(管理役の LLM)。人物の説明が空なら、まず画像を見て作る。そのうえで、シーンごとの演出を、H3 公式の Ref2VA 6 セクション形式で書く
   scene    : H3。そのシーンのボーカルを切り出し、キャラクター画像と一緒に Ref2VA + Vocal Lock で生成 → ちょうどの尺のクリップに整える
   assemble : CPU。クリップをつなぎ、元の曲に差し替えた MP4 を作ってギャラリーに載せる
 作業のファイルは outputs/mv/<制作の ID>/ に置く(song.wav・vocals.wav・scene_NNN.mp4 など)。
@@ -15,7 +17,7 @@ import re
 import time
 from pathlib import Path
 
-from .. import config, media, mv_audio, mvclip, mvscript
+from .. import config, media, mv_audio, mvclip, mvdescribe, mvscript
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from ..ledger import THUMB_WIDTH
 from ..llm import LlmError
@@ -145,6 +147,38 @@ async def _analyze(job: Job, ctx: Ctx) -> None:
              "あり" if analysis["has_vocals"] else "なし")
 
 
+# ---- mv.listen ----
+
+async def run_listen(job: Job, ctx: Ctx) -> None:
+    if job.cancel_requested:
+        raise JobCancelled()
+    await _cancellable(job, _listen(job, ctx))
+
+
+async def _listen(job: Job, ctx: Ctx) -> None:
+    proj = _project(ctx, job)
+    pid, p = proj["id"], proj["params"]
+    rec = ctx.ledger.get_output(p["song_id"])
+    if rec is None:
+        raise JobFailed("曲が見つかりません(ギャラリーから削除されたかもしれません)")
+    if ctx.llm is None:
+        raise JobFailed("LLM が設定されていません")
+    analysis = p.get("analysis") or {}
+    job.message = "曲を聞いています"
+    try:
+        heard = await mvdescribe.listen_song(ctx.llm, ctx.ledger.abs_path(rec["path"]), analysis.get("duration") or rec.get("duration_s"))
+        job.progress, job.message = 0.9, "曲の内容を考えています"
+        text = await mvdescribe.propose_concept(ctx.llm, {**heard, "bpm": analysis.get("bpm")}, rec["params"])
+    except LlmError as e:
+        raise JobFailed(e.message) from e
+    except mv_audio.MvAudioError as e:
+        raise JobFailed(e.message, e.log_tail) from e
+    job.result = {"text": text, **heard}
+    # 失敗しても MV は止めない(Director が、曲の内容なしで続ける)。ここに書くのは、聞けて案ができたときだけ
+    ctx.ledger.update_mv_project(pid, params_patch={"concept": text, "concept_source": "listen", "listen": "done"})
+    log.info("MV %s: 曲を聞きました(%s)→ %s", pid, heard, text)
+
+
 # ---- mv.script ----
 
 async def run_script(job: Job, ctx: Ctx) -> None:
@@ -153,18 +187,35 @@ async def run_script(job: Job, ctx: Ctx) -> None:
     await _cancellable(job, _script(job, ctx))
 
 
+async def _describe_image(job: Job, ctx: Ctx, proj: dict) -> str:
+    """人物の説明が空の制作(台帳に画像のプロンプトが無い、画面で書かなかった)のとき、画像を見て人物の説明を作り、制作に残す(再開でやり直さない)。
+    画像を読めなければ、理由を character_note に残して空のまま(演出は中立の文)。"""
+    rec = ctx.ledger.get_output(proj["params"]["image_id"])
+    if rec is None:
+        return ""
+    job.message = "画像を見て、人物の見た目を調べています"
+    res = await mvdescribe.describe_character(ctx.llm, ctx.ledger.abs_path(rec["path"]), str(rec["params"].get("prompt") or ""))
+    source = {"vision": "vision", "prompt": "image"}.get(res["source"], "none")        # none: 読めなかった(再開しても、また頼まない)
+    ctx.ledger.update_mv_project(proj["id"], params_patch={"character": res["text"], "character_source": source, "character_note": res["note"]})
+    log.info("MV %s: 人物の説明を自動で作りました(%s): %s", proj["id"], res["source"], res["text"] or res["note"])
+    return res["text"]
+
+
 async def _script(job: Job, ctx: Ctx) -> None:
     proj = _project(ctx, job)
     pid, p, scenes = proj["id"], proj["params"], proj["scenes"]
     if ctx.llm is None:
         raise JobFailed("LLM が設定されていません")
-    job.message = "人物の見た目を整理しています"
 
     def on_progress(done: int, total: int) -> None:
         job.progress, job.message = done / total, f"演出を書いています {done} / {total} シーン"
     try:
-        # 人物の特徴は、画面の説明か画像のプロンプト(画像の解析はしない)。場所や光を除いた見た目だけにしてから使う
-        character = await mvscript.character_facts(ctx.llm.chat, p.get("character") or "")
+        description = str(p.get("character") or "").strip()
+        if not description and p.get("character_source") != "none":
+            description = await _describe_image(job, ctx, proj)
+        job.message = "人物の見た目を整理しています"
+        # 人物の特徴は、画面の説明か、画像のプロンプトか、画像を見て作った説明。場所や光を除いた見た目だけにしてから使う
+        character = await mvscript.character_facts(ctx.llm.chat, description)
         job.message = f"演出を書いています 0 / {len(scenes)} シーン"
         result = await mvscript.generate_scenario(
             ctx.llm.chat, scenes, p.get("concept") or "", character, frame=mvscript.frame_kind(p["width"], p["height"]),
@@ -295,6 +346,7 @@ async def run_assemble(job: Job, ctx: Ctx) -> None:
 
 HANDLERS = {
     "mv.analyze": Handler(component=None, normalize=normalize, run=run_analyze, cancel=cancel_task, gpu=False),
+    "mv.listen": Handler(component=None, normalize=normalize, run=run_listen, cancel=cancel_task, gpu=False),
     "mv.script": Handler(component=None, normalize=normalize, run=run_script, cancel=cancel_task, gpu=False),
     "mv.scene": Handler(component=h3.COMPONENT, normalize=normalize, run=run_scene, cancel=h3.cancel),
     "mv.assemble": Handler(component=None, normalize=normalize, run=run_assemble, cancel=cancel_flag, gpu=False),

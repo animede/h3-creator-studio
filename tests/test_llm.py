@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import io
+import json
 import tarfile
 import tempfile
 import unittest
@@ -8,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import httpx
+from PIL import Image
 
 from studio import llm as llm_mod
 from studio.config import Settings
@@ -84,6 +87,15 @@ class SettingsTest(unittest.TestCase):
         self.assertNotIn("-ngl", plain)                                                # CPU 版には、もともと GPU の指定が無い
 
 
+    def test_build_command_mmproj(self):
+        proj = Path("/m/mmproj.gguf")
+        for gpu, cpu_only in ((True, False), (True, True), (False, False)):      # GPU 版・CUDA 版の CPU 専用・CPU 版: どれでも付ける
+            cmd = llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, gpu, "auto", cpu_only, proj)
+            self.assertEqual(cmd[cmd.index("--mmproj"):cmd.index("--mmproj") + 2], ["--mmproj", str(proj)], (gpu, cpu_only))
+        for args in ((True, "auto", False), (True, "auto", True), (False, "auto", False)):
+            self.assertNotIn("--mmproj", llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, args[0], args[1], args[2]))      # 投影ファイルが無ければ付けない
+
+
 class FilesTest(unittest.TestCase):
     def setUp(self):
         self._t = tempfile.TemporaryDirectory()
@@ -143,6 +155,36 @@ class FilesTest(unittest.TestCase):
         self.assertEqual(llm_mod.find_gguf(make_cfg(self.root, gguf=str(explicit))), explicit)
         with self.assertRaises(LlmError):
             llm_mod.find_gguf(make_cfg(self.root, gguf=str(self.root / "none.gguf")))
+
+    def test_find_mmproj_order_override_and_missing(self):
+        cfg = make_cfg(self.root)
+        self.assertIsNone(llm_mod.find_mmproj(cfg))                                   # 無くてもテキストの chat は動く: None
+        own = touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
+        self.assertEqual(llm_mod.find_mmproj(cfg), own)                               # tools_dir(取得先)
+        ace = touch(self.root / "ace" / "easy-music" / "models" / llm_mod.MODEL_FILE)
+        self.assertEqual(llm_mod.find_gguf(cfg), ace)
+        self.assertEqual(llm_mod.find_mmproj(cfg), own)                               # 見つかった GGUF の隣に無ければ、tools_dir
+        beside = touch(ace.parent / llm_mod.MMPROJ_FILE)
+        self.assertEqual(llm_mod.find_mmproj(cfg), beside)                            # GGUF の隣が先
+        self.assertEqual(llm_mod.find_mmproj(cfg, ace), beside)
+        explicit = touch(self.root / "my-mmproj.gguf")
+        self.assertEqual(llm_mod.find_mmproj(make_cfg(self.root, mmproj=str(explicit))), explicit)    # 設定が最優先
+        with self.assertRaises(LlmError) as cm:                                       # 設定が間違っていれば、find_gguf と同じ LlmError
+            llm_mod.find_mmproj(make_cfg(self.root, mmproj=str(self.root / "none.gguf")))
+        self.assertIn("[llm] mmproj", cm.exception.message)
+        self.assertIsNone(llm_mod.find_mmproj(make_cfg(self.root, tools_dir=str(self.root / "empty")), self.root / "elsewhere" / "m.gguf"))
+
+    def test_download_mmproj_goes_to_the_tools_dir(self):
+        cfg = make_cfg(self.root)
+        fake = mock.Mock(side_effect=lambda repo_id, filename, local_dir: str(touch(Path(local_dir) / filename)))
+        with mock.patch("huggingface_hub.hf_hub_download", fake):
+            got = llm_mod.download_mmproj(cfg)
+            model = llm_mod.download_model(cfg)
+        self.assertEqual((got, model), (self.root / "tools" / llm_mod.MMPROJ_FILE, self.root / "tools" / llm_mod.MODEL_FILE))
+        self.assertEqual([c.kwargs["filename"] for c in fake.call_args_list], [llm_mod.MMPROJ_FILE, llm_mod.MODEL_FILE])
+        self.assertEqual({c.kwargs["repo_id"] for c in fake.call_args_list}, {llm_mod.MODEL_REPO})
+        self.assertEqual(llm_mod.find_mmproj(cfg), got)
+        self.assertEqual((llm_mod.MMPROJ_FILE, llm_mod.MODEL_REPO), ("mmproj-gemma-4-E4B-it-Q8_0.gguf", "ggml-org/gemma-4-E4B-it-GGUF"))
 
     def test_find_binary_prefers_override_then_tools_dir(self):
         cfg = make_cfg(self.root)
@@ -331,6 +373,293 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("-ngl", spec.cmd)
         self.assertEqual(spec.env(None, None), {})
         self.assertEqual((llm._gpu, llm._cpu_only), (False, False))
+
+    # ---- 画像を読む(chat_image) ----
+
+    def recorder(self, seen: list, status=200, text=""):
+        """/health は 200。それ以外(chat)は本文を seen に残して、status が 200 なら答えを返す。"""
+        def handler(req: httpx.Request) -> httpx.Response:
+            if req.url.path == "/health":
+                return httpx.Response(200)
+            seen.append(json.loads(req.content))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "<think>x</think>\n見た答え"}}]}) if status == 200 else httpx.Response(status, text=text)
+        return httpx.MockTransport(handler)
+
+    @staticmethod
+    def png(size=(64, 48), mode="RGB", color=(10, 120, 200), fmt="PNG", **save) -> bytes:
+        buf = io.BytesIO()
+        Image.new(mode, size, color).save(buf, fmt, **save)
+        return buf.getvalue()
+
+    @staticmethod
+    def uri_image(payload: dict):
+        """メッセージの画像(data URI)を (MIME, バイト列) にする。"""
+        url = payload["messages"][1]["content"][1]["image_url"]["url"]
+        head, _, b64 = url.partition(",")
+        return head[len("data:"):-len(";base64")], base64.b64decode(b64)
+
+    async def test_chat_image_sends_text_and_image_parts_as_a_data_uri(self):
+        seen = []
+        llm = Llm(make_cfg(self.root), transport=self.recorder(seen), poll_s=0.01, settle_s=0)         # すでに別の llama-server が応答している(外部)
+        png = self.png()
+        with mock.patch.object(llm_mod, "download_mmproj") as download:
+            answer = await llm.chat_image("sys", "この画像は?", png, "image/png", max_tokens=321, temperature=0.25)
+        self.assertEqual(answer, "見た答え")                                                          # 思考ブロックは取り除く
+        download.assert_not_called()                                                                   # 外部の llama-server には、こちらの投影ファイルは関係しない
+        (payload,) = seen
+        self.assertEqual(payload["messages"][0], {"role": "system", "content": "sys"})
+        user = payload["messages"][1]
+        self.assertEqual((user["role"], [part["type"] for part in user["content"]]), ("user", ["text", "image_url"]))
+        self.assertEqual(user["content"][0]["text"], "この画像は?")
+        self.assertEqual((payload["max_tokens"], payload["temperature"]), (321, 0.25))
+        self.assertEqual(self.uri_image(payload), ("image/png", png))                                  # 小さな PNG は、そのまま
+        self.assertEqual(llm._users, 0)
+
+    async def test_chat_image_shrinks_large_images_and_converts_unreadable_formats(self):
+        seen = []
+        llm = Llm(make_cfg(self.root), transport=self.recorder(seen), poll_s=0.01, settle_s=0)
+        cases = {
+            "large png": (self.png((3000, 1500)), "image/png", (1024, 512)),                            # 長辺 1024 に縮める(縦横比は保つ)
+            "tall jpeg": (self.png((900, 2400), fmt="JPEG"), "image/jpeg", (384, 1024)),
+            "webp": (self.png((100, 80), fmt="WEBP"), "image/webp", (100, 80)),                         # llama.cpp は WebP を読めない
+            "alpha png": (self.png((100, 80), "RGBA", (255, 0, 0, 0)), "image/png", (100, 80)),         # 透明は白で埋める
+        }
+        for name, (data, mime, size) in cases.items():
+            seen.clear()
+            await llm.chat_image("s", "u", data, mime)
+            got_mime, got = self.uri_image(seen[0])
+            im = Image.open(io.BytesIO(got))
+            self.assertEqual((got_mime, im.format, im.size), ("image/jpeg", "JPEG", size), name)
+        self.assertEqual(Image.open(io.BytesIO(got)).convert("RGB").getpixel((5, 5)), (255, 255, 255))   # 透明な赤は、白になる
+        # 小さな PNG / JPEG はそのまま。画像として読めないものも、そのまま(LLM が断れば、その理由が出る)
+        small_jpeg, junk = self.png((200, 100), fmt="JPEG"), b"not an image"
+        for data, mime, want in ((small_jpeg, "image/png", "image/jpeg"), (junk, "image/gif", "image/gif")):
+            seen.clear()
+            await llm.chat_image("s", "u", data, mime)
+            self.assertEqual(self.uri_image(seen[0]), (want, data))
+
+    def test_shrink_image_applies_the_exif_orientation_and_is_exact_for_small_files(self):
+        exif = Image.Exif()
+        exif[0x0112] = 6                                                                                # 時計回りに 90 度回して見る写真
+        data, mime = llm_mod.shrink_image(self.png((200, 100), fmt="JPEG", exif=exif), "image/jpeg")
+        self.assertEqual((mime, Image.open(io.BytesIO(data)).size), ("image/jpeg", (100, 200)))
+        plain = self.png((64, 48))
+        self.assertEqual(llm_mod.shrink_image(plain, "image/png"), (plain, "image/png"))
+        self.assertEqual(llm_mod.shrink_image(plain, "image/png", max_side=32)[1], "image/jpeg")        # 上限を変えられる
+
+    async def test_chat_image_without_the_projector_fetches_it_once_and_starts_with_it(self):
+        self.gpu_files()
+        calls, started, fetched = [], [], []
+
+        def fake_download(cfg):
+            fetched.append(1)
+            return touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
+        llm = self.make(calls)
+        llm.transport = chat_transport(calls, health_after=3)                                           # 自分で起こす(外部の llama-server は居ない)
+        for patch in self.launcher(calls, started):
+            patch.start()
+            self.addCleanup(patch.stop)
+        with mock.patch.object(llm_mod, "download_mmproj", fake_download):
+            self.assertEqual(await asyncio.wait_for(llm.chat_image("s", "u", self.png()), 5), "こんにちは")
+            await llm.chat_image("s", "u", self.png())                                                  # 2 回目は、取得しない
+        self.assertEqual((len(fetched), llm.starts, llm._with_projector), (1, 1, True))
+        (spec,) = started
+        self.assertEqual(spec.cmd[spec.cmd.index("--mmproj") + 1], str(self.root / "tools" / llm_mod.MMPROJ_FILE))
+
+    async def test_running_child_without_the_projector_is_restarted_for_images(self):
+        self.gpu_files()
+        calls, started = [], []
+        llm = self.make(calls)
+        llm.transport = chat_transport(calls, health_after=3)
+        for patch in self.launcher(calls, started):
+            patch.start()
+            self.addCleanup(patch.stop)
+        with mock.patch.object(llm_mod.procman, "stop") as stop:
+            await llm.chat("s", "u")                                                                    # 投影ファイルが無い間に、テキストで起こした子
+            self.assertEqual((llm.starts, llm._with_projector, "--mmproj" in started[0].cmd), (1, False, False))
+            touch(self.root / "tools" / llm_mod.MMPROJ_FILE)                                            # そのあと投影ファイルが用意できた(setup --llm など)
+            async with llm.session():                                                                   # ほかの chat が使っている最中は、切らない
+                async with llm.session():
+                    await llm.ensure_running(projector=True)
+                stop.assert_not_called()
+                self.assertEqual(llm.starts, 1)
+            await llm.chat_image("s", "u", self.png())                                                  # 他に誰も居なければ、投影ファイルつきで起こし直す
+            stop.assert_called_once()
+        self.assertEqual((llm.starts, llm._with_projector), (2, True))
+        self.assertIn("--mmproj", started[1].cmd)
+        await llm.chat_image("s", "u", self.png())                                                      # もう起こし直さない
+        self.assertEqual(llm.starts, 2)
+
+    async def test_a_projector_that_cannot_be_loaded_falls_back_to_text_only(self):
+        self.gpu_files()
+        touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
+        calls, started, procs = [], [], []
+
+        def fake_start(spec):
+            started.append(spec)
+            procs.append(fake_proc())
+            return procs[-1]
+
+        def alive(proc):
+            return "--mmproj" not in started[procs.index(proc)].cmd                              # 投影ファイルつきの子は、読み込めずにすぐ終了する
+        llm = self.make(calls)
+        llm.transport = chat_transport(calls, health_after=3)
+        for patch in (mock.patch.object(llm_mod, "use_gpu", return_value=True), mock.patch.object(llm_mod.procman, "start", fake_start),
+                      mock.patch.object(llm_mod.procman, "is_alive", alive), mock.patch.object(llm_mod, "smi_mib", return_value=9000),
+                      mock.patch.object(llm_mod.procman, "log_tail", return_value="")):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.assertEqual(await asyncio.wait_for(llm.chat("s", "u"), 5), "こんにちは")             # テキストの chat は、画像なしで起動し直して動く
+        self.assertEqual((llm.starts, llm._with_projector, llm._projector_failed), (2, False, True))
+        self.assertIn("--mmproj", started[0].cmd)
+        self.assertNotIn("--mmproj", started[1].cmd)
+        with self.assertRaises(LlmError) as cm:                                                  # 画像は、わけを伝えて断る(起動し直しを繰り返さない)
+            await llm.chat_image("s", "u", self.png())
+        self.assertIn("画像を読めません", cm.exception.message)
+        self.assertIn("logs/llm.log", cm.exception.message)
+        self.assertEqual(llm.starts, 2)
+        self.assertEqual(await llm.chat("s", "u"), "こんにちは")
+
+    async def test_a_startup_failure_without_a_projector_is_still_an_error(self):
+        self.gpu_files()
+        calls = []
+        llm = self.make(calls)
+        for patch in (mock.patch.object(llm_mod, "use_gpu", return_value=True), mock.patch.object(llm_mod.procman, "start", lambda spec: fake_proc()),
+                      mock.patch.object(llm_mod.procman, "is_alive", return_value=False), mock.patch.object(llm_mod, "smi_mib", return_value=9000),
+                      mock.patch.object(llm_mod.procman, "log_tail", return_value="")):
+            patch.start()
+            self.addCleanup(patch.stop)
+        llm.transport = chat_transport(calls, health_after=99)
+        with self.assertRaises(LlmError) as cm:                                                  # 投影ファイルが無ければ、これまでどおり(やり直さない)
+            await llm.chat("s", "u")
+        self.assertIn("途中で終了しました", cm.exception.message)
+        self.assertEqual((llm.starts, llm._projector_failed), (1, False))
+
+    async def test_projector_download_failure_gives_a_hint_and_text_chat_still_works(self):
+        self.gpu_files()
+        calls, started = [], []
+        llm = self.make(calls)
+        llm.transport = chat_transport(calls, health_after=3)
+        for patch in self.launcher(calls, started):
+            patch.start()
+            self.addCleanup(patch.stop)
+        with mock.patch.object(llm_mod, "download_mmproj", side_effect=OSError("network down")) as download:
+            with self.assertRaises(LlmError) as cm:
+                await llm.chat_image("s", "u", self.png())
+        download.assert_called_once()                                                                   # 取得は 1 回だけ
+        for word in (llm_mod.MMPROJ_FILE, "約 0.56GB", "network down", "setup --llm", "[llm] mmproj"):
+            self.assertIn(word, cm.exception.message)
+        self.assertEqual(await llm.chat("s", "u"), "こんにちは")                                          # 投影ファイルが無くても、テキストの chat は動く
+        self.assertEqual(llm._users, 0)
+
+    async def test_wrong_mmproj_setting_only_disables_images(self):
+        self.gpu_files()
+        calls, started = [], []
+        llm = Llm(make_cfg(self.root, mmproj=str(self.root / "nope.gguf")), transport=chat_transport(calls, health_after=3), poll_s=0.01, settle_s=0)
+        for patch in self.launcher(calls, started):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.assertEqual(await llm.chat("s", "u"), "こんにちは")                                          # テキストは動く(警告だけ)
+        self.assertNotIn("--mmproj", started[0].cmd)
+        with mock.patch.object(llm_mod, "download_mmproj") as download:
+            with self.assertRaises(LlmError) as cm:
+                await llm.chat_image("s", "u", self.png())
+        self.assertIn("[llm] mmproj のファイルがありません", cm.exception.message)                       # 設定の間違いを、そのまま伝える(勝手に取得しない)
+        download.assert_not_called()
+        self.assertIsNone(llm.status()["mmproj"])
+
+    async def test_chat_image_explains_a_server_without_the_projector(self):
+        seen = []
+        text = "image input is not supported - hint: if this is unexpected, you may need to provide the mmproj"
+        llm = Llm(make_cfg(self.root), transport=self.recorder(seen, 500, text), poll_s=0.01, settle_s=0)
+        with self.assertRaises(LlmError) as cm:
+            await llm.chat_image("s", "u", self.png())
+        self.assertIn("画像を読めません", cm.exception.message)
+        self.assertIn("mmproj", cm.exception.message)
+        with self.assertRaises(LlmError) as cm:                                                         # ほかのエラーは、そのまま
+            await Llm(make_cfg(self.root), transport=self.recorder(seen, 503, "busy"), poll_s=0.01, settle_s=0).chat_image("s", "u", self.png())
+        self.assertIn("HTTP 503", cm.exception.message)
+
+    @staticmethod
+    def wav(seconds=1.0, rate=16000) -> bytes:
+        import wave
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(b"\x00\x00" * int(rate * seconds))
+        return buf.getvalue()
+
+    async def test_chat_audio_sends_the_text_and_every_clip_as_input_audio(self):
+        seen = []
+        llm = Llm(make_cfg(self.root), transport=self.recorder(seen), poll_s=0.01, settle_s=0)         # すでに別の llama-server が応答している(外部)
+        first, second = self.wav(1.0), self.wav(2.0)
+        with mock.patch.object(llm_mod, "download_mmproj") as download:
+            answer = await llm.chat_audio("sys", "どんな曲?", [first, second], max_tokens=222, temperature=0.1)
+        self.assertEqual(answer, "見た答え")                                                          # 思考ブロックは取り除く
+        download.assert_not_called()
+        (payload,) = seen
+        self.assertEqual(payload["messages"][0], {"role": "system", "content": "sys"})
+        user = payload["messages"][1]
+        self.assertEqual([part["type"] for part in user["content"]], ["text", "input_audio", "input_audio"])
+        self.assertEqual(user["content"][0]["text"], "どんな曲?")
+        for part, clip in zip(user["content"][1:], (first, second)):
+            self.assertEqual(part["input_audio"]["format"], "wav")
+            self.assertEqual(base64.b64decode(part["input_audio"]["data"]), clip)                      # 渡した WAV のまま
+        self.assertEqual((payload["max_tokens"], payload["temperature"]), (222, 0.1))
+        self.assertEqual(llm._users, 0)
+
+    async def test_chat_audio_fetches_the_same_projector_and_starts_with_it(self):
+        self.gpu_files()
+        calls, started, fetched = [], [], []
+
+        def fake_download(cfg):
+            fetched.append(1)
+            return touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
+        llm = self.make(calls)
+        llm.transport = chat_transport(calls, health_after=3)
+        for patch in self.launcher(calls, started):
+            patch.start()
+            self.addCleanup(patch.stop)
+        with mock.patch.object(llm_mod, "download_mmproj", fake_download):
+            self.assertEqual(await asyncio.wait_for(llm.chat_audio("s", "u", [self.wav()]), 5), "こんにちは")
+            await llm.chat_image("s", "u", self.png())                                                  # 画像も同じ投影ファイル: もう取得しない・起動し直さない
+        self.assertEqual((len(fetched), llm.starts, llm._with_projector), (1, 1, True))
+        self.assertEqual(started[0].cmd[started[0].cmd.index("--mmproj") + 1], str(self.root / "tools" / llm_mod.MMPROJ_FILE))
+
+    async def test_chat_audio_explains_a_server_without_the_projector(self):
+        seen = []
+        text = "audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj"
+        llm = Llm(make_cfg(self.root), transport=self.recorder(seen, 500, text), poll_s=0.01, settle_s=0)
+        with self.assertRaises(LlmError) as cm:
+            await llm.chat_audio("s", "u", [self.wav()])
+        self.assertIn("音声を読めません", cm.exception.message)
+        self.assertIn("mmproj", cm.exception.message)
+        with self.assertRaises(LlmError) as cm:                                                         # 画像は画像と言う
+            await Llm(make_cfg(self.root), transport=self.recorder(seen, 500, "image input is not supported"), poll_s=0.01, settle_s=0).chat_image("s", "u", self.png())
+        self.assertIn("画像を読めません", cm.exception.message)
+
+    async def test_chat_audio_after_a_projector_that_could_not_be_loaded_says_audio(self):
+        self.gpu_files()
+        touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
+        calls, started, procs = [], [], []
+
+        def fake_start(spec):
+            started.append(spec)
+            procs.append(fake_proc())
+            return procs[-1]
+        llm = self.make(calls)
+        llm.transport = chat_transport(calls, health_after=3)
+        for patch in (mock.patch.object(llm_mod, "use_gpu", return_value=True), mock.patch.object(llm_mod.procman, "start", fake_start),
+                      mock.patch.object(llm_mod.procman, "is_alive", lambda proc: "--mmproj" not in started[procs.index(proc)].cmd),
+                      mock.patch.object(llm_mod, "smi_mib", return_value=9000), mock.patch.object(llm_mod.procman, "log_tail", return_value="")):
+            patch.start()
+            self.addCleanup(patch.stop)
+        with self.assertRaises(LlmError) as cm:
+            await llm.chat_audio("s", "u", [self.wav()])
+        self.assertIn("音声を読めません", cm.exception.message)
+        self.assertEqual(llm.starts, 2)                                                                 # 投影ファイルつき → なし(1 回だけ起動し直す)
 
     async def test_missing_files_raise_japanese_error(self):
         llm = self.make()

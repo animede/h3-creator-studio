@@ -50,8 +50,9 @@ remain under the Apache License, Version 2.0; each file carries
                enforce_reference_and_lipsync, generate_scenario).
                Modified: async calls to this studio's single-turn LLM client;
                JSON extraction prefers objects; narration branches and
-               analyze_character are not ported; an unreadable overview does
-               not stop the run.
+               analyze_character are not ported here (analyze_character is
+               in mvdescribe.py below); an unreadable overview does not
+               stop the run.
   mvclip.py    frame-grid quantization of the scene plan, per-scene seeds and
                the ffmpeg command lines that fit a clip to its exact length
                and join the clips under the original song. Ported from
@@ -60,3 +61,23 @@ remain under the Apache License, Version 2.0; each file carries
                concatenate_and_mux). Modified: the commands are only built here
                (run by studio/handlers/mv.py); a clip that H3 returns short is
                padded by cloning its last frame.
+
+----------------------------------------------------------------------
+studio/mvdescribe.py
+----------------------------------------------------------------------
+This file is also ported from Minimax-H3-lipsync-mv, Copyright 2026 YUZUKI,
+licensed under the Apache License, Version 2.0, and has been modified. It
+remains under the Apache License, Version 2.0; it carries
+"SPDX-License-Identifier: Apache-2.0" and a header describing the changes.
+
+  mvdescribe.py  appearance analysis of the character reference image: the
+               system prompt and the JSON shape (subject / face / hair /
+               outfit / style / identity_anchor). Ported from
+               app/services/llm.py (analyze_character).
+               Modified: async call to this studio's vision LLM client; the
+               prompt asks for the appearance only (no expression, location,
+               lighting, pose or action) and for a one-line Japanese
+               description; one JSON-repair retry; fallbacks to the image's
+               ledger prompt or a neutral text. The song listening (listen_song) and
+               the song-concept proposal (propose_concept) in the same file are
+               new code for this studio.

@@ -1,10 +1,11 @@
 """リップシンク MV の管理役(Director): 制作(プロジェクト)を持ち、ジョブを 1 つずつつないで 1 本の MV にする。
 
-流れ(それぞれが 1 つのジョブ): mv.analyze(曲の分析、CPU)→ mv.script(演出を LLM が書く)→ mv.scene × シーン数(H3)→ mv.assemble(結合、CPU)。
+流れ(それぞれが 1 つのジョブ): mv.analyze(曲の分析、CPU)→ [mv.listen(曲を LLM が聞いて、曲の内容を書く、CPU)]→ mv.script(演出を LLM が書く)→
+mv.scene × シーン数(H3)→ mv.assemble(結合、CPU)。[ ] は、曲の台帳に情報が無く、「曲の内容」も空のときだけ(listen = "pending")。聞けなくても MV は作る。
 シーンのジョブは、前のシーンが終わってから次を入れる。その間に他のタブの仕事が割り込める(順番は受け付けた順)。
 
-制作の状態(state)とシーンは台帳の mv_projects 表に残る。次にやることは「データから導く」(next_step): 分析が無ければ分析、演出の無いシーンが
-あれば演出、できていない最初のシーン、結合がまだなら結合。だから、一時停止・再開・失敗・再起動・シーンのやり直しのあとも、同じ規則で続きから進む。
+制作の状態(state)とシーンは台帳の mv_projects 表に残る。次にやることは「データから導く」(next_step): 分析が無ければ分析、曲を聞く予定が残っていれば
+聞く、演出の無いシーンがあれば演出、できていない最初のシーン、結合がまだなら結合。だから、一時停止・再開・失敗・再起動・シーンのやり直しのあとも、同じ規則で続きから進む。
 
   create             → analyzing  (mv.analyze を入れる)
   ジョブが完了        → 次の段階のジョブを入れる(analyzing → scripting → generating(シーン 1 … N)→ assembling → completed)
@@ -46,8 +47,8 @@ SEED_MOD = 2_147_483_647
 RUNNING = ("analyzing", "scripting", "generating", "assembling")
 STATES = (*RUNNING, "paused", "completed", "failed", "cancelled")
 FINISHED = ("completed", "cancelled")           # 終わった制作。これ以外(一時停止・失敗も)は続きがあるので、曲と画像を使い続ける
-STAGE_STATE = {"mv.analyze": "analyzing", "mv.script": "scripting", "mv.scene": "generating", "mv.assemble": "assembling"}
-STAGE_LABEL = {"mv.analyze": "曲の分析", "mv.script": "演出の作成", "mv.scene": "シーンの生成", "mv.assemble": "結合"}
+STAGE_STATE = {"mv.analyze": "analyzing", "mv.listen": "analyzing", "mv.script": "scripting", "mv.scene": "generating", "mv.assemble": "assembling"}
+STAGE_LABEL = {"mv.analyze": "曲の分析", "mv.listen": "曲を聞く処理", "mv.script": "演出の作成", "mv.scene": "シーンの生成", "mv.assemble": "結合"}
 RESTART_MESSAGE = "管理役の再起動で一時停止しました"
 # 全体の進みの重み(シーンの生成が、ほぼ全部)。シーンは尺に比例して分ける
 WEIGHT_ANALYZE, WEIGHT_SCRIPT, WEIGHT_SCENES, WEIGHT_ASSEMBLE = 0.04, 0.03, 0.90, 0.03
@@ -101,6 +102,11 @@ def concept_from_song(params: dict) -> str:
     return _clip("\n".join(p for p in parts if p), CONCEPT_MAX)
 
 
+def song_has_info(params: dict) -> bool:
+    """曲の台帳の params に、曲の内容の手がかり(テーマ・キャプション・ジャンル)があるか。音楽タブの曲は有り、外から持ち込んだ曲(アップロード)は無い。"""
+    return bool(concept_from_song(params))
+
+
 def _output(ledger, oid, kind: str, label: str, what: str) -> dict:
     if not str(oid or "").strip():
         raise ValueError(f"{label}を選んでください")
@@ -114,10 +120,21 @@ def _output(ledger, oid, kind: str, label: str, what: str) -> dict:
     return rec
 
 
+def pick_song(ledger, oid) -> dict:
+    """曲(音声の生成物)を台帳から取る。無い・音声でない・ファイルが無いときは ValueError(日本語)。"""
+    return _output(ledger, oid, "audio", "曲", "音声")
+
+
+def pick_image(ledger, oid) -> dict:
+    return _output(ledger, oid, "image", "キャラクター画像", "画像")
+
+
 def resolve_params(ledger, params: dict) -> dict:
-    """画面・API から来た入力を検証し、曲・画像の生成物の中身で既定を埋めて、制作の params にする。不正なら ValueError(日本語)。"""
-    song = _output(ledger, params.get("song_id"), "audio", "曲", "音声")
-    image = _output(ledger, params.get("image_id"), "image", "キャラクター画像", "画像")
+    """画面・API から来た入力を検証し、曲・画像の生成物の中身で既定を埋めて、制作の params にする。不正なら ValueError(日本語)。
+    人物の説明・曲の内容の出どころは character_source(typed / image)・concept_source(typed / song)に残す(空は ""。制作の中で、画像を見る・曲を聞いて
+    埋めたら、vision / listen になる)。曲の内容が空のまま(台帳にも手がかりが無い)のときは listen = "pending" で、曲を聞く段が入る。"""
+    song = pick_song(ledger, params.get("song_id"))
+    image = pick_image(ledger, params.get("image_id"))
     aspect = str(params.get("aspect") or "16:9")
     if aspect not in SIZES:
         raise ValueError("投稿先は " + " / ".join(ASPECTS) + " のいずれかです")
@@ -140,13 +157,16 @@ def resolve_params(ledger, params: dict) -> dict:
     background_text = str(params.get("background_text") or "auto")
     if background_text not in ("auto", "large", "none"):
         raise ValueError("background_text は auto / large / none のいずれかです")
-    character = _clip(str(params.get("character") or ""), CHARACTER_MAX) or _clip(str(image["params"].get("prompt") or ""), CHARACTER_MAX)
-    concept = _clip(str(params.get("concept") or ""), CONCEPT_MAX) or concept_from_song(song["params"])
+    typed_character, image_prompt = _clip(str(params.get("character") or ""), CHARACTER_MAX), _clip(str(image["params"].get("prompt") or ""), CHARACTER_MAX)
+    typed_concept, song_concept = _clip(str(params.get("concept") or ""), CONCEPT_MAX), concept_from_song(song["params"])
+    character, concept = typed_character or image_prompt, typed_concept or song_concept
     width, height = SIZES[aspect][quality]
     title = _clip(str(song["params"].get("theme") or Path(song.get("filename") or "").stem or "MV"), 60) or "MV"
     return {"song_id": song["id"], "image_id": image["id"], "character": character, "concept": concept, "aspect": aspect,
             "quality": quality, "width": width, "height": height, "min_s": min_s, "max_s": max_s, "seed": seed,
-            "background_text": background_text, "title": title}
+            "background_text": background_text, "title": title,
+            "character_source": "typed" if typed_character else "image" if image_prompt else "",
+            "concept_source": "typed" if typed_concept else "song" if song_concept else "", "listen": "" if concept else "pending"}
 
 
 # ---- シーン・次にやること ----
@@ -161,10 +181,12 @@ def make_scenes(plan_scenes: list) -> list:
 
 
 def next_step(proj: dict) -> tuple:
-    """制作のデータから、次にやること: ("analyze",) / ("script",) / ("scene", 番号) / ("assemble",) / ("done",)。"""
+    """制作のデータから、次にやること: ("analyze",) / ("listen",) / ("script",) / ("scene", 番号) / ("assemble",) / ("done",)。"""
     params, scenes = proj["params"], proj["scenes"]
     if not params.get("analysis") or not scenes:
         return ("analyze",)
+    if params.get("listen") == "pending":
+        return ("listen",)
     if any(not s.get("prompt") for s in scenes):
         return ("script",)
     for s in sorted(scenes, key=lambda s: s["index"]):
@@ -325,6 +347,8 @@ class Director:
         return {"id": pid, "title": params.get("title") or "MV", "state": proj["state"], "message": self._message(proj, job),
                 "error": proj["error"], "created_at": proj["created_at"], "updated_at": proj["updated_at"],
                 "params": {k: params.get(k) for k in INPUT_KEYS}, "analysis": params.get("analysis"), "script": params.get("script"),
+                "sources": {"character": params.get("character_source") or "", "concept": params.get("concept_source") or ""},
+                "source_notes": {"character": params.get("character_note") or "", "concept": params.get("listen_error") or ""},
                 "assembled": bool(params.get("assembled")), "scenes": [self._scene_view(pid, s, job) for s in proj["scenes"]],
                 "job_id": job.id if job else None, "job_status": job.status if job else None,
                 "progress": self._progress(proj, job), "output": out}
@@ -417,6 +441,9 @@ class Director:
             if step[0] == "analyze":
                 self._set(pid, "analyzing", "曲を分析します")
                 self._submit(pid, "mv.analyze")
+            elif step[0] == "listen":
+                self._set(pid, "analyzing", "曲を聞いて、曲の内容を考えます")
+                self._submit(pid, "mv.listen")
             elif step[0] == "script":
                 self._set(pid, "scripting", "演出を書きます")
                 self._submit(pid, "mv.script")
@@ -457,7 +484,13 @@ class Director:
             self.ledger.update_mv_project(pid, scene_patches={scene: patch})
         if state == "cancelled":
             return
-        if job.status == "failed":
+        if job.status == "failed" and job.kind == "mv.listen":      # 曲を聞けなくても MV は作れる: 理由を残して、曲の内容なしで続ける
+            self.ledger.update_mv_project(pid, params_patch={"listen": "skipped", "listen_error": job.error or "原因不明"})
+            if state in RUNNING:
+                self._advance(pid)
+            else:
+                self._set(pid, "paused", "一時停止しました")
+        elif job.status == "failed":
             self._set(pid, "failed", f"{STAGE_LABEL[job.kind]}に失敗しました", error=job.error or "原因不明")
         elif state == "paused":       # 一時停止で取り下げた(まだ始まっていなかった)ジョブ
             self._set(pid, "paused", "一時停止しました")

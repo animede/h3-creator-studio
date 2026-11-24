@@ -485,5 +485,45 @@ class MvToolsTest(unittest.TestCase):
         self.assertEqual(S.run_step.call_args_list[0].args[1], self.root / "elsewhere" / "mvtools")
 
 
+class PrefetchLlmTest(unittest.TestCase):
+    """setup --llm: llama-server と GGUF に加えて、画像・音声を読む投影ファイル(約 0.56GB)も、管理役と同じ関数で取得する。"""
+
+    def setUp(self):
+        from studio import llm as llm_mod
+        self.llm = llm_mod
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = Path(self._t.name)
+        self.cfg = Settings({"llm": {"tools_dir": str(self.root / "tools")}}, self.root)
+        self.said = []
+        p = mock.patch.object(S, "say", self.said.append)
+        p.start()
+        self.addCleanup(p.stop)
+        for name, value in (("use_gpu", False), ("find_binary", self.root / "llama-server"), ("find_gguf", self.root / "m.gguf")):
+            p = mock.patch.object(llm_mod, name, return_value=value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_projector_is_fetched_when_missing(self):
+        proj = self.root / "tools" / self.llm.MMPROJ_FILE
+        with mock.patch.object(self.llm, "find_mmproj", return_value=None), mock.patch.object(self.llm, "download_mmproj", return_value=proj) as download:
+            self.assertTrue(S.prefetch_llm(self.cfg))
+        download.assert_called_once_with(self.cfg)
+        self.assertIn(f"  画像・音声を読む投影ファイル: {proj}", self.said)
+        self.assertIn("約 0.56GB", self.said[0])
+
+    def test_an_existing_projector_is_not_downloaded_again(self):
+        proj = self.root / "have" / self.llm.MMPROJ_FILE
+        with mock.patch.object(self.llm, "find_mmproj", return_value=proj), mock.patch.object(self.llm, "download_mmproj") as download:
+            self.assertTrue(S.prefetch_llm(self.cfg))
+        download.assert_not_called()
+
+    def test_a_failed_download_is_reported_and_setup_goes_on(self):
+        with mock.patch.object(self.llm, "find_mmproj", return_value=None), mock.patch.object(self.llm, "download_mmproj", side_effect=OSError("network down")):
+            self.assertFalse(S.prefetch_llm(self.cfg))
+        self.assertTrue(any("同梱 LLM の取得" in line and "network down" in line for line in self.said))
+        self.assertTrue(any("最初に使うときにも取得します" in line for line in self.said))
+
+
 if __name__ == "__main__":
     unittest.main()

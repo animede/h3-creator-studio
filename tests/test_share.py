@@ -732,6 +732,19 @@ class LifespanWiringTest(ShareBase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         specs = {n: spec(n, 30, port=11 + i) for i, n in enumerate("ab")}
+        # lifespan が差し込む app.state(本物の Llm など)は、終わったら元に戻す。残すと、後のテストが本物の LLM のポート(8701)へ
+        # 要求を送ってしまう(動いている管理役の LLM に届いていた。2026-11-24)
+        keys, missing = ("sched", "ledger", "tts", "llm", "jobs", "mv", "monitor"), object()
+        saved = {k: getattr(main.app.state, k, missing) for k in keys}
+
+        def restore():
+            for k, v in saved.items():
+                if v is missing:
+                    if hasattr(main.app.state, k):
+                        delattr(main.app.state, k)
+                else:
+                    setattr(main.app.state, k, v)
+        self.addCleanup(restore)
         with mock.patch.object(main, "Scheduler", lambda: Scheduler(specs, poll_s=0.01)), \
                 mock.patch.object(main, "GpuMonitor", lambda **kw: monitor), \
                 mock.patch.object(main, "OUTPUTS_DIR", Path(tmp.name)), \

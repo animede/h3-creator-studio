@@ -1,5 +1,6 @@
 // MV タブ(リップシンク MV): 曲とキャラクター画像から、口の合った MV を作る。
 // 左 = 入力、右上 = いまの制作(進み・最終の動画・シーン)、右下 = 制作の履歴(ギャラリーに切り替え可)。ジョブは管理役の Director がつなぐので、ここは /api/mv を見て操作するだけ。
+// 人物の説明・曲の内容は、「画像から作る」「曲から作る」で入力欄に自動で入れて、確かめてから作れる(空のまま作っても、制作の中で自動で入る)。
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
   // 投稿先 × 画質の寸法(サーバの SIZES、docs/SPEC.md の表と同じ。実際の寸法はサーバが決める)
   const SIZES = {
@@ -16,6 +17,11 @@
   const ACTIVE = ["analyzing", "scripting", "generating", "assembling"];
   const POLL_MS = 2000;
   const CHAR_MAX = 600, CONCEPT_MAX = 1000;
+  const LISTEN_LABEL = [["language", "言語"], ["genre", "ジャンル"], ["mood", "雰囲気"], ["instruments", "楽器"], ["vocal", "ボーカル"], ["tempo", "テンポ"]];
+  // 制作に出す「自動で入れた説明」の出どころ(サーバの character_source / concept_source。書いた説明 typed は出さない)
+  const AUTO_HOW = { character: { vision: "画像を見て自動で作りました", image: "画像のプロンプトから入れました",
+    none: "画像を読めなかったので、空のままです(演出は、画像の人物としか書きません)" },
+  concept: { listen: "曲を聞いて自動で作りました", song: "曲のテーマ・キャプションから入れました" } };
 
   const mvp = (id) => $("mv-" + id);
   let song = null, image = null;          // 入力(生成物のレコード)
@@ -60,6 +66,7 @@
   function renderSong() {
     const body = mvp("song").querySelector(".frame-body");
     body.replaceChildren();
+    updateAuto();
     if (!song) { body.append(el("div", "refs-empty", "ここに曲をドロップ")); return; }
     const c = el("div", "songitem");
     const text = el("div", "stext");
@@ -72,7 +79,7 @@
     text.append(a);
     const x = el("button", "rdel", "×");
     x.title = "外す";
-    x.onclick = () => { song = null; renderSong(); };
+    x.onclick = clearSong;
     c.append(el("div", "aicon", "🎵"), text, x);
     makeDraggable(c, song.id);
     body.append(c);
@@ -81,6 +88,7 @@
   function renderImage() {
     const body = mvp("image").querySelector(".frame-body");
     body.replaceChildren();
+    updateAuto();
     if (!image) { body.append(el("div", "refs-empty", "ここにキャラクター画像をドロップ")); return; }
     const c = el("div", "frame-item");
     const img = el("img");
@@ -89,7 +97,7 @@
     img.draggable = false;
     const x = el("button", "rdel", "×");
     x.title = "外す";
-    x.onclick = () => { image = null; renderImage(); };
+    x.onclick = () => { image = null; renderImage(); };      // 画像を見ている最中なら、その答えは使わない(describeImage が見分ける)
     c.append(img, x);
     makeDraggable(c, image.id);
     body.append(c);
@@ -99,6 +107,8 @@
     if (item.kind !== "audio") { showMsg("曲には音声を落としてください(音楽タブの曲、または音声ファイル)"); return false; }
     song = item;
     showMsg("");
+    showListenInfo(null);
+    mvp("concept-note").hidden = true;
     fill(mvp("concept"), conceptFrom(item.params));
     renderSong();
     return true;
@@ -108,6 +118,7 @@
     if (item.kind !== "image") { showMsg("キャラクターには画像を落としてください"); return false; }
     image = item;
     showMsg("");
+    mvp("char-note").hidden = true;
     fill(mvp("char"), String((item.params && item.params.prompt) || "").trim().slice(0, CHAR_MAX));
     renderImage();
     return true;
@@ -128,11 +139,114 @@
   // 消された曲・画像は入力欄から外す。自動で入れた説明の文(曲の内容・人物の説明)も、自分で書き直していなければ外す
   // (消したとき(studio-deleted)と、一覧を読み直したらギャラリーに無かったとき)
   function dropGone(gone) {
-    if (song && gone(song.id)) { song = null; fill(mvp("concept"), ""); renderSong(); }
+    if (song && gone(song.id)) { clearSong(); fill(mvp("concept"), ""); }
     if (image && gone(image.id)) { image = null; fill(mvp("char"), ""); renderImage(); }
   }
   studio.on.items.push(() => dropGone((id) => !byId(id)));
   document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
+
+  // ---- 入力: 自動の説明(画像から人物の説明、曲から曲の内容・世界観) ----
+
+  const busy = { char: false, concept: false };
+
+  const hasPrompt = (item) => !!(item && item.params && String(item.params.prompt || "").trim());      // 画像タブで作った画像か(台帳に画像のプロンプトがある)
+
+  // ボタン(落としたものがあって、通信中でないときだけ)と、「空のまま作ると、自動で入れます」の案内
+  // (外から持ち込んだ=台帳に手がかりが無い画像・曲で、その欄がまだ空のときだけ)
+  function updateAuto() {
+    mvp("char-go").disabled = !image || busy.char;
+    mvp("concept-go").disabled = !song || busy.concept;
+    mvp("char-hint").hidden = !(image && !hasPrompt(image) && !mvp("char").value.trim());
+    mvp("concept-hint").hidden = !(song && !conceptFrom(song.params) && !mvp("concept").value.trim());
+  }
+  mvp("char").addEventListener("input", updateAuto);
+  mvp("concept").addEventListener("input", updateAuto);
+
+  // 通信中の表示(くるくる・文言・経過時間)。label() が文言を返す。戻り値は、終わらせる関数
+  function startBusy(which, label) {
+    const t0 = Date.now();
+    const draw = () => {
+      const sec = Math.round((Date.now() - t0) / 1000);
+      mvp(which + "-busy-text").textContent = `${label()}(経過 ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")})`;
+    };
+    busy[which] = true;
+    mvp(which + "-busy").hidden = false;
+    draw();
+    const timer = setInterval(draw, 1000);
+    updateAuto();
+    return () => { clearInterval(timer); busy[which] = false; mvp(which + "-busy").hidden = true; updateAuto(); };
+  }
+
+  function setNote(which, text) {
+    mvp(which + "-note").hidden = !text;
+    mvp(which + "-note").textContent = text || "";
+  }
+
+  // 自動で作った文を欄に入れる(自動で入れた文の印を付けるので、プリセットには入らない)。書いた文があれば、置き換えてよいか確かめる。入れたら true
+  function putAuto(ta, text) {
+    if (ta.value.trim() && ta.value !== ta.dataset.auto && !confirm("書いた内容を、自動で作った文に置き換えますか?")) return false;
+    ta.value = ta.dataset.auto = text;
+    updateAuto();
+    return true;
+  }
+
+  async function describeImage() {
+    if (!image || busy.char) return;
+    const target = image;
+    showMsg("");
+    setNote("char", "");
+    const stop = startBusy("char", () => "画像を見ています…");
+    try {
+      const js = await api("/api/mv/describe/image", "POST", { image_id: target.id });
+      if (image !== target) return;       // 待っている間に、画像が入れ替わった
+      if (js.text && !putAuto(mvp("char"), js.text)) return;
+      setNote("char", js.source === "vision" ? "画像を見て作りました。確かめて、直してから MV を作れます" : js.note);
+    } catch (e) {
+      showMsg(`人物の説明を作れませんでした: ${e.message || e}`);
+    } finally {
+      stop();
+    }
+  }
+  mvp("char-go").onclick = describeImage;
+
+  // 曲の聞き取り(参考): 言語・ジャンル・雰囲気・楽器・ボーカル・テンポ(閉じておく。歌詞は聞き取らない)
+  function showListenInfo(r) {
+    mvp("listen-info").hidden = !r;
+    if (!r) return;
+    mvp("listen-body").replaceChildren(...LISTEN_LABEL.filter(([key]) => r[key]).map(([key, label]) => {
+      const row = el("div", "li-row");
+      row.append(el("b", "", label), r[key]);
+      return row;
+    }));
+  }
+
+  function clearSong() {
+    song = null;
+    showListenInfo(null);
+    setNote("concept", "");
+    renderSong();
+  }
+
+  async function describeSong() {
+    if (!song || busy.concept) return;
+    const target = song;
+    showMsg("");
+    setNote("concept", "");
+    showListenInfo(null);
+    const stop = startBusy("concept", () => (conceptFrom(target.params) ? "曲の内容を考えています…" : "曲を聞いています…"));      // 音楽タブの曲は、聞かずに書く
+    try {
+      const js = await api("/api/mv/describe/song", "POST", { song_id: target.id });
+      if (song !== target) return;       // 待っている間に、曲が入れ替わった
+      if (!putAuto(mvp("concept"), js.text)) return;
+      showListenInfo(js.listen);
+      setNote("concept", `${js.source === "listen" ? "曲を聞いて" : "曲のテーマ・キャプションから"}作りました。確かめて、直してから MV を作れます`);
+    } catch (e) {
+      showMsg(`曲の内容を作れませんでした: ${e.message || e}`);
+    } finally {
+      stop();
+    }
+  }
+  mvp("concept-go").onclick = describeSong;
 
   // ---- 入力: 投稿先・画質・シード ----
 
@@ -338,6 +452,9 @@
     ui.err.hidden = true;
     ui.actionErr = el("div", "mverr");
     ui.actionErr.hidden = true;
+    ui.auto = el("div", "mvauto");
+    ui.auto.hidden = true;
+    ui.autoSig = "";
     ui.btns = {
       pause: button("一時停止", () => act(`/api/mv/${v.id}/pause`), "走っている仕事は終わるまで続け、順番待ちの仕事は取り下げて止めます"),
       resume: button("再開", () => act(`/api/mv/${v.id}/resume`), "できているところから続けます"),
@@ -350,7 +467,7 @@
     title.append(ui.name, ui.badge);
     const btns = el("div", "mvbtns");
     btns.append(...Object.values(ui.btns));
-    head.append(title, ui.msg, ui.bar, ui.meta, ui.err, ui.actionErr, btns);
+    head.append(title, ui.msg, ui.bar, ui.meta, ui.err, ui.actionErr, ui.auto, btns);
 
     ui.final = el("div", "mvfinal");
     ui.final.hidden = true;
@@ -455,6 +572,29 @@
     row.retry.disabled = row.editBtn.disabled = !idle;
   }
 
+  // 自動で入れた説明(画像を見て作った人物の説明・曲を聞いて作った曲の内容など)を、どれが自動かが分かるように出す。書いた説明は出さない
+  function renderAuto(v) {
+    const rows = [["character", "人物の説明", v.params.character], ["concept", "曲の内容・世界観", v.params.concept]].flatMap(([key, label, text]) => {
+      const src = (v.sources || {})[key], note = (v.source_notes || {})[key];
+      let how = AUTO_HOW[key][src] || "";
+      if (key === "concept" && !how && note) how = "曲を聞けなかったので、曲の内容なしで作りました";      // 聞き取れなかった(理由は note)
+      return how || note ? [{ label, how, text: how && src !== "none" ? text || "" : "", note: note || "" }] : [];
+    });
+    const sig = JSON.stringify(rows);
+    if (sig === ui.autoSig) return;      // 2 秒おきの更新で、変わっていなければ組み立て直さない
+    ui.autoSig = sig;
+    ui.auto.hidden = !rows.length;
+    ui.auto.replaceChildren(...rows.map((r) => {
+      const row = el("div", "mvauto-row");
+      const head = el("div");
+      head.append(el("b", "", r.label), el("span", "mvauto-how", r.how));
+      row.append(head);
+      if (r.text) row.append(el("div", "mvauto-text", r.text));
+      if (r.note) row.append(el("div", "mvauto-note", r.note));
+      return row;
+    }));
+  }
+
   function renderProject() {
     const v = view;
     if ((v ? v.id : null) !== ui.id) buildProject(v);
@@ -473,6 +613,7 @@
     ui.meta.textContent = [`${p}%`, `${pr.width}×${pr.height}(${pr.aspect})`, v.scenes.length ? `${v.scenes.filter((s) => s.status === "done").length} / ${v.scenes.length} シーン` : "",
       a ? `曲 ${fmtDur(a.duration)}${a.bpm ? ` · BPM ${Math.round(a.bpm)}` : ""}${a.has_vocals === false ? " · 歌なし(口は閉じたまま)" : ""}` : "",
       live ? `経過 ${fmtElapsed(v.created_at)}` : ""].filter(Boolean).join("  ");
+    renderAuto(v);
     if (v.error) { ui.err.hidden = false; ui.err.textContent = `失敗: ${v.error}`; }
     else if (ui.err.textContent.startsWith("失敗:")) { ui.err.hidden = true; ui.err.textContent = ""; }
     const done = v.scenes.length > 0 && v.scenes.every((s) => s.status === "done");

@@ -247,10 +247,25 @@
         <div class="refs frame" id="mv-song" aria-label="曲のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
       <div class="fld" id="mv-image-fld"><span class="fl">キャラクター画像 <span class="note inl" id="mv-image-note">画像タブの画像・ギャラリー・PC の画像ファイル</span></span>
         <div class="refs frame" id="mv-image" aria-label="キャラクター画像のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
-      <label class="fld"><span class="fl">人物の説明 <small>(任意。空なら画像のプロンプトを使います)</small></span>
-        <textarea id="mv-char" class="sm" rows="3" maxlength="600" placeholder="例: 銀色の長い髪、青いセーラー服の少女。アニメ調"></textarea></label>
-      <label class="fld"><span class="fl">曲の内容・世界観 <small>(任意。空なら曲のテーマ・キャプション・ジャンルを使います)</small></span>
-        <textarea id="mv-concept" class="sm" rows="3" maxlength="1000" placeholder="例: 夜明けの駅で、旅立つ人を見送る歌"></textarea></label>
+      <div class="fld"><div class="lhead"><label class="fl" for="mv-char">人物の説明 <small>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
+        <span class="mk"><button id="mv-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む部品 約 0.56GB を取得します)">🔍 画像から作る</button></span></div>
+        <textarea id="mv-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調"></textarea>
+        <div class="uploading" id="mv-char-busy" hidden><span class="spin"></span><span id="mv-char-busy-text"></span></div>
+        <span class="note" id="mv-char-note" hidden></span>
+        <span class="note" id="mv-char-hint" hidden>空のまま作ると、自動で入れます</span></div>
+      <div class="fld"><div class="lhead"><label class="fl" for="mv-concept">曲の内容・世界観 <small>(任意。空なら曲のテーマ・キャプション・ジャンル、無ければ曲を聞いて作ります)</small></label>
+        <span class="mk"><button id="mv-concept-go" type="button" class="mini" disabled title="曲の一部(30 秒を最大 2 か所)を LLM(Gemma 4)が聞き、言語・ジャンル・雰囲気・楽器などを読み取って、曲の内容・世界観の案を書きます(歌詞は聞き取りません)。CPU では 20〜60 秒ほど(初回は、画像・音声を読む部品 約 0.56GB を取得します)。音楽タブで作った曲は、聞かずに、テーマ・キャプションから書きます">🎧 曲から作る</button></span></div>
+        <textarea id="mv-concept" class="sm" rows="3" maxlength="1000" placeholder="例: 夜明けの駅で、旅立つ人を見送る歌"></textarea>
+        <div class="uploading" id="mv-concept-busy" hidden><span class="spin"></span><span id="mv-concept-busy-text"></span></div>
+        <span class="note" id="mv-concept-note" hidden></span>
+        <span class="note" id="mv-concept-hint" hidden>空のまま作ると、自動で入れます</span>
+        <details class="adv" id="mv-listen-info" hidden>
+          <summary>曲の聞き取り(参考)</summary>
+          <div class="adv-body">
+            <div id="mv-listen-body"></div>
+            <div class="li-note">曲の一部を聞いて読み取った、おおまかな内容です(聞き間違えることがあります)。歌詞は聞き取っていません</div>
+          </div>
+        </details></div>
       <div class="fld two">
         <label><span class="fl">投稿先</span>
           <select id="mv-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>

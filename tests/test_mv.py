@@ -70,6 +70,7 @@ class MvBase(unittest.IsolatedAsyncioTestCase):
         self.failing = {}              # 名前 -> 残り回数(その回数だけ失敗させる)
         self.late_file = False         # True なら、中止された仕事が、終わる直前に作業フォルダへファイルを書く(消された制作の後始末の確認)
         self.ensure_hold = None        # Event を入れると、それがセットされるまで H3 の準備が終わらない(ジョブが準備中のまま)
+        self.record_listen = True      # False なら、曲を聞く偽のハンドラは、終わっても結果(曲の内容・listen = done)を制作に書かない
         self.durations = list(self.DURATIONS)
 
     def add(self, kind: str, name: str, params: dict) -> dict:
@@ -107,6 +108,12 @@ class MvBase(unittest.IsolatedAsyncioTestCase):
             scenes = mv.make_scenes(quantize_scene_plan(plan_of(self.durations)))
             ctx.ledger.update_mv_project(job.params["project_id"], scenes=scenes, params_patch={
                 "analysis": {"duration": sum(self.durations), "bpm": 120.0, "has_vocals": True, "scenes": len(scenes)}, "assembled": False})
+
+        async def listen(job, ctx):
+            self.log.append(("listen", None))
+            await self.gate(job, "listen")
+            if self.record_listen:
+                ctx.ledger.update_mv_project(job.params["project_id"], params_patch={"concept": "聞いて作った案", "concept_source": "listen", "listen": "done"})
 
         async def script(job, ctx):
             self.log.append(("script", None))
@@ -149,7 +156,7 @@ class MvBase(unittest.IsolatedAsyncioTestCase):
 
         def h(component, run, gpu=True):
             return Handler(component, mvh.normalize, run, cancel, gpu=gpu)
-        return {"mv.analyze": h(None, analyze, False), "mv.script": h(None, script, False), "mv.scene": h("h3", scene),
+        return {"mv.analyze": h(None, analyze, False), "mv.listen": h(None, listen, False), "mv.script": h(None, script, False), "mv.scene": h("h3", scene),
                 "mv.assemble": h(None, assemble, False),
                 "h3.t2va": Handler("h3", lambda kind, params, ledger: dict(params), other, cancel)}
 
@@ -645,6 +652,117 @@ class RestoreDeleteTest(MvBase):
         self.assertEqual(self.director._active, {})
 
 
+class ListenFlowTest(MvBase):
+    """曲の台帳に情報が無く、「曲の内容」も空の制作には、分析の後に「曲を聞く」段(LLM が音声を聞く。CPU のレーン)が入る。聞けなくても MV は作る。"""
+
+    def external(self, name="ext.mp3") -> dict:
+        return self.add("audio", name, {"uploaded": True})
+
+    def new_external(self, **kw) -> dict:
+        return self.director.create({"song_id": self.external()["id"], "image_id": self.image["id"], **kw})
+
+    async def test_external_song_gets_a_listen_stage_between_analyze_and_script(self):
+        self.start()
+        self.hold["listen"] = asyncio.Event()
+        view = self.new_external()
+        pid = view["id"]
+        self.assertEqual(self.ledger.get_mv_project(pid)["params"]["listen"], "pending")
+        await self.until(lambda: ("listen", None) in self.log and self.waiting, "曲を聞く段が動き出す")
+        self.assertEqual(self.log, [("analyze", None), ("listen", None)])                       # 分析のあと、演出の前
+        self.assertEqual(self.state(pid), "analyzing")                                          # 状態は「分析中」のまま
+        self.assertEqual(self.ledger.get_mv_project(pid)["message"], "曲を聞いて、曲の内容を考えます")
+        (listen_job,) = self.mv_jobs("mv.listen")
+        self.assertEqual((listen_job.lane, listen_job.params), ("cpu", {"project_id": pid}))          # GPU も ACE-Step も使わない(載せ替えなし)
+        self.assertGreater(self.director.view(pid)["progress"], 0.0)
+        self.hold["listen"].set()
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.log, [("analyze", None), ("listen", None), ("script", None), ("scene", 1), ("scene", 2), ("scene", 3), ("assemble", None)])
+        self.assertEqual([j.kind for j in self.mv_jobs()][:3], ["mv.analyze", "mv.listen", "mv.script"])
+        v = self.director.view(pid)
+        self.assertEqual((v["params"]["concept"], v["sources"]["concept"]), ("聞いて作った案", "listen"))
+        self.assertEqual(v["sources"]["character"], "image")                                    # 画像のプロンプト(setUp の画像)から
+
+    async def test_a_studio_song_has_no_listen_stage(self):
+        self.start()
+        pid = self.new_project()["id"]                                                          # 音楽タブの曲(テーマ・キャプション・ジャンルがある)
+        params = self.ledger.get_mv_project(pid)["params"]
+        self.assertEqual((params["concept"], params["concept_source"], params["listen"]), ("夜明けの駅\nA warm ballad\nBallad", "song", ""))
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.log, [("analyze", None), ("script", None), ("scene", 1), ("scene", 2), ("scene", 3), ("assemble", None)])
+        self.assertEqual(self.mv_jobs("mv.listen"), [])
+        self.assertEqual(self.director.view(pid)["sources"]["concept"], "song")
+
+    async def test_a_written_concept_is_never_replaced(self):
+        self.start()
+        pid = self.new_external(concept="自分で書いた世界観")["id"]
+        await self.until_state(pid, "completed")
+        self.assertNotIn(("listen", None), self.log)                                            # 書いてあれば、聞かない
+        v = self.director.view(pid)
+        self.assertEqual((v["params"]["concept"], v["sources"]["concept"]), ("自分で書いた世界観", "typed"))
+
+    async def test_a_failed_listen_continues_without_a_concept_and_says_why(self):
+        self.start()
+        self.failing["listen"] = 1
+        pid = self.new_external()["id"]
+        await self.until_state(pid, "completed")                                                # 失敗しても、MV は作る
+        self.assertEqual(self.log[:3], [("analyze", None), ("listen", None), ("script", None)])
+        self.assertEqual(self.log.count(("listen", None)), 1)                                   # もう聞き直さない
+        v = self.director.view(pid)
+        self.assertEqual((v["params"]["concept"], v["sources"]["concept"]), ("", ""))
+        self.assertEqual(v["source_notes"]["concept"], "listen が失敗した")
+        self.assertEqual((v["error"], v["state"]), (None, "completed"))
+        self.assertEqual(self.ledger.get_mv_project(pid)["params"]["listen"], "skipped")
+
+    async def test_pause_during_listen_waits_for_it_and_resume_goes_on_to_the_script(self):
+        self.start()
+        self.hold["listen"] = asyncio.Event()
+        self.failing["listen"] = 1                                                              # 一時停止の間に、失敗で終わる
+        pid = self.new_external()["id"]
+        await self.until(lambda: self.waiting and ("listen", None) in self.log, "曲を聞く段が動き出す")
+        await self.director.pause(pid)
+        self.hold["listen"].set()
+        await self.until(lambda: self.mv_jobs("mv.listen")[0].status == "failed", "曲を聞く段が失敗で終わる")
+        await self.settle()
+        self.assertEqual(self.state(pid), "paused")                                             # 一時停止のまま(失敗にはしない)
+        self.assertEqual(self.ledger.get_mv_project(pid)["params"]["listen"], "skipped")
+        self.director.resume(pid)
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.log.count(("listen", None)), 1)
+
+    async def test_cancel_during_listen_then_resume_listens_again(self):
+        self.start()
+        self.hold["listen"] = asyncio.Event()
+        pid = self.new_external()["id"]
+        await self.until(lambda: self.waiting and ("listen", None) in self.log, "曲を聞く段が動き出す")
+        await self.director.cancel(pid)
+        await self.until(lambda: self.mv_jobs("mv.listen")[0].status == "cancelled", "曲を聞く段が止まる")
+        self.assertEqual(self.state(pid), "cancelled")
+        self.assertEqual(self.ledger.get_mv_project(pid)["params"]["listen"], "pending")        # 聞けていない: 続きから、また聞く
+        self.hold["listen"].set()
+        self.director.resume(pid)
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.log.count(("listen", None)), 2)
+
+    async def test_a_listen_that_records_nothing_fails_instead_of_looping(self):
+        self.start()
+        self.record_listen = False
+        pid = self.new_external()["id"]
+        await self.until_state(pid, "failed")
+        proj = self.ledger.get_mv_project(pid)
+        self.assertEqual(proj["message"], "曲を聞く処理の結果を記録できませんでした")
+        await self.settle()
+        self.assertEqual(self.log.count(("listen", None)), 1)
+
+    async def test_a_listen_cancelled_from_outside_pauses_the_project(self):
+        self.start()
+        self.hold["listen"] = asyncio.Event()
+        pid = self.new_external()["id"]
+        await self.until(lambda: self.waiting and ("listen", None) in self.log, "曲を聞く段が動き出す")
+        await self.runner.cancel(self.mv_jobs("mv.listen")[0].id)                               # ジョブの一覧など、制作の外からの中止
+        await self.until_state(pid, "paused")
+        self.assertEqual(self.ledger.get_mv_project(pid)["message"], "曲を聞く処理が中止されたので一時停止しました")
+
+
 class ViewTest(MvBase):
     async def test_progress_weights_scenes_by_duration(self):
         self.start()
@@ -733,6 +851,19 @@ class ResolveParamsTest(MvBase):
         p = self.resolve(character="  my text  ", concept="mine", seed="42", min_s="6", max_s="9")
         self.assertEqual((p["character"], p["concept"], p["seed"], p["min_s"], p["max_s"]), ("my text", "mine", 42, 6.0, 9.0))     # 画面の入力が優先
 
+    def test_sources_say_where_each_description_came_from(self):
+        p = self.resolve()
+        self.assertEqual((p["character_source"], p["concept_source"], p["listen"]), ("image", "song", ""))             # 台帳の画像のプロンプト・曲のテーマなどから
+        p = self.resolve(character="mine", concept="mine too")
+        self.assertEqual((p["character_source"], p["concept_source"], p["listen"]), ("typed", "typed", ""))             # 書いたもの
+        song, image = self.add("audio", "plain.mp3", {"uploaded": True}), self.add("image", "plain.png", {"uploaded": True})
+        plain = mv.resolve_params(self.ledger, {"song_id": song["id"], "image_id": image["id"]})
+        self.assertEqual((plain["character_source"], plain["concept_source"], plain["listen"]), ("", "", "pending"))   # どちらも空: 制作の中で自動で入れる
+        typed = mv.resolve_params(self.ledger, {"song_id": song["id"], "image_id": image["id"], "concept": "x"})
+        self.assertEqual((typed["concept_source"], typed["listen"]), ("typed", ""))                                      # 曲の内容を書けば、聞かない
+        self.assertFalse(mv.song_has_info({"uploaded": True}) or mv.song_has_info({}) or mv.song_has_info(None))
+        self.assertTrue(mv.song_has_info({"theme": "夜明け"}) and mv.song_has_info({"genre": "Ballad"}))
+
     def test_neutral_when_nothing_is_known(self):
         song = self.add("audio", "plain.mp3", {})
         image = self.add("image", "plain.png", {"uploaded": True})
@@ -789,6 +920,19 @@ class NextStepTest(unittest.TestCase):
         self.assertEqual(mv.next_step(self.proj(statuses=("done", "done"))), ("assemble",))
         self.assertEqual(mv.next_step(self.proj(statuses=("done", "done"), assembled=True)), ("done",))
         self.assertEqual(mv.next_step(self.proj(statuses=("done", "pending"), assembled=True)), ("scene", 2))      # 結合済みでも、作り直すシーンがあれば先
+
+    def test_listen_comes_after_the_analysis_and_before_the_script(self):
+        def proj(listen, **kw):
+            p = self.proj(**kw)
+            p["params"]["listen"] = listen
+            return p
+        self.assertEqual(mv.next_step(proj("pending", analysis=False)), ("analyze",))            # まず分析
+        self.assertEqual(mv.next_step(proj("pending", prompts=False)), ("listen",))
+        self.assertEqual(mv.next_step(proj("pending")), ("listen",))                              # 演出が済んでいても、予定が残っていれば聞く
+        for listen in ("done", "skipped", ""):
+            self.assertEqual(mv.next_step(proj(listen, prompts=False)), ("script",), listen)
+        self.assertEqual(mv.next_step(self.proj(prompts=False)), ("script",))                      # この版の前の制作(listen の項目が無い)は、聞かない
+        self.assertEqual(mv.step_of(types.SimpleNamespace(kind="mv.listen", params={})), ("listen",))
 
 
 if __name__ == "__main__":

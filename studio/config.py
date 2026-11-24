@@ -31,7 +31,7 @@ def _read_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
-LLM_DEFAULTS = {"port": 8701, "gpu": "auto", "gguf": "", "llama_server": "", "tools_dir": "components/llm"}
+LLM_DEFAULTS = {"port": 8701, "gpu": "auto", "gguf": "", "mmproj": "", "llama_server": "", "tools_dir": "components/llm"}
 GPU_MODES = ("auto", "exclusive", "share")
 
 

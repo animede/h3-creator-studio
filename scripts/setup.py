@@ -8,7 +8,7 @@
   python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 100GB)
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
   python scripts/setup.py --only h3,ace   # 指定した部品だけ
-  python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B)も先に取得する
+  python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
   python scripts/setup.py --mv            # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
   python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける)
 """
@@ -576,9 +576,9 @@ def setup_mv(cfg: Settings, models: bool = True) -> bool:
 
 
 def prefetch_llm(cfg: Settings) -> bool:
-    """同梱 LLM(llama-server と GGUF)を、管理役と同じ関数で先に取得する。"""
+    """同梱 LLM(llama-server と GGUF と、画像・音声を読む投影ファイル)を、管理役と同じ関数で先に取得する。"""
     from studio import llm
-    say("\n>>> 同梱 LLM(llama.cpp + Gemma 4 E4B、約 5GB)")
+    say("\n>>> 同梱 LLM(llama.cpp + Gemma 4 E4B、約 5GB + 画像・音声を読む投影ファイル 約 0.56GB)")
     try:
         gpu = llm.use_gpu(llm.parse_gpu_setting(cfg.llm["gpu"]))
         exe = llm.find_binary(cfg, gpu)
@@ -587,6 +587,8 @@ def prefetch_llm(cfg: Settings) -> bool:
         say(f"  llama-server: {exe}")
         gguf = llm.find_gguf(cfg) or llm.download_model(cfg)
         say(f"  GGUF: {gguf}")
+        mmproj = llm.find_mmproj(cfg, gguf) or llm.download_mmproj(cfg)
+        say(f"  画像・音声を読む投影ファイル: {mmproj}")
     except Exception as e:  # noqa: BLE001
         say(f"失敗しました: 同梱 LLM の取得({getattr(e, 'message', e)})")
         say("管理役は最初に使うときにも取得します。ネットワークを確かめて、setup --llm をやり直すこともできます。")
@@ -623,7 +625,7 @@ def parse_args(argv: list = None) -> argparse.Namespace:
     p.add_argument("--clone-anyway", action="store_true", help="~/<部品名> があっても components/ に取り込み直す")
     p.add_argument("--ace-xl", action="store_true", help="音楽に XL モデルも入れる(約 45GB。既定は 2B のみで約 15GB)")
     p.add_argument("--no-ref", action="store_true", help="h3 の参照モード用キャッシュ(transformer_ref、+約 32GB)を作らない")
-    p.add_argument("--llm", action="store_true", help="同梱 LLM(llama-server と GGUF、約 5GB)も先に取得する")
+    p.add_argument("--llm", action="store_true", help="同梱 LLM(llama-server と GGUF、約 5GB。画像・音声を読む投影ファイル 約 0.56GB を含む)も先に取得する")
     p.add_argument("--mv", action="store_true", help="MV の音声処理の道具(Demucs + librosa + CPU 版 torch、約 1.3GB)も用意する")
     return p.parse_args(argv)
 
