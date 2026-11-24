@@ -90,6 +90,18 @@ class TtsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s[2], {"speaker": "5"})
         self.assertEqual(json.loads(s[3])["speedScale"], 1.5)       # 話速は AudioQuery に入れて送る
 
+    async def test_synthesize_wav_returns_the_bytes_without_saving_or_registering(self):
+        self.comp.state = "ready"
+        data = await self.tts.synthesize_wav("  文ごとの合成。 ", 5, 2.0)             # ショート動画が文ごとに使う(ギャラリーには載せない)
+        self.assertEqual(data[:4], b"RIFF")
+        self.assertEqual((self.ledger.list_outputs(), list((self.root / "audio").glob("*")) if (self.root / "audio").exists() else []), ([], []))
+        q = next(c for c in self.fake.calls if c[1] == "/audio_query")
+        self.assertEqual(q[2], {"text": "文ごとの合成。", "speaker": "5"})
+        self.assertEqual(json.loads(next(c for c in self.fake.calls if c[1] == "/synthesis")[3])["speedScale"], 2.0)
+        with self.assertRaises(TtsError) as cm:
+            await self.tts.synthesize_wav("", 5)
+        self.assertEqual(cm.exception.status, 400)
+
     async def test_bad_text(self):
         for text in ("", "  ", "あ" * (MAX_TEXT + 1)):
             with self.assertRaises(TtsError) as cm:

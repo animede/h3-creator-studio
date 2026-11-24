@@ -275,8 +275,9 @@ textarea.sm { min-height: 0; }
 .songitem .stitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .songitem .sinfo { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .songitem audio { width: 100%; height: 28px; margin-top: 2px; }
-.workspace[data-tab="mv"] .output > .progress, .workspace[data-tab="mv"] .output > .viewer, .workspace[data-tab="mv"] .output > .vmeta { display: none; }
-.workspace:not([data-tab="mv"]) .mvproj { display: none; }
+.workspace[data-tab="mv"] .output > .progress, .workspace[data-tab="mv"] .output > .viewer, .workspace[data-tab="mv"] .output > .vmeta,
+.workspace[data-tab="short"] .output > .progress, .workspace[data-tab="short"] .output > .viewer, .workspace[data-tab="short"] .output > .vmeta { display: none; }
+.workspace:not([data-tab="mv"]) #mv-project, .workspace:not([data-tab="short"]) #short-project { display: none; }
 .mvproj { flex: 1; min-height: 0; overflow: auto; }
 .mvhead { margin-bottom: 8px; padding: 8px 10px; border-radius: 4px; background: #0e1013; border: 1px solid var(--line); }
 .mvtitle { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
@@ -287,7 +288,8 @@ textarea.sm { min-height: 0; }
 .mvbar.err i { background: var(--err); }
 .mvbar.ok i { background: var(--ok); }
 .mvbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.mvbtns button[hidden], .mvs-actions button[hidden] { display: none; }
+.mvbtns button[hidden], .mvs-actions button[hidden], .mvbtns select[hidden] { display: none; }
+.mvbtns select { width: auto; padding: 1px 6px; }
 .mverr { margin-top: 6px; padding: 4px 8px; border-radius: 4px; background: #3d1a18; color: var(--err); font-size: 12px; white-space: pre-wrap; }
 .mverr[hidden], .mvfinal[hidden], .mvs-edit[hidden], .mvs-err[hidden], .mvnote[hidden], .mvs-video[hidden], .mvs-none[hidden] { display: none; }
 .badge.analyzing, .badge.scripting, .badge.generating, .badge.assembling { background: #16283f; color: var(--accent); }
@@ -314,6 +316,9 @@ textarea.sm { min-height: 0; }
 .mvs-none { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; text-align: center; }
 .mvscene.tall .mvs-video, .mvscene.tall .mvs-none { height: 160px; }
 .mvs-actions { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.mvs-info { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.mvs-info[hidden] { display: none; }
+.mvs-info-row b { margin-right: 6px; color: var(--text); font-weight: 600; }
 .mvs-edit { margin-top: 6px; }
 .mvs-edit textarea { min-height: 120px; font-size: 12px; }
 .mvs-edit .inline { margin-top: 6px; flex-wrap: wrap; }
@@ -339,3 +344,16 @@ dialog { max-width: 420px; padding: 14px 18px; background: var(--panel); color: 
 dialog::backdrop { background: rgba(0,0,0,.55); }
 dialog .dtext { margin-bottom: 12px; white-space: pre-line; }
 dialog .actions { justify-content: flex-end; }
+
+/* ショート動画タブ: 参照画像の行(サムネイル・役割・外す)と、長さの警告 */
+.shimgs { flex-direction: column; gap: 6px; }
+.shimgs:empty { display: none; }
+.shimg { display: flex; align-items: center; gap: 8px; padding: 4px; border: 1px solid var(--line); border-radius: 4px; background: #0e1013; }
+.shimg img { width: 56px; height: 56px; flex: none; object-fit: cover; border-radius: 3px; background: #000; }
+.shimg .shname { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shimg select { width: auto; flex: none; }
+.sh-len-note { margin: -6px 0 12px; }
+.sh-len-note[hidden] { display: none; }
+.sh-warn { margin-top: -4px; }
+#sh-speaker-fld .note[hidden] { display: none; }
+.shimg .rdel { position: static; flex: none; }

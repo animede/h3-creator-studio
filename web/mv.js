@@ -2,20 +2,7 @@
 // 左 = 入力、右上 = いまの制作(進み・最終の動画・シーン)、右下 = 制作の履歴(ギャラリーに切り替え可)。ジョブは管理役の Director がつなぐので、ここは /api/mv を見て操作するだけ。
 // 人物の説明・曲の内容は、「画像から作る」「曲から作る」で入力欄に自動で入れて、確かめてから作れる(空のまま作っても、制作の中で自動で入る)。
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
-  // 投稿先 × 画質の寸法(サーバの SIZES、docs/SPEC.md の表と同じ。実際の寸法はサーバが決める)
-  const SIZES = {
-    "16:9": { fast: [768, 448], standard: [1024, 576], high: [1344, 768] },
-    "9:16": { fast: [448, 768], standard: [576, 1024], high: [768, 1344] },
-    "1:1": { fast: [512, 512], standard: [768, 768], high: [960, 960] },
-    "4:5": { fast: [512, 640], standard: [640, 800], high: [768, 960] },
-  };
-  const QUALITY_NOTE = { fast: "6〜12GB の GPU 向け。いちばん速い", standard: "16GB 以上の GPU 向け", high: "24GB 以上の GPU 向け。時間がかかります" };
-  const STATE_LABEL = { analyzing: "分析中", scripting: "演出を作成中", generating: "シーンを生成中", assembling: "結合中", paused: "一時停止",
-    completed: "完成", failed: "失敗", cancelled: "中止" };
-  const SCENE_LABEL = { pending: "待機", running: "生成中", done: "完了", failed: "失敗" };
-  const JOB_LABEL = { queued: "順番待ち", preparing: "準備中", running: "生成中" };
-  const ACTIVE = ["analyzing", "scripting", "generating", "assembling"];
-  const POLL_MS = 2000;
+  const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 投稿先 × 画質の寸法と、画質の説明(web/project.js。ショート動画タブと共通)
   const CHAR_MAX = 600, CONCEPT_MAX = 1000;
   const LISTEN_LABEL = [["language", "言語"], ["genre", "ジャンル"], ["mood", "雰囲気"], ["instruments", "楽器"], ["vocal", "ボーカル"], ["tempo", "テンポ"]];
   // 制作に出す「自動で入れた説明」の出どころ(サーバの character_source / concept_source。書いた説明 typed は出さない)
@@ -25,25 +12,10 @@
 
   const mvp = (id) => $("mv-" + id);
   let song = null, image = null;          // 入力(生成物のレコード)
-  let projects = [];                       // /api/mv の一覧(新しい順)
-  let current = null;                      // 選んでいる制作の ID
-  let view = null;                         // その制作の /api/mv/{id}
   let tools = { available: true, hint: null };
-  let creating = false, qualityTouched = false, timer = null;
+  let creating = false, qualityTouched = false;
 
-  const isActive = (p) => ACTIVE.includes(p.state) || !!p.job_id;
-  const pct = (p) => Math.round((p || 0) * 100);
-  const fmtElapsed = (created) => {
-    const s = Math.max(0, Math.round(Date.now() / 1000 - created));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  };
-
-  async function api(url, method = "GET", body) {
-    const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
-    const js = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "入力を確認してください");
-    return js;
-  }
+  const api = apiJson;      // JSON の API(web/project.js)
 
   function showMsg(text) {
     mvp("msg").hidden = !text;
@@ -332,388 +304,35 @@
   }
   wirePresets({ tab: "mv", box: mvp("presets"), get: getPresetValues, apply: applyPresetValues });
 
-  // ---- 制作の一覧・選択・更新 ----
-
-  async function loadList() {
-    try { projects = await api("/api/mv?limit=100"); } catch (e) { /* 次の周で再試行 */ }
-  }
-
-  async function loadView() {
-    if (!current) { view = null; return; }
-    try {
-      const r = await fetch(`/api/mv/${current}`);
-      if (r.status === 404) { current = null; view = null; }
-      else if (r.ok) view = await r.json();
-    } catch (e) { /* 一時的な通信失敗は次の周で */ }
-  }
-
-  async function refresh() {
-    await loadList();
-    await loadView();
-    if (!current && projects.length) {      // まだ何も選んでいなければ、動いている(無ければ最新の)制作を開く
-      current = (projects.find(isActive) || projects[0]).id;
-      await loadView();
-    }
-    renderProject();
-    renderCards();
-  }
-
-  // 動いている制作がある間は 2 秒おきに読む(MV タブを開いているときだけ)
-  function schedule() {
-    clearTimeout(timer);
-    if (studio.tab !== "mv") return;
-    if ((view && isActive(view)) || projects.some(isActive)) timer = setTimeout(async () => { await refresh(); schedule(); }, POLL_MS);
-  }
-
-  async function select(id) {
-    current = id;
-    view = null;
-    renderProject();
-    await refresh();
-    schedule();
-  }
-
-  async function act(path, method = "POST", body) {
-    ui.actionErr.hidden = true;
-    try {
-      view = await api(path, method, body);
-      renderProject();
-    } catch (e) {
-      ui.actionErr.hidden = false;
-      ui.actionErr.textContent = `できませんでした: ${e.message || e}`;
-    }
-    await refresh();
-    schedule();
-  }
-
-  // 確認の小窓(index.html の <dialog>)。mvs は消す制作にある完成した MV の数で、あれば「完成した MV も削除する」を選べる。やめたら null、続けるなら { out: MV も消すか }
-  function askDelete(text, mvs) {
-    const d = mvp("del");
-    mvp("del-text").textContent = text;
-    mvp("del-out").checked = false;
-    mvp("del-out-fld").hidden = !mvs;
-    mvp("del-out-text").textContent = `完成した MV も削除する(${mvs} 本)`;
-    d.returnValue = "";
-    return new Promise((resolve) => {
-      d.addEventListener("close", () => resolve(d.returnValue === "ok" ? { out: mvp("del-out").checked } : null), { once: true });      // Esc で閉じても close になる
-      d.showModal();
-    });
-  }
-
-  // その制作の完成した MV(動画)の ID。サーバが消す対象と同じで、結合し直す前の版(生成物の params.project_id がその制作のもの)も入る
-  const mvOutputs = (p) => [...studio.items.filter((i) => i.params && i.params.project_id === p.id).map((i) => i.id), ...(p.output ? [p.output.id] : [])];
-
-  // 制作を消す(1 件でも、まとめてでも)。完成した MV は、選べばいっしょに消す。消したら true、やめたら false
-  async function removeProjects(ids) {
-    const list = ids.map((id) => projects.find((p) => p.id === id) || { id, title: "MV" });
-    const what = list.length === 1 ? `「${list[0].title}」の制作` : `${list.length} 件の制作`;
-    const ask = await askDelete(`${what}を削除しますか?\nシーンのクリップも消えます。`, new Set(list.flatMap(mvOutputs)).size);
-    if (!ask) return false;
-    const gone = [], refused = [], failed = [];
-    for (const p of list) {
-      try {
-        const js = await api(`/api/mv/${p.id}${ask.out ? "?with_output=1" : ""}`, "DELETE");
-        gone.push(...(js.deleted || []), ...(js.missing || []));
-        refused.push(...(js.refused || []));
-      } catch (e) { failed.push(`${p.title}: ${e.message || e}`); }
-    }
-    if (list.some((p) => p.id === current)) { current = null; view = null; }
-    await refresh();
-    if (gone.length) await forget(gone);
-    schedule();
-    const notes = [];
-    if (failed.length) notes.push(`${failed.length} 件の制作は削除できませんでした。\n${failed.join("\n")}`);
-    if (refused.length) notes.push(refusedText(refused, "使っているものがあるので、完成した MV の一部は残しました。"));
-    if (notes.length) alert(notes.join("\n\n"));
-    return true;
-  }
-
-  // ---- 右上: いまの制作 ----
-
-  const ui = { id: null, rows: new Map() };      // 組み立て済みの画面の部品(同じ制作は、組み立て直さず中身だけ更新する。動画の再生が途切れないように)
-
-  function button(text, onclick, title) {
-    const b = el("button", "", text);
-    b.type = "button";
-    b.onclick = onclick;
-    if (title) b.title = title;
-    return b;
-  }
-
-  function buildProject(v) {
-    const root = mvp("project");
-    root.replaceChildren();
-    ui.id = v ? v.id : null;
-    ui.rows = new Map();
-    ui.count = -1;
-    if (!v) {
-      root.append(el("div", "placeholder", "MV を作ると、ここに進み具合とシーンが並びます"));
-      return;
-    }
-    ui.name = el("b", "mvname");
-    ui.badge = el("span", "badge");
-    ui.msg = el("div", "mvmsg");
-    ui.bar = el("div", "pbar mvbar");
-    ui.bar.append(el("i"));
-    ui.meta = el("div", "mvmeta");
-    ui.err = el("div", "mverr");
-    ui.err.hidden = true;
-    ui.actionErr = el("div", "mverr");
-    ui.actionErr.hidden = true;
-    ui.auto = el("div", "mvauto");
-    ui.auto.hidden = true;
-    ui.autoSig = "";
-    ui.btns = {
-      pause: button("一時停止", () => act(`/api/mv/${v.id}/pause`), "走っている仕事は終わるまで続け、順番待ちの仕事は取り下げて止めます"),
-      resume: button("再開", () => act(`/api/mv/${v.id}/resume`), "できているところから続けます"),
-      cancel: button("中止", () => act(`/api/mv/${v.id}/cancel`), "走っている仕事を止めます(あとで再開できます)"),
-      reassemble: button("結合し直す", () => act(`/api/mv/${v.id}/reassemble`), "いまのクリップをつなぎ直して、新しい MV を作ります"),
-      remove: button("削除", () => removeProjects([v.id]), "この制作とクリップを消します(完成した MV も消すかは、確認で選べます)"),
-    };
-    const head = el("div", "mvhead");
-    const title = el("div", "mvtitle");
-    title.append(ui.name, ui.badge);
-    const btns = el("div", "mvbtns");
-    btns.append(...Object.values(ui.btns));
-    head.append(title, ui.msg, ui.bar, ui.meta, ui.err, ui.actionErr, ui.auto, btns);
-
-    ui.final = el("div", "mvfinal");
-    ui.final.hidden = true;
-    ui.video = el("video");
-    ui.video.controls = true;
-    ui.video.preload = "metadata";
-    ui.fnote = el("span", "mvnote", "古い版です。結合し直すと更新されます");
-    ui.fnote.hidden = true;
-    ui.finfo = el("span");
-    ui.save = el("a", "btn", "保存");
-    ui.save.download = "";
-    const fbar = el("div", "fbar");
-    fbar.append(ui.save, ui.finfo, ui.fnote);
-    ui.final.append(ui.video, fbar);
-
-    ui.scenes = el("div", "mvscenes");
-    root.append(head, ui.final, ui.scenes);
-  }
-
-  function buildRow(v, s) {
-    const row = { index: s.index, edit: false };
-    row.el = el("div", "mvscene");
-    const head = el("div", "mvs-head");
-    row.status = el("span", "badge");
-    row.kind = el("span", "badge");
-    row.time = el("span", "mvs-time");
-    row.meta = el("span", "mvs-meta");
-    head.append(el("b", "", `シーン ${s.index}`), row.time, row.kind, row.status, row.meta);
-    const body = el("div", "mvs-body");
-    row.video = el("video", "mvs-video");
-    row.video.controls = true;
-    row.video.preload = "none";
-    row.video.hidden = true;
-    row.none = el("div", "mvs-none");
-    const actions = el("div", "mvs-actions");
-    row.retry = button("やり直す", () => retry(row, false), "別の seed で作り直します(全シーンができると、自動で結合し直します)");
-    row.editBtn = button("プロンプトを編集", () => toggleEdit(row), "演出(H3 に渡すプロンプト)と seed を直して、そのシーンだけ作り直します");
-    actions.append(row.retry, row.editBtn);
-    body.append(row.video, row.none, actions);
-    row.editor = el("div", "mvs-edit");
-    row.editor.hidden = true;
-    row.ta = el("textarea");
-    row.ta.maxLength = 8000;
-    row.seed = el("input");
-    row.seed.type = "number";
-    row.seed.min = "0";
-    row.seed.placeholder = "seed";
-    row.seed.setAttribute("aria-label", "seed");
-    const inline = el("div", "inline");
-    inline.append(row.seed, button("この内容でやり直す", () => retry(row, true)), button("閉じる", () => toggleEdit(row)));
-    row.editor.append(row.ta, inline);
-    row.err = el("div", "mvs-err");
-    row.err.hidden = true;
-    row.el.append(head, body, row.editor, row.err);
-    return row;
-  }
-
-  function toggleEdit(row) {
-    row.edit = !row.edit;
-    row.editor.hidden = !row.edit;
-    const s = view && view.scenes.find((x) => x.index === row.index);
-    if (row.edit && s) { row.ta.value = s.prompt || ""; row.seed.value = s.seed == null ? "" : s.seed; }
-  }
-
-  function retry(row, edited) {
-    const s = view && view.scenes.find((x) => x.index === row.index);
-    if (!s) return;
-    let body;
-    if (edited) {      // 書き換えた分だけ送る(プロンプトが同じなら送らない)
-      const prompt = row.ta.value.trim();
-      body = { prompt: prompt !== (s.prompt || "") ? prompt : null, seed: row.seed.value === "" ? null : parseInt(row.seed.value, 10) };
-      row.edit = false;
-      row.editor.hidden = true;
-    }
-    act(`/api/mv/${view.id}/scenes/${row.index}/retry`, "POST", body);
-  }
-
-  function updateRow(row, v, s) {
-    row.el.className = "mvscene " + s.status + (v.params.height > v.params.width ? " tall" : "");      // 縦長の MV は、小さい動画も少し高く
-    row.time.textContent = `${fmtDur(s.start)}–${fmtDur(s.end)}(${s.duration.toFixed(1)} 秒)`;
-    row.kind.className = "badge " + s.kind;
-    row.kind.textContent = s.kind === "vocal" ? "歌唱" : "器楽";
-    row.kind.title = `歌っている割合 ${Math.round((s.vocal_ratio || 0) * 100)}%`;
-    row.status.className = "badge " + s.status;
-    row.status.textContent = s.status === "running" && s.job_status ? JOB_LABEL[s.job_status] || SCENE_LABEL.running : SCENE_LABEL[s.status] || s.status;
-    row.meta.textContent = [s.seed != null ? `seed ${s.seed}` : "", s.elapsed_s ? `生成 ${fmtSec(s.elapsed_s)}` : "", s.peak_vram_gb ? `VRAM ${(+s.peak_vram_gb).toFixed(1)}GB` : ""]
-      .filter(Boolean).join(" · ");
-    row.err.hidden = !s.error;
-    row.err.textContent = s.error || "";
-    row.el.style.setProperty("--ar", `${v.params.width} / ${v.params.height}`);       // 小さい動画の縦横比(縦長の MV は縦長に)
-    if (s.clip_url) {
-      row.video.hidden = false;
-      row.none.hidden = true;
-      if (row.video.dataset.src !== s.clip_url) { row.video.dataset.src = s.clip_url; row.video.poster = s.thumb_url || ""; row.video.src = s.clip_url; }
-    } else {
-      row.video.hidden = true;
-      row.none.hidden = false;
-      row.none.textContent = s.status === "running" ? "生成中…" : s.status === "failed" ? "失敗" : s.prompt ? "未生成" : "演出待ち";
-      if (row.video.dataset.src) { row.video.removeAttribute("src"); row.video.load(); delete row.video.dataset.src; }
-    }
-    const idle = !!s.prompt && s.status !== "running" && v.state !== "assembling";
-    row.retry.disabled = row.editBtn.disabled = !idle;
-  }
+  // ---- 制作の一覧・選択・更新・右側の画面(ショート動画タブと共通。web/project.js) ----
 
   // 自動で入れた説明(画像を見て作った人物の説明・曲を聞いて作った曲の内容など)を、どれが自動かが分かるように出す。書いた説明は出さない
-  function renderAuto(v) {
-    const rows = [["character", "人物の説明", v.params.character], ["concept", "曲の内容・世界観", v.params.concept]].flatMap(([key, label, text]) => {
+  function autoRows(v) {
+    return [["character", "人物の説明", v.params.character], ["concept", "曲の内容・世界観", v.params.concept]].flatMap(([key, label, text]) => {
       const src = (v.sources || {})[key], note = (v.source_notes || {})[key];
       let how = AUTO_HOW[key][src] || "";
       if (key === "concept" && !how && note) how = "曲を聞けなかったので、曲の内容なしで作りました";      // 聞き取れなかった(理由は note)
       return how || note ? [{ label, how, text: how && src !== "none" ? text || "" : "", note: note || "" }] : [];
     });
-    const sig = JSON.stringify(rows);
-    if (sig === ui.autoSig) return;      // 2 秒おきの更新で、変わっていなければ組み立て直さない
-    ui.autoSig = sig;
-    ui.auto.hidden = !rows.length;
-    ui.auto.replaceChildren(...rows.map((r) => {
-      const row = el("div", "mvauto-row");
-      const head = el("div");
-      head.append(el("b", "", r.label), el("span", "mvauto-how", r.how));
-      row.append(head);
-      if (r.text) row.append(el("div", "mvauto-text", r.text));
-      if (r.note) row.append(el("div", "mvauto-note", r.note));
-      return row;
-    }));
   }
 
-  function renderProject() {
-    const v = view;
-    if ((v ? v.id : null) !== ui.id) buildProject(v);
-    if (!v) return;
-    ui.name.textContent = v.title;
-    ui.badge.className = "badge " + v.state;
-    ui.badge.textContent = STATE_LABEL[v.state] || v.state;
-    const live = ACTIVE.includes(v.state);
-    ui.msg.textContent = v.message || "";
-    const p = pct(v.progress);
-    ui.bar.querySelector("i").style.width = p + "%";
-    ui.bar.classList.toggle("err", v.state === "failed");
-    ui.bar.classList.toggle("ok", v.state === "completed");
-    ui.bar.title = `${p}%`;
-    const a = v.analysis, pr = v.params;
-    ui.meta.textContent = [`${p}%`, `${pr.width}×${pr.height}(${pr.aspect})`, pr.lipsync === false ? "歌わせない(イメージ MV)" : "", v.scenes.length ? `${v.scenes.filter((s) => s.status === "done").length} / ${v.scenes.length} シーン` : "",
-      a ? `曲 ${fmtDur(a.duration)}${a.bpm ? ` · BPM ${Math.round(a.bpm)}` : ""}${a.has_vocals === false && pr.lipsync !== false ? " · 歌なし(口は閉じたまま)" : ""}` : "",
-      live ? `経過 ${fmtElapsed(v.created_at)}` : ""].filter(Boolean).join("  ");
-    renderAuto(v);
-    if (v.error) { ui.err.hidden = false; ui.err.textContent = `失敗: ${v.error}`; }
-    else if (ui.err.textContent.startsWith("失敗:")) { ui.err.hidden = true; ui.err.textContent = ""; }
-    const done = v.scenes.length > 0 && v.scenes.every((s) => s.status === "done");
-    const b = ui.btns;
-    b.pause.hidden = !live;
-    b.resume.hidden = !["paused", "failed", "cancelled"].includes(v.state);
-    b.cancel.hidden = !(live || v.state === "paused");
-    b.reassemble.hidden = !(done && !v.job_id && ["completed", "paused", "failed", "cancelled"].includes(v.state));
-    // 最終の動画
-    ui.final.hidden = !v.output;
-    if (v.output) {
-      if (ui.video.dataset.src !== v.output.url) {
-        ui.video.dataset.src = v.output.url;
-        ui.video.poster = v.output.thumb_url || "";
-        ui.video.src = v.output.url;
-      }
-      ui.save.href = v.output.url;
-      ui.save.download = v.output.filename || "mv.mp4";
-      ui.finfo.textContent = [v.output.width ? `${v.output.width}×${v.output.height}` : "", v.output.duration_s ? fmtSec(v.output.duration_s) : ""].filter(Boolean).join("  ");
-      ui.fnote.hidden = v.assembled;
-    }
-    // シーン
-    if (ui.count !== v.scenes.length) {      // シーンの数が変わったときだけ、行を組み立て直す
-      ui.count = v.scenes.length;
-      ui.rows = new Map(v.scenes.map((s) => [s.index, buildRow(v, s)]));
-      ui.scenes.replaceChildren(...(v.scenes.length ? [...ui.rows.values()].map((r) => r.el) : [el("div", "placeholder", "曲の分析が終わると、シーンがここに並びます")]));
-    }
-    for (const s of v.scenes) { const row = ui.rows.get(s.index); if (row) updateRow(row, v, s); }
-  }
-
-  // ---- 右下: 制作の履歴 ----
-
-  function projectNode(p) {
-    const t = el("div", "thumb mvcard");
-    t.title = `${p.title}\n${p.message || ""}`;
-    if (p.thumb_url) {
-      const img = el("img");
-      img.src = p.thumb_url;
-      img.alt = p.title;
-      img.loading = "lazy";
-      img.draggable = false;
-      t.append(img);
-    } else {
-      t.append(el("div", "nothumb video", "MV"));
-    }
-    t.append(el("span", "tbadge top", p.title));
-    t.append(el("span", "tbadge state", `${STATE_LABEL[p.state] || p.state}${ACTIVE.includes(p.state) ? ` ${pct(p.progress)}%` : ""}`));
-    t.classList.toggle("sel", !studio.select.on && p.id === current);
-    if (studio.select.on) { pickable(t, p.id); return t; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
-    t.onclick = () => select(p.id);
-    const x = el("button", "tdel", "×");
-    x.title = "削除";
-    x.onclick = (e) => { e.stopPropagation(); removeProjects([p.id]); };
-    t.append(x);
-    if (p.output) makeDraggable(t, p.output.id);      // 完成した MV は、ふつうの動画として他のタブへ落とせる
-    return t;
-  }
-
-  // 一覧が変わっていなければ描き直さない(2 秒おきの更新で、ドラッグ中のカードを作り直さないように)。タブの切り替えなどでは force で描く
-  let cardsSig = "";
-  function renderCards(force = false) {
-    const grid = $("hist-grid");
-    if (studio.tab !== "mv") return;
-    const sig = JSON.stringify([current, projects.map((p) => [p.id, p.state, pct(p.progress), p.title, p.thumb_url, p.output && p.output.id])]);
-    if (!force && sig === cardsSig) return;
-    cardsSig = sig;
-    grid.replaceChildren();
-    if (!projects.length) grid.append(el("div", "placeholder", "作った MV(制作)がここに並びます"));
-    for (const p of projects) grid.append(projectNode(p));
-    renderSelectBar();       // 選んでいた制作が消えていたら、数を合わせる
-  }
-
-  // 生成物ビューアと履歴を、この画面で自前に描く(gallery.js の studio.own)。ギャラリーで MV を選んだら、それを作った制作を開く
-  studio.own.mv = {
-    history: () => renderCards(true),
-    open: (item) => {
-      const pid = item.params && item.params.project_id;
-      if (pid && projects.some((p) => p.id === pid)) select(pid);
+  const panel = makeProjectPanel({
+    tab: "mv", base: "/api/mv", noun: "MV", root: mvp("project"), dialog: "proj", cardLabel: "MV", outName: "mv.mp4",
+    placeholder: "MV を作ると、ここに進み具合とシーンが並びます", scenesPlaceholder: "曲の分析が終わると、シーンがここに並びます", historyPlaceholder: "作った MV(制作)がここに並びます",
+    meta: (v, m) => {
+      const a = v.analysis, pr = v.params;
+      return [m.pct, m.size, pr.lipsync === false ? "歌わせない(イメージ MV)" : "", m.scenes,
+        a ? `曲 ${fmtDur(a.duration)}${a.bpm ? ` · BPM ${Math.round(a.bpm)}` : ""}${a.has_vocals === false && pr.lipsync !== false ? " · 歌なし(口は閉じたまま)" : ""}` : "", m.elapsed];
     },
-    ids: () => projects.map((p) => p.id),
-    remove: removeProjects,
-  };
-
-  studio.on.tab.push((tab) => {
-    if (tab === "mv") { loadTools(); refresh().then(schedule); }
-    else clearTimeout(timer);
+    autoRows,
+    onOpen: loadTools,
   });
+  const select = panel.select;
+
 
   renderSong();
   renderImage();
   renderSize();
   updateGo();
-  buildProject(null);
   pickQuality();
 })();

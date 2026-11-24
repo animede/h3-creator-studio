@@ -27,10 +27,11 @@ from .handlers import HANDLERS
 from .jobs import TERMINAL, Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
-from .mv import FINISHED, Director, pick_image, pick_song, song_has_info
+from .mv import FINISHED, Director, concept_from_song, pick_image, pick_song, song_has_info
 from .mvdescribe import describe_character, listen_song, propose_concept
 from .presets import PresetError
 from .scheduler import Scheduler
+from .short import ShortDirector, propose_narration
 from .handlers import ace as ace_handler
 from .songplan import SongPlanError, make_caption, make_plan
 from .tts import Tts, TtsError
@@ -41,8 +42,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
-              "/api/components/", "/api/mv", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
-              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/dnd.js", "/viz.js", "/favicon.ico")
+              "/api/components/", "/api/mv", "/api/short", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
+              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/dnd.js", "/viz.js", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -62,9 +63,11 @@ async def lifespan(app: FastAPI):
     app.state.ledger = ledger = Ledger(OUTPUTS_DIR)
     app.state.tts = Tts(sched, ledger, OUTPUTS_DIR)
     app.state.llm = llm = Llm(settings)
-    app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm), HANDLERS)
+    app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm, tts=app.state.tts), HANDLERS)
     app.state.mv = director = Director(runner, ledger, OUTPUTS_DIR)
     director.restore()       # 再起動で途切れた MV の制作は、一時停止にして残す
+    app.state.short = short_director = ShortDirector(runner, ledger, OUTPUTS_DIR)
+    short_director.restore()       # ショート動画も同じ
     llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
     sched.monitor = monitor
@@ -527,6 +530,115 @@ async def api_mv_delete(pid: str, with_output: bool = False):
     return {"ok": True, **(await asyncio.to_thread(_delete_outputs, ids) if with_output else {})}
 
 
+# ---- ショート動画(MV と同じ制作の管理。kind = short) ----
+
+class ShortImageIn(BaseModel):
+    id: str = ""
+    role: str = ""                 # person(人物。1 枚まで)/ scenery(景色・物)
+    description: str = ""          # 画面の説明(空なら、画像の台帳のプロンプト)
+
+
+class ShortIn(BaseModel):
+    story: str = ""                # 物語・映像のイメージ(曲もセリフも無ければ必須)
+    song_id: str = ""              # 曲(BGM。あれば)
+    narration: str = ""            # セリフ・ナレーション(あれば AivisSpeech で読み上げ、人物が口を合わせる)
+    speaker_id: Optional[int] = None
+    images: list[ShortImageIn] = Field(default_factory=list)       # 参照画像 0〜4 枚
+    length_s: Optional[float] = None     # 曲もセリフも無いときの長さ(30 秒以上。空なら 60)
+    aspect: str = "16:9"
+    quality: str = "fast"
+    min_s: float = 5.0
+    max_s: float = 10.0
+    seed: Optional[int] = None
+    background_text: str = "auto"
+    final_audio: str = "auto"      # auto / none(映像だけ)
+    character: str = ""            # 人物の説明(空なら、画像のプロンプト → 画像を見て作る)
+
+
+class ShortReassembleIn(BaseModel):
+    final_audio: Optional[str] = None      # 渡せば、制作の設定を書き換えてから結合し直す
+
+
+class DescribeNarrationIn(BaseModel):
+    story: str = ""
+    song_id: str = ""
+
+
+@app.post("/api/short/describe/narration")
+async def api_short_describe_narration(body: DescribeNarrationIn):
+    """物語の文章(と、あれば曲の内容)から、ナレーションの案(日本語 3〜8 文)を管理役の LLM が書く。入力欄を埋める用で、制作は作らない。{text}。
+    生成中は LLM が CPU 専用になり、遅くなることがある。"""
+    concept = ""
+    with _mv_errors():
+        if body.song_id.strip():
+            concept = concept_from_song(pick_song(app.state.ledger, body.song_id)["params"])
+    try:
+        return {"text": await propose_narration(app.state.llm, body.story, concept)}
+    except LlmError as e:
+        raise HTTPException(400 if not body.story.strip() else 503, e.message)
+
+
+@app.get("/api/short")
+def api_short_list(limit: int = 100):
+    """制作の一覧(新しい順。シーンの中身は含めない)。ショート動画だけ(MV は /api/mv)。"""
+    return [_mv_public(v) for v in app.state.short.list(max(1, min(limit, 500)))]
+
+
+@app.post("/api/short")
+async def api_short_create(body: ShortIn):
+    with _mv_errors():
+        return _mv_public(app.state.short.create(body.model_dump()))
+
+
+@app.get("/api/short/{pid}")
+def api_short_get(pid: str):
+    view = app.state.short.view(pid)
+    if view is None:
+        raise HTTPException(404, "そのショート動画の制作は見つかりません(削除されたかもしれません)")
+    return _mv_public(view)
+
+
+@app.post("/api/short/{pid}/pause")
+async def api_short_pause(pid: str):
+    with _mv_errors():
+        return _mv_public(await app.state.short.pause(pid))
+
+
+@app.post("/api/short/{pid}/resume")
+async def api_short_resume(pid: str):
+    with _mv_errors():
+        return _mv_public(app.state.short.resume(pid))
+
+
+@app.post("/api/short/{pid}/cancel")
+async def api_short_cancel(pid: str):
+    with _mv_errors():
+        return _mv_public(await app.state.short.cancel(pid))
+
+
+@app.post("/api/short/{pid}/reassemble")
+async def api_short_reassemble(pid: str, body: Optional[ShortReassembleIn] = None):
+    """結合し直す。body の final_audio(auto / none)があれば、制作の設定を書き換えてから。前の動画はギャラリーに残る。"""
+    with _mv_errors():
+        return _mv_public(app.state.short.reassemble(pid, body.final_audio if body else None))
+
+
+@app.post("/api/short/{pid}/scenes/{index}/retry")
+async def api_short_retry_scene(pid: str, index: int, body: Optional[MvRetryIn] = None):
+    body = body or MvRetryIn()
+    with _mv_errors():
+        return _mv_public(app.state.short.retry_scene(pid, index, body.prompt, body.seed))
+
+
+@app.delete("/api/short/{pid}")
+async def api_short_delete(pid: str, with_output: bool = False):
+    """制作を消す(作業フォルダごと。走っていれば、ジョブを中止して)。ギャラリーの最終の動画は残る。with_output=1 なら、その制作の動画も消す(MV と同じ)。"""
+    with _mv_errors():
+        ids = app.state.short.output_ids(pid) if with_output else []
+        await app.state.short.delete(pid)
+    return {"ok": True, **(await asyncio.to_thread(_delete_outputs, ids) if with_output else {})}
+
+
 # ---- プリセット(各タブの入力欄の値に名前を付けたもの) ----
 
 class PresetIn(BaseModel):
@@ -617,6 +729,7 @@ def api_gallery(kind: str = "all", tab: str = None, limit: int = 200):
 
 JOB_IN_USE = "実行中・順番待ちのジョブで使っています"
 MV_IN_USE = "MV の制作(一時停止中など)で使っています。先に制作を削除してください"
+SHORT_IN_USE = "ショート動画の制作(一時停止中など)で使っています。先に制作を削除してください"
 DELETE_MAX = 500          # 一度に消せる数(画面のギャラリーが読む数)
 
 
@@ -643,9 +756,10 @@ def _in_use(ids) -> dict:
                     busy.setdefault(s, JOB_IN_USE)
     for proj in app.state.ledger.list_mv_projects(limit=100000):
         if proj["state"] not in FINISHED:
-            for key in ("song_id", "image_id"):
-                if proj["params"].get(key) in ids:
-                    busy.setdefault(proj["params"][key], MV_IN_USE)
+            params = proj["params"]
+            for oid in (params.get("song_id"), params.get("image_id"), *(it.get("id") for it in params.get("images") or [])):       # ショート動画は参照画像(images)
+                if oid in ids:
+                    busy.setdefault(oid, SHORT_IN_USE if proj.get("kind") == "short" else MV_IN_USE)
     return busy
 
 

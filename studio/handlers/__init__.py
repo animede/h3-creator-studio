@@ -1,4 +1,4 @@
 """ジョブの種類ごとのハンドラ。kind(例: h3image.t2i)から Handler を引く。"""
-from . import ace, h3, h3image, mv
+from . import ace, h3, h3image, mv, short
 
-HANDLERS = {**h3image.HANDLERS, **h3.HANDLERS, **ace.HANDLERS, **mv.HANDLERS}
+HANDLERS = {**h3image.HANDLERS, **h3.HANDLERS, **ace.HANDLERS, **mv.HANDLERS, **short.HANDLERS}

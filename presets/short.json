@@ -1,0 +1,9 @@
+{
+  "presets": [
+    {"name": "YouTube 横長 16:9 標準", "values": {"aspect": "16:9", "quality": "standard", "min_s": 5, "max_s": 10, "final_audio": "auto", "length_s": 60}},
+    {"name": "縦長 9:16 高速(TikTok・Reels・Shorts)", "values": {"aspect": "9:16", "quality": "fast", "min_s": 5, "max_s": 7, "final_audio": "auto", "length_s": 60}},
+    {"name": "正方形 1:1 標準", "values": {"aspect": "1:1", "quality": "standard", "min_s": 5, "max_s": 8, "final_audio": "auto", "length_s": 60}},
+    {"name": "映像だけ(音声なし)横長 16:9", "values": {"aspect": "16:9", "quality": "fast", "min_s": 5, "max_s": 10, "final_audio": "none", "length_s": 60}},
+    {"name": "長尺 3 分 横長 16:9 高速", "values": {"aspect": "16:9", "quality": "fast", "min_s": 6, "max_s": 10, "final_audio": "auto", "length_s": 180}}
+  ]
+}

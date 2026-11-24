@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created_at DESC);
 CREATE TABLE IF NOT EXISTS mv_projects (
     id TEXT PRIMARY KEY, created_at REAL NOT NULL, updated_at REAL NOT NULL, state TEXT NOT NULL,
-    params_json TEXT, scenes_json TEXT, output_id TEXT, error TEXT, message TEXT
+    params_json TEXT, scenes_json TEXT, output_id TEXT, error TEXT, message TEXT, kind TEXT NOT NULL DEFAULT 'mv'
 );
 CREATE INDEX IF NOT EXISTS mv_projects_created ON mv_projects(created_at DESC);
 CREATE TABLE IF NOT EXISTS presets (
@@ -71,6 +71,9 @@ class Ledger:
         self._db.row_factory = sqlite3.Row
         with self._lock, self._db:
             self._db.executescript(SCHEMA)
+            # 第 3 版で足した kind 列(mv / short)。古い DB の mv_projects には無いので足す(既存の制作は mv)
+            if "kind" not in {r["name"] for r in self._db.execute("PRAGMA table_info(mv_projects)")}:
+                self._db.execute("ALTER TABLE mv_projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'mv'")
 
     def close(self) -> None:
         with self._lock:
@@ -191,7 +194,7 @@ class Ledger:
             rows = self._db.execute(sql, ((tab, limit) if tab else (limit,))).fetchall()
         return [self._job_dict(r) for r in rows]
 
-    # ---- MV の制作(リップシンク MV のプロジェクト) ----
+    # ---- MV の制作(リップシンク MV・ショート動画のプロジェクト。kind = mv / short) ----
 
     @staticmethod
     def _mv(row: sqlite3.Row) -> dict:
@@ -200,14 +203,14 @@ class Ledger:
         d["scenes"] = json.loads(d.pop("scenes_json") or "[]")
         return d
 
-    def create_mv_project(self, pid: str, state: str, params: dict, scenes: list = (), message: str = "") -> dict:
+    def create_mv_project(self, pid: str, state: str, params: dict, scenes: list = (), message: str = "", kind: str = "mv") -> dict:
         now = time.time()
         with self._lock, self._db:
             self._db.execute(
-                "INSERT INTO mv_projects (id, created_at, updated_at, state, params_json, scenes_json, output_id, error, message)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO mv_projects (id, created_at, updated_at, state, params_json, scenes_json, output_id, error, message, kind)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (pid, now, now, state, json.dumps(params, ensure_ascii=False), json.dumps(list(scenes), ensure_ascii=False),
-                 None, None, message))
+                 None, None, message, kind))
         return self.get_mv_project(pid)
 
     def get_mv_project(self, pid: str) -> Optional[dict]:
@@ -215,10 +218,11 @@ class Ledger:
             row = self._db.execute("SELECT * FROM mv_projects WHERE id = ?", (pid,)).fetchone()
         return self._mv(row) if row else None
 
-    def list_mv_projects(self, limit: int = 200) -> list:
-        """新しい順。"""
+    def list_mv_projects(self, limit: int = 200, kind: str = None) -> list:
+        """新しい順。kind(mv / short)を渡せば、その種類だけ。"""
+        sql = "SELECT * FROM mv_projects" + (" WHERE kind = ?" if kind else "") + " ORDER BY created_at DESC LIMIT ?"
         with self._lock:
-            rows = self._db.execute("SELECT * FROM mv_projects ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = self._db.execute(sql, ((kind, limit) if kind else (limit,))).fetchall()
         return [self._mv(r) for r in rows]
 
     def update_mv_project(self, pid: str, params_patch: dict = None, scene_patches: dict = None, params: dict = None,

@@ -1,4 +1,4 @@
-"""プリセット: 画像・動画・音楽・MV の各タブの入力欄の値に名前を付けて保存したもの。
+"""プリセット: 画像・動画・音楽・MV・ショート動画の各タブの入力欄の値に名前を付けて保存したもの。
 
 同梱のプリセット(リポジトリの presets/*.json。変更できない。複製して編集する)と、自分のプリセット(台帳の presets 表)を
 1 つの一覧にして扱う。値は入力欄の値(文字・数・真偽値・それらの配列)だけで、参照画像・曲・フレームなどの生成物は含めない。
@@ -15,7 +15,7 @@ from .ledger import Ledger
 
 log = logging.getLogger("studio.presets")
 
-TABS = ("image", "video", "music", "mv")
+TABS = ("image", "video", "music", "mv", "short")
 PRESETS_DIR = REPO_ROOT / "presets"
 BUILTIN = "builtin:"                   # 同梱のプリセットの ID の頭(builtin:<tab>:<そのタブでの番号>)
 MAX_NAME = 60

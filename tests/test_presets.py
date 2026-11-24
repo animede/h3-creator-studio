@@ -104,6 +104,14 @@ class BuiltinFilesTest(unittest.TestCase):
                 "steps": str(v.get("steps")) in opt["mu-steps"], "batch_size": str(v.get("batch_size")) in opt["mu-batch"],
                 "thinking": isinstance(v.get("thinking"), bool), "seed": seed_ok, "negative_prompt": self.text_ok(v.get("negative_prompt"), "mu-neg"),
                 "shift": v.get("shift") in opt["mu-shift"], "infer_method": v.get("infer_method") in opt["mu-infer"]}
+        elif tab == "short":
+            checks = {
+                "aspect": v.get("aspect") in opt["sh-aspect"], "quality": v.get("quality") in opt["sh-quality"],
+                "min_s": self.number_ok(v.get("min_s"), "sh-min"), "max_s": self.number_ok(v.get("max_s"), "sh-max"), "seed": seed_ok,
+                "background_text": v.get("background_text") in opt["sh-bgtext"], "final_audio": v.get("final_audio") in opt["sh-final"],
+                "length_s": isinstance(v.get("length_s"), (int, float)) and not isinstance(v.get("length_s"), bool)
+                and v.get("length_s", 0) >= float(f.attrs["sh-length"]["min"]),             # 長さは下限だけ(上限は設けない)
+                "speaker_id": v.get("speaker_id") is None or (isinstance(v.get("speaker_id"), int) and not isinstance(v.get("speaker_id"), bool))}
         else:
             checks = {
                 "character": self.text_ok(v.get("character"), "mv-char"), "concept": self.text_ok(v.get("concept"), "mv-concept"),
@@ -112,7 +120,7 @@ class BuiltinFilesTest(unittest.TestCase):
                 "lipsync": isinstance(v.get("lipsync"), bool)}
         # 書かれている項目だけを確かめる(プリセットは、一部の項目だけを持ってよい)
         bad = [k for k in v if k in checks and not checks[k]] + [k for k in v if k not in checks]
-        if tab == "mv" and "min_s" in v and "max_s" in v and v["min_s"] > v["max_s"]:
+        if tab in ("mv", "short") and "min_s" in v and "max_s" in v and v["min_s"] > v["max_s"]:
             bad.append("min_s > max_s")
         return bad
 
@@ -143,6 +151,10 @@ class BuiltinFilesTest(unittest.TestCase):
         self.assertEqual(self.problems("music", {"genre_mode": "free", "genre": "あ" * 201}), ["genre"])
         self.assertEqual(self.problems("music", {"genre_mode": "tag", "genre": "Rock"}), ["genre_mode"])
         self.assertEqual(self.problems("mv", {"min_s": 9, "max_s": 6}), ["min_s > max_s"])
+        self.assertEqual(self.problems("short", {"min_s": 9, "max_s": 6}), ["min_s > max_s"])
+        self.assertEqual(self.problems("short", {"final_audio": "mute", "length_s": 20, "aspect": "2:1", "speaker_id": "a"}), ["final_audio", "length_s", "aspect", "speaker_id"])
+        self.assertEqual(self.problems("short", {"length_s": 600, "speaker_id": 3, "background_text": "none", "seed": None}), [])
+        self.assertEqual(self.problems("short", {"story": "あ"}), ["story"])                       # 物語・セリフ・曲・画像はプリセットに入れない
 
     def test_each_tab_script_saves_and_applies_every_field(self):
         """プリセットの項目の一覧(この検査の field 一覧)が、各タブの getPresetValues と applyPresetValues の両方に出てくる。"""
@@ -150,8 +162,9 @@ class BuiltinFilesTest(unittest.TestCase):
                   "video": ("mode", "prompt", "resolution", "seconds", "match_audio", "vocal_lock", "seed"),
                   "music": ("mode", "genre_mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
                             "vocal", "model", "steps", "batch_size", "thinking", "seed", "negative_prompt", "shift", "infer_method"),
-                  "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed", "lipsync")}
-        files = {"image": "image.js", "video": "video.js", "music": "music.js", "mv": "mv.js"}
+                  "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed", "lipsync"),
+                  "short": ("aspect", "quality", "min_s", "max_s", "seed", "background_text", "final_audio", "length_s", "speaker_id")}
+        files = {"image": "image.js", "video": "video.js", "music": "music.js", "mv": "mv.js", "short": "short.js"}
         for tab, keys in fields.items():
             src = (WEB / files[tab]).read_text(encoding="utf-8")
             for fn in ("getPresetValues", "applyPresetValues"):
@@ -161,10 +174,10 @@ class BuiltinFilesTest(unittest.TestCase):
             self.assertIn(f'wirePresets({{ tab: "{tab}"', src)
 
     def test_page_has_a_preset_bar_per_tab_and_loads_the_script_first(self):
-        for box in ("im-presets", "vd-presets", "mu-presets", "mv-presets"):
+        for box in ("im-presets", "vd-presets", "mu-presets", "mv-presets", "sh-presets"):
             self.assertIn(f'<div class="presetbar" id="{box}"></div>', self.html)
         order = re.findall(r'<script src="([\w.]+)"></script>', self.html)
-        self.assertLess(order.index("presets.js"), min(order.index(f) for f in ("image.js", "video.js", "music.js", "mv.js")))
+        self.assertLess(order.index("presets.js"), min(order.index(f) for f in ("image.js", "video.js", "music.js", "mv.js", "short.js")))
         self.assertLess(max(order.index(f) for f in ("app.js", "gallery.js", "jobs.js")), order.index("presets.js"))      # el・studio・createTracker の後
 
 
@@ -303,7 +316,7 @@ class PresetsApiTest(unittest.TestCase):
         self.assertEqual(self.names("mv"), [])
         r = self.client.get("/api/presets", params={"tab": "audio"})
         self.assertEqual(r.status_code, 400)
-        self.assertIn("tab は image / video / music / mv のいずれかです", r.json()["detail"])
+        self.assertIn("tab は image / video / music / mv / short のいずれかです", r.json()["detail"])
 
     def test_the_real_files_are_served_too(self):
         """同梱のフォルダを差し替えなければ、リポジトリの presets/*.json がそのまま一覧に出る。"""
@@ -407,7 +420,7 @@ class PresetsApiTest(unittest.TestCase):
     def test_create_validation_errors_are_japanese_400s(self):
         cases = [({"tab": "image", "name": "", "values": {}}, "名前は 1〜60 文字"), ({"tab": "image", "name": "   ", "values": {}}, "名前は 1〜60 文字"),
                  ({"tab": "image", "name": "x" * 61, "values": {}}, "名前は 1〜60 文字"), ({"tab": "image", "values": {}}, "名前は 1〜60 文字"),
-                 ({"tab": "audio", "name": "x", "values": {}}, "tab は image / video / music / mv のいずれかです"),
+                 ({"tab": "audio", "name": "x", "values": {}}, "tab は image / video / music / mv / short のいずれかです"),
                  ({"name": "x", "values": {}}, "tab は"), ({"tab": "image", "name": "x"}, "values は"), ({"tab": "image", "name": "x", "values": [1]}, "values は"),
                  ({"tab": "image", "name": "x", "values": "text"}, "values は"),
                  ({"tab": "image", "name": "x", "values": {"a": {"b": 1}}}, "文字・数・真偽値と、それらの配列だけ"),

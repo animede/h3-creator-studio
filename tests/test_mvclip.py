@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -99,6 +100,47 @@ def probe_video(path) -> dict:
             "pix_fmt": st["pix_fmt"], "duration": float(info["format"]["duration"])}
 
 
+class ShortArgsTest(unittest.TestCase):
+    def test_finish_args_default_drops_the_audio_and_keep_audio_keeps_it_aac(self):
+        argv = C.finish_args("ffmpeg", "raw.mp4", "out.part", 144, 768, 448)
+        self.assertIn("-an", argv)
+        self.assertNotIn("-c:a", argv)
+        keep = C.finish_args("ffmpeg", "raw.mp4", "out.part", 144, 768, 448, C.FPS, 0.5, keep_audio=True)
+        self.assertNotIn("-an", keep)
+        self.assertEqual((keep[keep.index("-c:a") + 1], keep[keep.index("-ar") + 1], keep[keep.index("-ac") + 1]), ("aac", "48000", "2"))
+        self.assertEqual(keep[keep.index("-af") + 1], "apad=whole_dur=6.000")                         # 映像(144 コマ = 6 秒)の長さにそろえる
+        self.assertEqual(keep[keep.index("-t") + 1], "6.000")
+        self.assertEqual(keep[keep.index("-frames:v") + 1], "144")
+        self.assertIn("tpad=stop_mode=clone:stop_duration=0.500", keep[keep.index("-vf") + 1])
+        self.assertEqual(keep[-3:], ["-f", "mp4", "out.part"])
+
+    def test_concat_args_keeps_the_audio_unless_asked(self):
+        base = C.concat_args("ffmpeg", "list.txt", "out.part")
+        self.assertEqual(base, ["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", "-f", "mp4", "out.part"])
+        none = C.concat_args("ffmpeg", "list.txt", "out.part", drop_audio=True, faststart=True)
+        self.assertEqual(none[none.index("-c") + 1:], ["copy", "-an", "-movflags", "+faststart", "-f", "mp4", "out.part"])
+
+    def test_mix_args_puts_the_song_14_db_under_the_narration(self):
+        argv = C.mix_args("ffmpeg", "v.mp4", "nar.wav", "song.wav", "out.part", 20.5, 30.0)
+        self.assertEqual([argv[i + 1] for i, a in enumerate(argv) if a == "-i"], ["v.mp4", "nar.wav", "song.wav"])
+        graph = argv[argv.index("-filter_complex") + 1]
+        self.assertEqual(graph, "[1:a]aformat=channel_layouts=stereo[nar];"
+                                "[2:a]aformat=channel_layouts=stereo,atrim=duration=20.500,asetpts=PTS-STARTPTS,volume=-14dB,afade=t=out:st=18.500:d=2.000[bgm];"
+                                "[nar][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]")
+        self.assertEqual((argv[argv.index("-t") + 1], argv[argv.index("-c:v") + 1], argv[argv.index("-c:a") + 1], argv[argv.index("-b:a") + 1]), ("20.500", "copy", "aac", "256k"))
+        self.assertEqual([argv[i + 1] for i, a in enumerate(argv) if a == "-map"], ["0:v:0", "[a]"])
+        self.assertEqual(argv[-3:], ["-f", "mp4", "out.part"])
+
+    def test_mix_args_fades_at_the_end_of_a_short_song_and_handles_a_tiny_one(self):
+        graph = C.mix_args("ffmpeg", "v", "n", "s", "o", 40.0, 12.0)[11]
+        self.assertIn("atrim=duration=12.000", graph)
+        self.assertIn("afade=t=out:st=10.000:d=2.000", graph)
+        graph = C.mix_args("ffmpeg", "v", "n", "s", "o", 40.0, None)[11]            # 曲の長さが分からなければ、読み上げの長さまで
+        self.assertIn("atrim=duration=40.000", graph)
+        graph = C.mix_args("ffmpeg", "v", "n", "s", "o", 40.0, 1.0)[11]
+        self.assertIn("afade=t=out:st=0.000:d=1.000", graph)
+
+
 def has_audio(path) -> bool:
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
                        capture_output=True, check=True)
@@ -179,6 +221,58 @@ class RealFfmpegTest(unittest.TestCase):
         audio = json.loads(r.stdout)["streams"][0]
         self.assertEqual(audio["codec_name"], "aac")
         self.assertAlmostEqual(float(audio["duration"]), duration, delta=0.1)       # 曲は -t で映像の長さに切られる
+
+
+    def test_keep_audio_clip_has_exact_frames_audio_of_the_same_length_and_survives_concat(self):
+        clips = []
+        for frames in (150, 130):                                                     # H3 の 141 コマ(5.875 秒)より長い・短い
+            out = self.root / f"keep_{frames}.mp4"
+            tmp = out.with_name(out.name + ".part")
+            subprocess.run(C.finish_args("ffmpeg", self.raw, tmp, frames, 96, 64, C.FPS, C.pad_seconds(frames, 141 / 24), keep_audio=True), check=True, capture_output=True)
+            tmp.replace(out)
+            clips.append(out)
+            self.assertEqual(probe_video(out)["frames"], frames)
+            self.assertTrue(has_audio(out))
+            r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,sample_rate,channels,duration", "-of", "json", str(out)],
+                               capture_output=True, check=True)
+            audio = json.loads(r.stdout)["streams"][0]
+            self.assertEqual((audio["codec_name"], audio["sample_rate"], audio["channels"]), ("aac", "48000", 2))
+            self.assertAlmostEqual(float(audio["duration"]), frames / 24, delta=0.1)
+        listing, kept, silent = self.root / "keep_list.txt", self.root / "kept.mp4", self.root / "silent.mp4"
+        listing.write_text(C.concat_list(clips), encoding="utf-8")
+        subprocess.run(C.concat_args("ffmpeg", listing, kept, faststart=True), check=True, capture_output=True)
+        self.assertEqual(probe_video(kept)["frames"], 280)
+        self.assertTrue(has_audio(kept))                                              # つないでも音声は残る
+        subprocess.run(C.concat_args("ffmpeg", listing, silent, drop_audio=True), check=True, capture_output=True)
+        self.assertEqual(probe_video(silent)["frames"], 280)
+        self.assertFalse(has_audio(silent))
+
+    def test_mix_gives_the_narration_length_with_both_voices_and_never_loops_a_short_song(self):
+        frames = [150, 130, 141]
+        clips = [self.finish(n) for n in frames]
+        listing, video = self.root / "mix_list.txt", self.root / "mix_video.mp4"
+        listing.write_text(C.concat_list(clips), encoding="utf-8")
+        subprocess.run(C.concat_args("ffmpeg", listing, video), check=True, capture_output=True)
+        duration = sum(frames) / 24                                                   # 17.5 秒
+        narration, song = self.root / "nar.wav", self.root / "bgm.wav"
+        ffmpeg("-f", "lavfi", "-i", f"sine=frequency=500:sample_rate=44100:duration={duration}", "-ac", 2, narration)
+        ffmpeg("-f", "lavfi", "-i", "sine=frequency=200:sample_rate=44100:duration=8", "-ac", 1, song)         # 読み上げより短い、モノラルの曲
+        final = self.root / "mix_final.mp4"
+        subprocess.run(C.mix_args("ffmpeg", video, narration, song, final, duration, 8.0), check=True, capture_output=True)
+        info = probe_video(final)
+        self.assertEqual(info["frames"], sum(frames))
+        self.assertAlmostEqual(info["duration"], duration, delta=0.05)
+
+        def level(start, length):
+            """音声の start〜start+length 秒の平均の音量(dB)。"""
+            r = subprocess.run(["ffmpeg", "-v", "info", "-ss", str(start), "-t", str(length), "-i", str(final), "-vn", "-af", "volumedetect", "-f", "null", "-"],
+                               capture_output=True, check=True)
+            return float(re.search(r"mean_volume: (-?[\d.]+) dB", r.stderr.decode()).group(1))
+        under_bgm, narration_only = level(2.0, 3.0), level(12.0, 3.0)
+        self.assertGreater(under_bgm, narration_only - 1.0)                           # 曲がある所は、読み上げだけの所より小さくならない(混ざっている)
+        self.assertLess(abs(under_bgm - narration_only), 3.0)                         # -14 dB の BGM は、読み上げを少し持ち上げるだけ
+        r = subprocess.run(["ffmpeg", "-v", "info", "-i", str(final), "-vn", "-af", "silencedetect=n=-60dB:d=0.5", "-f", "null", "-"], capture_output=True, check=True)
+        self.assertNotIn("silence_start", r.stderr.decode())                          # 曲が終わっても、読み上げは最後まで続く(無音にならない)
 
 
 if __name__ == "__main__":

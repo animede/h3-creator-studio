@@ -297,6 +297,26 @@ IMAGE_MV_PREFIX = ("The character does not sing or mouth words in this shot and 
                    "the music is added later, so the performance is in the eyes, posture, movement and the scene itself. ")
 
 
+# 口の動きを確かめられなくする構図の指示(口を合わせるシーンで取り除く)
+_MOUTH_HIDING_REWRITES = {
+    r"\bextreme close-up(?: shot)? of (?:the )?(?:eye|eyes)\b": "medium close-up portrait",
+    r"\b(?:extreme )?wide shot\b": "medium close-up shot",
+    r"\b(?:full-body|full body|long) shot\b": "medium close-up shot",
+    r"\bover-the-shoulder shot\b": "front three-quarter medium close-up shot",
+    r"\bfrom behind\b": "from a front three-quarter angle",
+    r"\bprofile(?: shot)?\b": "three-quarter face view",
+    r"\btilts? (?:her|his|their) head back\b": "keeps the face oriented toward the camera",
+}
+
+
+def keep_mouth_visible(prompt: str, neutral: str = "performance framing") -> str:
+    """口を合わせるシーンの演出から、口を隠す構図を取り除く。公式の検証は、1 つの [Shot] の中でショットの大きさの語が重なると
+    構図の変更とみなすことがあるので(固定の頭書きが唯一のショットの大きさを持つ)、残ったショットの大きさの語は中立の語 neutral にする。"""
+    for pattern, replacement in _MOUTH_HIDING_REWRITES.items():
+        prompt = re.sub(pattern, replacement, prompt, flags=re.IGNORECASE)
+    return re.sub(r"\b(?:medium close-up(?: shot| portrait)?|medium shot|medium-wide shot)\b", neutral, prompt, flags=re.IGNORECASE)
+
+
 def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict, lipsync: bool = True) -> str:
     """LLM の後で、人物の同一性と口の見えを守る規則を、必ず当てる。
     lipsync=False(イメージ MV)は、歌の割合を見ずに、どのシーンも「歌わない・口は閉じたまま」にする(口を動かすのは音声の参照そのもので、
@@ -307,22 +327,7 @@ def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict,
         return ("Use the exact same person from the reference image; preserve facial identity, hair, outfit, "
                 f"and visual style unchanged: {identity}. " + IMAGE_MV_PREFIX + prompt)
     if float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO:
-        # 口の動きを確かめられなくする構図の指示を取り除く
-        replacements = {
-            r"\bextreme close-up(?: shot)? of (?:the )?(?:eye|eyes)\b": "medium close-up portrait",
-            r"\b(?:extreme )?wide shot\b": "medium close-up shot",
-            r"\b(?:full-body|full body|long) shot\b": "medium close-up shot",
-            r"\bover-the-shoulder shot\b": "front three-quarter medium close-up shot",
-            r"\bfrom behind\b": "from a front three-quarter angle",
-            r"\bprofile(?: shot)?\b": "three-quarter face view",
-            r"\btilts? (?:her|his|their) head back\b": "keeps the face oriented toward the camera",
-        }
-        for pattern, replacement in replacements.items():
-            prompt = re.sub(pattern, replacement, prompt, flags=re.IGNORECASE)
-        # 公式の検証は、1 つの [Shot] の中でショットの大きさの語が重なると構図の変更とみなすことがある。
-        # 下の固定の頭書きが唯一のショットの大きさを持つので、創作部分に残ったショットの大きさの語は中立の語にする。
-        prompt = re.sub(r"\b(?:medium close-up(?: shot| portrait)?|medium shot|medium-wide shot)\b", "performance framing",
-                        prompt, flags=re.IGNORECASE)
+        prompt = keep_mouth_visible(prompt)
         prefix = (
             "Medium close-up performance shot, front-facing or three-quarter face view. "
             "Use the exact same person from the reference image; preserve facial identity, hair, outfit, "

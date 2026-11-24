@@ -34,14 +34,19 @@ SEPARATE_START, SEPARATE_SPAN = 0.05, 0.85       # 分析ジョブの進みの�
 DEVICES = ("cpu", "cuda", "auto")
 
 
+NOUNS = {"mv": "MV の", "short": "ショート動画の"}       # ジョブの種類の接頭辞 -> エラー文に出す呼び名(ショート動画のジョブも、ここを通る)
+
+
 def normalize(kind: str, params: dict, ledger=None) -> dict:
-    """ジョブの params を検証する: 制作の ID(と、シーンなら番号)。不正なら ValueError(日本語)。"""
+    """ジョブの params を検証する: 制作の ID(と、シーンなら番号)。不正なら ValueError(日本語)。
+    制作の種類(台帳の kind)はジョブの種類の接頭辞(mv / short)と合っていなければならない(MV のジョブでショート動画の制作を触らせない)。"""
+    prefix, _, stage = kind.partition(".")
     pid = str(params.get("project_id") or "").strip()
     proj = ledger.get_mv_project(pid) if ledger is not None and pid else None
-    if not pid or (ledger is not None and proj is None):
-        raise ValueError("MV の制作が見つかりません(削除されたかもしれません)")
+    if not pid or (ledger is not None and (proj is None or proj.get("kind", "mv") != prefix)):
+        raise ValueError(f"{NOUNS.get(prefix, 'MV の')}制作が見つかりません(削除されたかもしれません)")
     out = {"project_id": pid}
-    if kind == "mv.scene":
+    if stage == "scene":
         try:
             out["scene"] = int(params.get("scene"))
         except (TypeError, ValueError):
@@ -54,7 +59,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
 def _project(ctx: Ctx, job: Job) -> dict:
     proj = ctx.ledger.get_mv_project(job.params["project_id"])
     if proj is None:
-        raise JobFailed("MV の制作が見つかりません(削除されたかもしれません)")
+        raise JobFailed(f"{NOUNS.get(job.kind.partition('.')[0], 'MV の')}制作が見つかりません(削除されたかもしれません)")
     return proj
 
 
@@ -110,13 +115,13 @@ async def run_analyze(job: Job, ctx: Ctx) -> None:
     await _cancellable(job, _analyze(job, ctx))
 
 
-async def _analyze(job: Job, ctx: Ctx) -> None:
-    proj = _project(ctx, job)
-    pid, p = proj["id"], proj["params"]
+async def analyze_song(job: Job, ctx: Ctx, proj: dict, work: Path) -> tuple:
+    """曲を 44.1kHz にそろえ、ボーカルを分離し、曲をシーンに分ける(MV の mv.analyze と、ショート動画の曲だけの short.analyze が使う)。
+    work に song.wav・vocals.wav・accompaniment.wav を置く(できているものはやり直さない)。(量子化したシーンの並び, 分析の結果の辞書)を返す。"""
+    p = proj["params"]
     rec = ctx.ledger.get_output(p["song_id"])
     if rec is None:
         raise JobFailed("曲が見つかりません(ギャラリーから削除されたかもしれません)")
-    work = work_dir(ctx.outputs_dir, pid)
     work.mkdir(parents=True, exist_ok=True)
     song, vocals, accompaniment = work / "song.wav", work / "vocals.wav", work / "accompaniment.wav"
 
@@ -138,12 +143,19 @@ async def _analyze(job: Job, ctx: Ctx) -> None:
         plan = await mv_audio.analyze(song, vocals, p["min_s"], p["max_s"], (p["min_s"] + p["max_s"]) / 2)
     except mv_audio.MvAudioError as e:      # 道具が無い(MvToolsMissing)ときは、その案内がそのまま message になる
         raise JobFailed(e.message, e.log_tail) from e
-    scenes = make_scenes(mvclip.quantize_scene_plan(plan["scenes"]))
+    scenes = mvclip.quantize_scene_plan(plan["scenes"])
     if not scenes:
         raise JobFailed("曲をシーンに分けられませんでした")
     analysis = {"duration": plan["duration"], "bpm": plan.get("bpm"), "has_vocals": bool(plan.get("has_vocals", True)),
                 "scenes": len(scenes)}
-    ctx.ledger.update_mv_project(pid, scenes=scenes, params_patch={"analysis": analysis, "assembled": False})
+    return scenes, analysis
+
+
+async def _analyze(job: Job, ctx: Ctx) -> None:
+    proj = _project(ctx, job)
+    pid = proj["id"]
+    scenes, analysis = await analyze_song(job, ctx, proj, work_dir(ctx.outputs_dir, pid))
+    ctx.ledger.update_mv_project(pid, scenes=make_scenes(scenes), params_patch={"analysis": analysis, "assembled": False})
     job.result = analysis
     log.info("MV %s: 曲 %.1f 秒を %d シーンに分けました(BPM %s、歌%s)", pid, analysis["duration"], len(scenes), analysis["bpm"],
              "あり" if analysis["has_vocals"] else "なし")
@@ -189,10 +201,10 @@ async def run_script(job: Job, ctx: Ctx) -> None:
     await _cancellable(job, _script(job, ctx))
 
 
-async def _describe_image(job: Job, ctx: Ctx, proj: dict) -> str:
+async def _describe_image(job: Job, ctx: Ctx, proj: dict, image_id: str = None) -> str:
     """人物の説明が空の制作(台帳に画像のプロンプトが無い、画面で書かなかった)のとき、画像を見て人物の説明を作り、制作に残す(再開でやり直さない)。
-    画像を読めなければ、理由を character_note に残して空のまま(演出は中立の文)。"""
-    rec = ctx.ledger.get_output(proj["params"]["image_id"])
+    画像を読めなければ、理由を character_note に残して空のまま(演出は中立の文)。image_id は人物の画像(MV は params.image_id、ショート動画は人物の参照画像)。"""
+    rec = ctx.ledger.get_output(image_id or proj["params"]["image_id"])
     if rec is None:
         return ""
     job.message = "画像を見て、人物の見た目を調べています"
@@ -275,10 +287,18 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
         data["mute"] = "true"
     if scene.get("seed") is not None:
         data["seed"] = str(scene["seed"])
+    res, frames = await generate_clip(job, ctx, h3.ENDPOINTS["ref2va"], data, files, tag=tag, scene=scene, p=p, raw=raw, clip=clip)
+    await record_scene(job, ctx, "MV", proj["id"], scene, res, clip, thumb, started, frames, tag)
+
+
+async def generate_clip(job: Job, ctx: Ctx, endpoint: str, data: dict, files: list, *, tag: str, scene: dict, p: dict, raw: Path, clip: Path,
+                        keep_audio: bool = False) -> tuple:
+    """H3 にシーン 1 つを頼み(進みは job に写す)、できた動画を取り込んで、ちょうどの尺のクリップ clip に整える(MV もショート動画も同じ)。
+    (H3 の結果, クリップのコマ数)を返す。keep_audio なら H3 の音を残す(ショート動画の「どちらも無し」)。"""
     try:
         async with h3._client(ctx) as c:
             job.message = f"{tag}: H3 に送っています"
-            res = await h3._generate(job, c, h3.ENDPOINTS["ref2va"], data, files, prefix=f"{tag}: ")      # 中止は H3 への interrupt(h3.cancel)
+            res = await h3._generate(job, c, endpoint, data, files, prefix=f"{tag}: ")      # 中止は H3 への interrupt(h3.cancel)
             if not res.get("video_url"):
                 raise JobFailed("H3 が動画を返しませんでした")
             job.progress, job.message = 0.99, f"{tag}: 動画を取り込んでいます"
@@ -287,16 +307,23 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
         frames = scene.get("frame_count") or max(1, round(scene["duration"] * mvclip.FPS))
         pad = mvclip.pad_seconds(frames, res.get("duration_s"))
         job.message = f"{tag}: 尺をそろえています"
-        await _ffmpeg(lambda exe, tmp: mvclip.finish_args(exe, raw, tmp, frames, p["width"], p["height"], mvclip.FPS, pad), clip,
+        await _ffmpeg(lambda exe, tmp: mvclip.finish_args(exe, raw, tmp, frames, p["width"], p["height"], mvclip.FPS, pad, keep_audio), clip,
                       f"{tag} のクリップの整形")
     finally:
         raw.unlink(missing_ok=True)
+    return res, frames
+
+
+async def record_scene(job: Job, ctx: Ctx, label: str, pid: str, scene: dict, res: dict, clip: Path, thumb: Path, started: float, frames: int,
+                       tag: str) -> None:
+    """できたシーンを台帳に書く(サムネイル・実測・seed)。"""
+    index = scene["index"]
     has_thumb = await asyncio.to_thread(media.video_thumb, clip, thumb, THUMB_WIDTH)
     elapsed = res.get("total_elapsed_s")
     job.result = {"scene": index, "generation_seconds": elapsed, "peak_vram_gb": res.get("peak_vram_gb"),
                   "steps_used": res.get("num_inference_steps"), "seed": res.get("seed")}
     seed = res.get("seed") if res.get("seed") is not None else scene.get("seed")
-    log.info("MV %s: %s ができました(H3 %s 秒、%d コマ、%.1f 秒)", pid, tag, elapsed, frames, time.monotonic() - started)
+    log.info("%s %s: %s ができました(H3 %s 秒、%d コマ、%.1f 秒)", label, pid, tag, elapsed, frames, time.monotonic() - started)
     ctx.ledger.update_mv_project(pid, scene_patches={index: {
         "status": "done", "clip": clip.name, "thumb": thumb.name if has_thumb else None, "error": None, "seed": seed,
         "elapsed_s": round(elapsed if elapsed is not None else time.monotonic() - started, 1), "peak_vram_gb": res.get("peak_vram_gb")}})
@@ -304,28 +331,45 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
 
 # ---- mv.assemble ----
 
-def final_path(outputs_dir, pid: str) -> Path:
-    """最終の MV の置き場所 outputs/video/mv_<ID>.mp4。結合し直すときは、前の MV(ギャラリーに残っている)を上書きしないよう _2、_3… にする。"""
+def final_path(outputs_dir, pid: str, prefix: str = "mv") -> Path:
+    """最終の動画の置き場所 outputs/video/<prefix>_<ID>.mp4(MV は mv、ショート動画は short)。結合し直すときは、前の動画(ギャラリーに残っている)を
+    上書きしないよう _2、_3… にする。"""
     base = Path(outputs_dir) / "video"
-    path, n = base / f"mv_{pid}.mp4", 1
+    path, n = base / f"{prefix}_{pid}.mp4", 1
     while path.exists():
         n += 1
-        path = base / f"mv_{pid}_{n}.mp4"
+        path = base / f"{prefix}_{pid}_{n}.mp4"
     return path
+
+
+def ready_clips(proj: dict, work: Path) -> tuple:
+    """結合するクリップ(シーン番号順の scenes と、そのファイルの並び)。まだ無い・消えているときは JobFailed。"""
+    scenes = sorted(proj["scenes"], key=lambda s: s["index"])
+    if not scenes or any(s["status"] != "done" or not s.get("clip") for s in scenes):
+        raise JobFailed("まだ生成できていないシーンがあります")
+    clips = [work / s["clip"] for s in scenes]
+    missing = [c.name for c in clips if not c.is_file()]
+    if missing:
+        raise JobFailed("シーンのクリップが見つかりません: " + "、".join(missing) + "(そのシーンをやり直してください)")
+    return scenes, clips
+
+
+async def register_video(job: Job, ctx: Ctx, pid: str, dest: Path, name: str, meta: dict, p: dict, duration: float) -> dict:
+    """最終の動画をギャラリー(台帳)に載せ、制作に結びつける。"""
+    rec = await asyncio.to_thread(ctx.ledger.add_output, "video", dest, job.tab, job.id, name, meta,
+                                  width=p.get("width"), height=p.get("height"), duration_s=duration)
+    job.outputs.append(rec["id"])
+    ctx.ledger.update_mv_project(pid, output_id=rec["id"], params_patch={"assembled": True})
+    return rec
 
 
 async def run_assemble(job: Job, ctx: Ctx) -> None:
     if job.cancel_requested:
         raise JobCancelled()
     proj = _project(ctx, job)
-    pid, p, scenes = proj["id"], proj["params"], sorted(proj["scenes"], key=lambda s: s["index"])
-    if not scenes or any(s["status"] != "done" or not s.get("clip") for s in scenes):
-        raise JobFailed("まだ生成できていないシーンがあります")
+    pid, p = proj["id"], proj["params"]
     work = work_dir(ctx.outputs_dir, pid)
-    clips = [work / s["clip"] for s in scenes]
-    missing = [c.name for c in clips if not c.is_file()]
-    if missing:
-        raise JobFailed("シーンのクリップが見つかりません: " + "、".join(missing) + "(そのシーンをやり直してください)")
+    scenes, clips = ready_clips(proj, work)
     song = work / "song.wav"
     if not song.is_file():
         rec = ctx.ledger.get_output(p["song_id"])
@@ -349,10 +393,7 @@ async def run_assemble(job: Job, ctx: Ctx) -> None:
     meta = {"project_id": pid, "kind": job.kind, "aspect": p.get("aspect"), "quality": p.get("quality"), "scenes": len(scenes),
             "song_id": p.get("song_id"), "image_id": p.get("image_id"), "width": p.get("width"), "height": p.get("height")}
     name = re.sub(r'[\\/:*?"<>|\s]+', "_", str(p.get("title") or "MV"))[:40] + "_mv.mp4"
-    rec = await asyncio.to_thread(ctx.ledger.add_output, "video", dest, job.tab, job.id, name, meta,
-                                  width=p.get("width"), height=p.get("height"), duration_s=duration)
-    job.outputs.append(rec["id"])
-    ctx.ledger.update_mv_project(pid, output_id=rec["id"], params_patch={"assembled": True})
+    await register_video(job, ctx, pid, dest, name, meta, p, duration)
     log.info("MV %s: %d シーンを結合しました → %s(%.1f 秒)", pid, len(scenes), dest.name, duration)
 
 

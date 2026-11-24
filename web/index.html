@@ -33,6 +33,7 @@
   <button class="tab" data-tab="video" role="tab">動画</button>
   <button class="tab" data-tab="music" role="tab">音楽</button>
   <button class="tab" data-tab="mv" role="tab">MV</button>
+  <button class="tab" data-tab="short" role="tab">ショート動画</button>
 </nav>
 
 <main class="workspace" id="workspace" data-tab="image">
@@ -292,6 +293,64 @@
       <div class="msg" id="mv-msg" hidden></div>
       <div class="actions"><button id="mv-go" class="primary">MV を作る</button></div>
     </div>
+    <div class="tabpanel" id="tab-short" hidden>
+      <div class="presetbar" id="sh-presets"></div>
+      <div class="msg" id="sh-tools" hidden></div>
+      <div class="fld"><label class="fl" for="sh-story">物語・映像のイメージ <small id="sh-story-req">(曲もセリフも無いときは必須)</small></label>
+        <textarea id="sh-story" rows="5" maxlength="4000" placeholder="例: 雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る"></textarea></div>
+      <div class="fld" id="sh-song-fld"><span class="fl">曲 <small>(任意)</small> <span class="note inl" id="sh-song-note">音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
+        <div class="refs frame" id="sh-song" aria-label="曲のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div>
+        <span class="note" id="sh-bgm-note" hidden>セリフがあるので、曲は BGM として下に敷きます(長さは読み上げの長さに合わせます)</span></div>
+      <div class="fld"><div class="lhead"><label class="fl" for="sh-narr">セリフ・ナレーション <small>(任意。あれば読み上げて、人物が口を合わせます)</small></label>
+        <span class="mk"><button id="sh-narr-go" type="button" class="mini" disabled title="物語の文章から、管理役の LLM がナレーションの案を書きます(曲があれば、その内容も使います)。確かめて、直してから作れます。CPU では 20〜60 秒ほど">📝 物語から作る</button></span></div>
+        <textarea id="sh-narr" class="sm" rows="4" maxlength="4000" placeholder="例: 雨の音だけが、駅に残っていた。……"></textarea>
+        <div class="uploading" id="sh-narr-busy" hidden><span class="spin"></span><span id="sh-narr-busy-text"></span></div>
+        <span class="note" id="sh-narr-note" hidden></span>
+        <span class="note">空のままなら、セリフなしの動画になります</span></div>
+      <label class="fld" id="sh-speaker-fld"><span class="fl">話者 <small>(セリフがあるときは必須。AivisSpeech)</small></span>
+        <select id="sh-speaker" aria-label="話者"><option value="">話者を選ぶ(セリフを入れると読み込みます)</option></select>
+        <span class="note" id="sh-speaker-note" hidden></span></label>
+      <div class="fld"><span class="fl">参照画像 <small>(0〜4 枚。役割ごとに選びます)</small></span>
+        <div class="refs" id="sh-images" aria-label="参照画像のドロップ欄">
+          <div class="refs-list shimgs" id="sh-images-list"></div>
+          <div class="refs-empty" id="sh-images-empty">ここに画像をドロップ<br><small>画像タブの画像・ギャラリー・PC の画像ファイル</small></div>
+          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+        </div>
+        <span class="note" id="sh-images-note">人物は 1 枚まで(全シーンに同じ人物)。セリフがあるときは、人物の画像が必須です(口を合わせる相手)。景色・物は、その場所・物を出すシーンの参照になります</span></div>
+      <div class="fld" id="sh-char-fld" hidden><div class="lhead"><label class="fl" for="sh-char">人物の説明 <small>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
+        <span class="mk"><button id="sh-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む部品 約 0.56GB を取得します)">🔍 画像から作る</button></span></div>
+        <textarea id="sh-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調"></textarea>
+        <div class="uploading" id="sh-char-busy" hidden><span class="spin"></span><span id="sh-char-busy-text"></span></div>
+        <span class="note" id="sh-char-note" hidden></span>
+        <span class="note" id="sh-char-hint" hidden>空のまま作ると、自動で入れます</span></div>
+      <div class="fld" id="sh-length-fld"><label class="fl" for="sh-length">長さ(秒) <small>(曲もセリフも無いときだけ。30 秒以上)</small></label>
+        <input id="sh-length" type="number" min="30" step="5" value="60"></div>
+      <span class="note sh-len-note" id="sh-len-note" hidden></span>
+      <div class="msg sh-warn" id="sh-len-warn" hidden></div>
+      <div class="fld two">
+        <label><span class="fl">投稿先</span>
+          <select id="sh-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
+            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option></select></label>
+        <label><span class="fl">画質 <b id="sh-size"></b></span>
+          <select id="sh-quality"><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+      </div>
+      <span class="note mv-qnote" id="sh-qnote"></span>
+      <label class="fld"><span class="fl">背景の文字 <small>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
+        <select id="sh-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです"><option value="auto">おまかせ</option>
+          <option value="large">大きな文字だけ</option><option value="none">文字を出さない</option></select></label>
+      <div class="fld two">
+        <label><span class="fl">シーンの最短(秒)</span><input id="sh-min" type="number" min="5" max="10" step="0.5" value="5"></label>
+        <label><span class="fl">シーンの最長(秒)</span><input id="sh-max" type="number" min="5" max="10" step="0.5" value="10"></label>
+      </div>
+      <label class="fld"><span class="fl">最終の音声 <small>(結合し直すときに変えられます)</small></span>
+        <select id="sh-final" title="自動: セリフがあれば読み上げ(曲は BGM)、曲だけなら曲、どちらも無ければ H3 が作った音。音声なし: 映像だけの MP4(他のツールで音を付ける人向け)">
+          <option value="auto">自動</option><option value="none">音声なし(映像だけ)</option></select></label>
+      <div class="fld"><span class="fl">シード</span>
+        <div class="inline"><input id="sh-seed" type="number" min="0" placeholder="例: 12345" disabled>
+          <label class="chk"><input id="sh-random" type="checkbox" checked>ランダム</label></div></div>
+      <div class="msg" id="sh-msg" hidden></div>
+      <div class="actions"><button id="sh-go" class="primary">ショート動画を作る</button></div>
+    </div>
   </section>
 
   <section class="panel output" id="output" aria-label="生成物">
@@ -308,6 +367,7 @@
       <span class="vbtns"><a id="vsave" class="btn" download>保存</a><button id="vdel" type="button" title="この生成物を削除します(ファイルも消え、元に戻せません)">削除</button><span id="vacts"></span></span>
     </div>
     <div class="mvproj" id="mv-project"></div>
+    <div class="mvproj" id="short-project"></div>
   </section>
 
   <section class="panel history" id="history" aria-label="履歴">
@@ -329,11 +389,11 @@
     <div class="thumbs big" id="gal-grid"></div>
   </section>
 </main>
-<dialog id="mv-del">
+<dialog id="proj-del">
   <form method="dialog">
-    <div class="dtext" id="mv-del-text"></div>
-    <div class="fld" id="mv-del-out-fld"><label class="chk"><input id="mv-del-out" type="checkbox"><span id="mv-del-out-text"></span></label>
-      <span class="note">チェックしないと、完成した MV はギャラリーに残ります</span></div>
+    <div class="dtext" id="proj-del-text"></div>
+    <div class="fld" id="proj-del-out-fld"><label class="chk"><input id="proj-del-out" type="checkbox"><span id="proj-del-out-text"></span></label>
+      <span class="note" id="proj-del-note"></span></div>
     <div class="actions"><button value="ok" class="primary">削除</button><button value="cancel" autofocus>やめる</button></div>
   </form>
 </dialog>
@@ -346,6 +406,8 @@
 <script src="image.js"></script>
 <script src="video.js"></script>
 <script src="music.js"></script>
+<script src="project.js"></script>
 <script src="mv.js"></script>
+<script src="short.js"></script>
 </body>
 </html>

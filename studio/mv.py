@@ -47,8 +47,10 @@ SEED_MOD = 2_147_483_647
 RUNNING = ("analyzing", "scripting", "generating", "assembling")
 STATES = (*RUNNING, "paused", "completed", "failed", "cancelled")
 FINISHED = ("completed", "cancelled")           # 終わった制作。これ以外(一時停止・失敗も)は続きがあるので、曲と画像を使い続ける
-STAGE_STATE = {"mv.analyze": "analyzing", "mv.listen": "analyzing", "mv.script": "scripting", "mv.scene": "generating", "mv.assemble": "assembling"}
-STAGE_LABEL = {"mv.analyze": "曲の分析", "mv.listen": "曲を聞く処理", "mv.script": "演出の作成", "mv.scene": "シーンの生成", "mv.assemble": "結合"}
+# 段階の名前(ジョブの種類は "<接頭辞>.<段階>": MV は mv.analyze…、ショート動画は short.analyze…)→ 制作の状態・画面に出す名前。
+# plan(物語からシーンに割る)はショート動画だけ
+STAGE_STATE = {"analyze": "analyzing", "listen": "analyzing", "plan": "scripting", "script": "scripting", "scene": "generating", "assemble": "assembling"}
+STAGE_LABEL = {"analyze": "曲の分析", "listen": "曲を聞く処理", "plan": "シーン割り", "script": "演出の作成", "scene": "シーンの生成", "assemble": "結合"}
 RESTART_MESSAGE = "管理役の再起動で一時停止しました"
 # 全体の進みの重み(シーンの生成が、ほぼ全部)。シーンは尺に比例して分ける
 WEIGHT_ANALYZE, WEIGHT_SCRIPT, WEIGHT_SCENES, WEIGHT_ASSEMBLE = 0.04, 0.03, 0.90, 0.03
@@ -129,12 +131,8 @@ def pick_image(ledger, oid) -> dict:
     return _output(ledger, oid, "image", "キャラクター画像", "画像")
 
 
-def resolve_params(ledger, params: dict) -> dict:
-    """画面・API から来た入力を検証し、曲・画像の生成物の中身で既定を埋めて、制作の params にする。不正なら ValueError(日本語)。
-    人物の説明・曲の内容の出どころは character_source(typed / image)・concept_source(typed / song)に残す(空は ""。制作の中で、画像を見る・曲を聞いて
-    埋めたら、vision / listen になる)。曲の内容が空のまま(台帳にも手がかりが無い)のときは listen = "pending" で、曲を聞く段が入る。"""
-    song = pick_song(ledger, params.get("song_id"))
-    image = pick_image(ledger, params.get("image_id"))
+def resolve_format(params: dict) -> dict:
+    """投稿先・画質・シーンの長さ・seed・背景の文字を検証して、サイズまで解決する(MV もショート動画も同じ規則)。不正なら ValueError(日本語)。"""
     aspect = str(params.get("aspect") or "16:9")
     if aspect not in SIZES:
         raise ValueError("投稿先は " + " / ".join(ASPECTS) + " のいずれかです")
@@ -157,6 +155,18 @@ def resolve_params(ledger, params: dict) -> dict:
     background_text = str(params.get("background_text") or "auto")
     if background_text not in ("auto", "large", "none"):
         raise ValueError("background_text は auto / large / none のいずれかです")
+    width, height = SIZES[aspect][quality]
+    return {"aspect": aspect, "quality": quality, "width": width, "height": height, "min_s": min_s, "max_s": max_s, "seed": seed,
+            "background_text": background_text}
+
+
+def resolve_params(ledger, params: dict) -> dict:
+    """画面・API から来た入力を検証し、曲・画像の生成物の中身で既定を埋めて、制作の params にする。不正なら ValueError(日本語)。
+    人物の説明・曲の内容の出どころは character_source(typed / image)・concept_source(typed / song)に残す(空は ""。制作の中で、画像を見る・曲を聞いて
+    埋めたら、vision / listen になる)。曲の内容が空のまま(台帳にも手がかりが無い)のときは listen = "pending" で、曲を聞く段が入る。"""
+    song = pick_song(ledger, params.get("song_id"))
+    image = pick_image(ledger, params.get("image_id"))
+    fmt = resolve_format(params)
     # 歌わせる(リップシンク。ボーカルを H3 に渡して口を合わせる)か、歌わせない(イメージ MV。音声を渡さず、画像とプロンプトだけで作る)か
     lipsync = params.get("lipsync", True)
     if not isinstance(lipsync, bool):
@@ -164,11 +174,8 @@ def resolve_params(ledger, params: dict) -> dict:
     typed_character, image_prompt = _clip(str(params.get("character") or ""), CHARACTER_MAX), _clip(str(image["params"].get("prompt") or ""), CHARACTER_MAX)
     typed_concept, song_concept = _clip(str(params.get("concept") or ""), CONCEPT_MAX), concept_from_song(song["params"])
     character, concept = typed_character or image_prompt, typed_concept or song_concept
-    width, height = SIZES[aspect][quality]
     title = _clip(str(song["params"].get("theme") or Path(song.get("filename") or "").stem or "MV"), 60) or "MV"
-    return {"song_id": song["id"], "image_id": image["id"], "character": character, "concept": concept, "aspect": aspect,
-            "quality": quality, "width": width, "height": height, "min_s": min_s, "max_s": max_s, "seed": seed,
-            "background_text": background_text, "lipsync": lipsync, "title": title,
+    return {"song_id": song["id"], "image_id": image["id"], "character": character, "concept": concept, **fmt, "lipsync": lipsync, "title": title,
             "character_source": "typed" if typed_character else "image" if image_prompt else "",
             "concept_source": "typed" if typed_concept else "song" if song_concept else "", "listen": "" if concept else "pending"}
 
@@ -203,34 +210,75 @@ def next_step(proj: dict) -> tuple:
 
 def step_of(job) -> tuple:
     """ジョブが受け持っていた段階(next_step と同じ形)。"""
-    if job.kind == "mv.scene":
-        return ("scene", job.params.get("scene"))
-    return (job.kind.split(".", 1)[1],)
+    stage = job.kind.split(".", 1)[1]
+    return ("scene", job.params.get("scene")) if stage == "scene" else (stage,)
 
 
 class Director:
-    """制作ごとに、ジョブを 1 つずつ入れて進める。runner は JobRunner、ledger と outputs_dir は管理役のもの。"""
+    """制作ごとに、ジョブを 1 つずつ入れて進める。runner は JobRunner、ledger と outputs_dir は管理役のもの。
+
+    MV(kind = "mv")とショート動画(kind = "short"。studio/short.py の ShortDirector)は同じ規則で動く。違いは下のクラス属性と、
+    入力の検証(_resolve)・次にやること(_next_step)・画面に出す項目だけで、一時停止・再開・中止・やり直し・結合し直し・削除・進みは共通。
+    """
+    KIND = "mv"                    # 台帳の kind 列。一覧・復元はこの種類だけを見る
+    PREFIX = "mv"                  # ジョブの種類の接頭辞(mv.analyze …)。ジョブの tab にも使う(生成物の tab になる)
+    NOUN = "MV"
+    WORK_SUB = "mv"                # outputs/<WORK_SUB>/<制作の ID>/ が作業フォルダ
+    STAGE_LABEL = STAGE_LABEL
+    TEXT = {"analyze": "曲を分析します", "listen": "曲を聞いて、曲の内容を考えます", "plan": "物語からシーンに分けます", "script": "演出を書きます",
+            "assemble": "シーンを結合します", "done": "MV ができました"}
+    PARAM_KEYS = INPUT_KEYS        # 画面(view)に出す制作の入力
+    SCENE_KEYS = ("index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "emotion", "seed", "status", "elapsed_s",
+                  "peak_vram_gb", "error")
 
     def __init__(self, runner, ledger, outputs_dir):
         self.runner, self.ledger, self.outputs_dir = runner, ledger, Path(outputs_dir)
+        self.stage_state = {f"{self.PREFIX}.{k}": v for k, v in STAGE_STATE.items()}      # ジョブの種類 -> 制作の状態
         self._active: dict = {}        # 制作の ID -> 入れてあるジョブの ID(制作ごとに高々 1 つ。ジョブが終わった通知で外す)
         runner.on_finished(self._on_finished)
+
+    # ---- 種類ごとに違うところ(ShortDirector が置き換える) ----
+
+    def _resolve(self, params: dict) -> dict:
+        return resolve_params(self.ledger, params)
+
+    def _next_step(self, proj: dict) -> tuple:
+        return next_step(proj)
+
+    def work(self, pid: str) -> Path:
+        return Path(self.outputs_dir) / self.WORK_SUB / pid
+
+    def _params_view(self, params: dict) -> dict:
+        return {k: params.get(k) for k in self.PARAM_KEYS}
+
+    def _summary_extra(self, params: dict) -> dict:
+        """一覧に足す、種類ごとの項目。"""
+        return {"lipsync": params.get("lipsync", True)}
+
+    def _cover_id(self, params: dict):
+        """一覧のサムネイルに使う画像(最終の動画ができるまでの代わり)の生成物の ID。"""
+        return params.get("image_id")
+
+    def _stage(self, job):
+        """このジョブがこの種類の制作の段階なら、その名前(analyze / scene …)、そうでなければ None。"""
+        prefix, _, stage = job.kind.partition(".")
+        return stage if prefix == self.PREFIX and job.kind in self.stage_state else None
 
     # ---- 入口 ----
 
     def create(self, params: dict) -> dict:
         """入力を検証して制作を作り、最初のジョブ(分析)を入れる。不正なら ValueError(日本語)。制作の画面用の辞書を返す。"""
-        resolved = resolve_params(self.ledger, params)
+        resolved = self._resolve(params)
         pid = uuid.uuid4().hex[:12]
-        work_dir(self.outputs_dir, pid).mkdir(parents=True, exist_ok=True)
-        self.ledger.create_mv_project(pid, "analyzing", resolved, [], "曲を分析します")
+        self.work(pid).mkdir(parents=True, exist_ok=True)
+        self.ledger.create_mv_project(pid, "analyzing", resolved, [], self.TEXT["analyze"], kind=self.KIND)
         self._advance(pid)
         return self.view(pid)
 
     def restore(self) -> int:
         """管理役の起動時: 走っていた制作(ジョブは再起動で消えた)を一時停止にし、「生成中」のシーンを未生成に戻す。戻す数を返す。"""
         n = 0
-        for proj in self.ledger.list_mv_projects(limit=100000):
+        for proj in self.ledger.list_mv_projects(limit=100000, kind=self.KIND):
             if proj["state"] not in RUNNING:
                 continue
             patches = {s["index"]: {"status": "pending"} for s in proj["scenes"] if s["status"] == "running"}
@@ -286,9 +334,10 @@ class Director:
         if scene is None:
             raise ValueError(f"シーン {number} はありません")
         job = self._inflight(pid)
-        if job is not None and job.kind == "mv.assemble":
+        stage = self._stage(job) if job is not None else None
+        if stage == "assemble":
             raise ValueError("結合しています。終わってからやり直してください")
-        if job is not None and job.kind == "mv.scene" and job.params.get("scene") == scene["index"]:
+        if stage == "scene" and job.params.get("scene") == scene["index"]:
             raise ValueError("そのシーンは生成中です")
         patch = {"status": "pending", "error": None, "clip": None, "thumb": None, "elapsed_s": None, "peak_vram_gb": None}
         if prompt is not None:
@@ -303,12 +352,15 @@ class Director:
         self.ledger.update_mv_project(pid, params_patch={"assembled": False}, scene_patches={scene["index"]: patch})
         return self._start(pid)
 
-    def reassemble(self, pid: str) -> dict:
+    def _check_reassemble(self, pid: str) -> None:
         proj = self._get(pid)
         if not proj["scenes"] or any(s["status"] != "done" for s in proj["scenes"]):
             raise ValueError("全部のシーンができてから結合できます")
         if self._inflight(pid) is not None:
             raise ValueError("制作中です。終わってから結合し直してください")
+
+    def reassemble(self, pid: str) -> dict:
+        self._check_reassemble(pid)
         self.ledger.update_mv_project(pid, params_patch={"assembled": False})
         return self._start(pid)
 
@@ -321,10 +373,10 @@ class Director:
             await self.runner.cancel(job.id)
         else:
             self._active.pop(pid, None)
-        await asyncio.to_thread(shutil.rmtree, work_dir(self.outputs_dir, pid), True)
+        await asyncio.to_thread(shutil.rmtree, self.work(pid), True)
 
     def output_ids(self, pid: str) -> list:
-        """この制作の MV(動画)の生成物の ID(新しい順)。結合し直すたびに残る前の版も含む(生成物の params.project_id がこの制作のもの)。制作が無ければ LookupError。"""
+        """この制作の動画の生成物の ID(新しい順)。結合し直すたびに残る前の版も含む(生成物の params.project_id がこの制作のもの)。制作が無ければ LookupError。"""
         self._get(pid)
         return [o["id"] for o in self.ledger.list_outputs(limit=100000) if o["params"].get("project_id") == pid]
 
@@ -332,25 +384,25 @@ class Director:
 
     def view(self, pid: str) -> Optional[dict]:
         proj = self.ledger.get_mv_project(pid)
-        return self._view(proj) if proj else None
+        return self._view(proj) if proj and proj.get("kind", "mv") == self.KIND else None
 
     def list(self, limit: int = 100) -> list:
         """新しい順の一覧(シーンの中身は含めない)。"""
-        return [self._summary(p) for p in self.ledger.list_mv_projects(limit)]
+        return [self._summary(p) for p in self.ledger.list_mv_projects(limit, kind=self.KIND)]
 
     def _get(self, pid: str) -> dict:
         proj = self.ledger.get_mv_project(pid)
-        if proj is None:
-            raise LookupError("その MV の制作は見つかりません(削除されたかもしれません)")
+        if proj is None or proj.get("kind", "mv") != self.KIND:       # 別の種類の制作の ID も「無い」ことにする(MV の API でショート動画を触らせない)
+            raise LookupError(f"その{self.NOUN}の制作は見つかりません(削除されたかもしれません)")
         return proj
 
     def _view(self, proj: dict) -> dict:
         pid, params = proj["id"], proj["params"]
         job = self._inflight(pid)
         out = self.ledger.get_output(proj["output_id"]) if proj["output_id"] else None
-        return {"id": pid, "title": params.get("title") or "MV", "state": proj["state"], "message": self._message(proj, job),
+        return {"id": pid, "title": params.get("title") or self.NOUN, "state": proj["state"], "message": self._message(proj, job),
                 "error": proj["error"], "created_at": proj["created_at"], "updated_at": proj["updated_at"],
-                "params": {k: params.get(k) for k in INPUT_KEYS}, "analysis": params.get("analysis"), "script": params.get("script"),
+                "params": self._params_view(params), "analysis": params.get("analysis"), "script": params.get("script"),
                 "sources": {"character": params.get("character_source") or "", "concept": params.get("concept_source") or ""},
                 "source_notes": {"character": params.get("character_note") or "", "concept": params.get("listen_error") or ""},
                 "assembled": bool(params.get("assembled")), "scenes": [self._scene_view(pid, s, job) for s in proj["scenes"]],
@@ -360,23 +412,22 @@ class Director:
     def _summary(self, proj: dict) -> dict:
         params, job = proj["params"], self._inflight(proj["id"])
         out = self.ledger.get_output(proj["output_id"]) if proj["output_id"] else None
-        thumb = (out or {}).get("thumb_path") or (self.ledger.get_output(params.get("image_id") or "") or {}).get("thumb_path")
-        return {"id": proj["id"], "title": params.get("title") or "MV", "state": proj["state"], "message": self._message(proj, job),
+        thumb = (out or {}).get("thumb_path") or (self.ledger.get_output(self._cover_id(params) or "") or {}).get("thumb_path")
+        return {"id": proj["id"], "title": params.get("title") or self.NOUN, "state": proj["state"], "message": self._message(proj, job),
                 "error": proj["error"], "created_at": proj["created_at"], "updated_at": proj["updated_at"],
                 "aspect": params.get("aspect"), "quality": params.get("quality"), "width": params.get("width"),
-                "height": params.get("height"), "lipsync": params.get("lipsync", True), "scenes": len(proj["scenes"]),
+                "height": params.get("height"), **self._summary_extra(params), "scenes": len(proj["scenes"]),
                 "done": sum(1 for s in proj["scenes"] if s["status"] == "done"), "progress": self._progress(proj, job),
                 "job_id": job.id if job else None, "output": out, "thumb_url": "/outputs/" + thumb if thumb else None}
 
     def _scene_view(self, pid: str, s: dict, job) -> dict:
-        d = work_dir(self.outputs_dir, pid)
+        d = self.work(pid)
 
         def url(name):
             f = d / name if name else None
-            return f"/outputs/mv/{pid}/{name}?v={int(f.stat().st_mtime)}" if f is not None and f.is_file() else None
-        running = job is not None and job.kind == "mv.scene" and job.params.get("scene") == s["index"]
-        return {**{k: s.get(k) for k in ("index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "emotion", "seed",
-                                         "status", "elapsed_s", "peak_vram_gb", "error")},
+            return f"/outputs/{self.WORK_SUB}/{pid}/{name}?v={int(f.stat().st_mtime)}" if f is not None and f.is_file() else None
+        running = job is not None and self._stage(job) == "scene" and job.params.get("scene") == s["index"]
+        return {**{k: s.get(k) for k in self.SCENE_KEYS},
                 "clip_url": url(s.get("clip")) if s["status"] == "done" else None, "thumb_url": url(s.get("thumb")),
                 "job_status": job.status if running else None}
 
@@ -385,7 +436,7 @@ class Director:
         if job is None or proj["state"] not in RUNNING:
             return proj["message"] or ""
         msg = job.message or proj["message"] or ""
-        if job.kind == "mv.scene" and not msg.startswith("シーン"):
+        if self._stage(job) == "scene" and not msg.startswith("シーン"):
             msg = f"シーン {job.params.get('scene')} / {len(proj['scenes'])}: {msg}"
         return msg
 
@@ -395,17 +446,17 @@ class Director:
             return 1.0
         params, scenes = proj["params"], proj["scenes"]
         live = max(0.0, min(1.0, job.progress if job is not None and job.status == "running" else 0.0))
-        kind = job.kind if job is not None else ""
-        total = WEIGHT_ANALYZE if params.get("analysis") else (WEIGHT_ANALYZE * live if kind == "mv.analyze" else 0.0)
-        total += WEIGHT_SCRIPT if scenes and all(s.get("prompt") for s in scenes) else (WEIGHT_SCRIPT * live if kind == "mv.script" else 0.0)
+        kind = (self._stage(job) or "") if job is not None else ""
+        total = WEIGHT_ANALYZE if params.get("analysis") else (WEIGHT_ANALYZE * live if kind == "analyze" else 0.0)
+        total += WEIGHT_SCRIPT if scenes and all(s.get("prompt") for s in scenes) else (WEIGHT_SCRIPT * live if kind == "script" else 0.0)
         length = sum(s["duration"] for s in scenes) or 1.0
         for s in scenes:
             w = WEIGHT_SCENES * s["duration"] / length
             if s["status"] == "done":
                 total += w
-            elif kind == "mv.scene" and job.params.get("scene") == s["index"]:
+            elif kind == "scene" and job.params.get("scene") == s["index"]:
                 total += w * live
-        total += WEIGHT_ASSEMBLE if params.get("assembled") else (WEIGHT_ASSEMBLE * live if kind == "mv.assemble" else 0.0)
+        total += WEIGHT_ASSEMBLE if params.get("assembled") else (WEIGHT_ASSEMBLE * live if kind == "assemble" else 0.0)
         return round(min(total, 0.999), 4)
 
     # ---- ジョブをつなぐ ----
@@ -422,7 +473,7 @@ class Director:
         self.ledger.update_mv_project(pid, state=state, message=message, error=error, **fields)
 
     def _submit(self, pid: str, kind: str, **params):
-        job = self.runner.submit("mv", kind, {"project_id": pid, **params})
+        job = self.runner.submit(self.PREFIX, f"{self.PREFIX}.{kind}", {"project_id": pid, **params})
         self._active[pid] = job.id
         return job
 
@@ -430,7 +481,7 @@ class Director:
         """走っているジョブがあればその段階として扱い(終わったら続きを入れる)、無ければ次の段階のジョブを入れる。"""
         job = self._inflight(pid, live=True)
         if job is not None:
-            self._set(pid, STAGE_STATE[job.kind], "再開しました")
+            self._set(pid, self.stage_state[job.kind], "再開しました")
         else:
             self._advance(pid)
         return self.view(pid)
@@ -440,66 +491,59 @@ class Director:
         proj = self.ledger.get_mv_project(pid)
         if proj is None:
             return
-        step, n = next_step(proj), len(proj["scenes"])
+        step, n = self._next_step(proj), len(proj["scenes"])
         try:
-            if step[0] == "analyze":
-                self._set(pid, "analyzing", "曲を分析します")
-                self._submit(pid, "mv.analyze")
-            elif step[0] == "listen":
-                self._set(pid, "analyzing", "曲を聞いて、曲の内容を考えます")
-                self._submit(pid, "mv.listen")
-            elif step[0] == "script":
-                self._set(pid, "scripting", "演出を書きます")
-                self._submit(pid, "mv.script")
-            elif step[0] == "scene":
+            if step[0] == "scene":
                 self._set(pid, "generating", f"シーン {step[1]} / {n} を生成します", scene_patches={step[1]: {"status": "running", "error": None}})
-                self._submit(pid, "mv.scene", scene=step[1])
-            elif step[0] == "assemble":
-                self._set(pid, "assembling", "シーンを結合します")
-                self._submit(pid, "mv.assemble")
+                self._submit(pid, "scene", scene=step[1])
+            elif step[0] in STAGE_STATE:
+                self._set(pid, STAGE_STATE[step[0]], self.TEXT[step[0]])
+                self._submit(pid, step[0])
             else:
-                self._set(pid, "completed", "MV ができました")
+                self._set(pid, "completed", self.TEXT["done"])
         except ValueError as e:       # ジョブを受け付けられない(制作のデータが壊れている、など)
             log.warning("制作 %s のジョブを入れられません: %s", pid, e)
             self._set(pid, "failed", "ジョブを始められませんでした", error=str(e))
 
     def _on_finished(self, job) -> None:
         """JobRunner から、ジョブが終わるたびに呼ばれる。この制作のジョブなら、結果に応じて次へ進む・止める。"""
-        pid = job.params.get("project_id") if job.kind in STAGE_STATE else None
+        stage = self._stage(job)
+        pid = job.params.get("project_id") if stage else None
         if not pid or self._active.get(pid) != job.id:
             return
         del self._active[pid]
         proj = self.ledger.get_mv_project(pid)
         if proj is None:       # 走っている間に消された制作: ジョブが後から書いたファイルを片づける
-            shutil.rmtree(work_dir(self.outputs_dir, pid), ignore_errors=True)
+            shutil.rmtree(self.work(pid), ignore_errors=True)
             return
         state, scene = proj["state"], job.params.get("scene")
+        label = self.STAGE_LABEL[stage]
         if job.status == "completed":
             if state in RUNNING:
-                if next_step(proj) == step_of(job):       # 完了したのに結果が記録されていない(同じことを繰り返さない)
-                    self._set(pid, "failed", f"{STAGE_LABEL[job.kind]}の結果を記録できませんでした", error="ジョブは完了しましたが、結果が制作に書かれていません")
+                if self._next_step(proj) == step_of(job):       # 完了したのに結果が記録されていない(同じことを繰り返さない)
+                    self._set(pid, "failed", f"{label}の結果を記録できませんでした", error="ジョブは完了しましたが、結果が制作に書かれていません")
                 else:
                     self._advance(pid)
             elif state == "paused":
                 self._set(pid, "paused", "一時停止しました")
             return
-        if job.kind == "mv.scene":       # 失敗・中止したシーンは、完成していない(中止なら、また最初から)
+        if stage == "scene":       # 失敗・中止したシーンは、完成していない(中止なら、また最初から)
             patch = {"status": "failed", "error": job.error} if job.status == "failed" and state != "cancelled" else {"status": "pending"}
             self.ledger.update_mv_project(pid, scene_patches={scene: patch})
         if state == "cancelled":
             return
-        if job.status == "failed" and job.kind == "mv.listen":      # 曲を聞けなくても MV は作れる: 理由を残して、曲の内容なしで続ける
+        if job.status == "failed" and stage == "listen":      # 曲を聞けなくても MV は作れる: 理由を残して、曲の内容なしで続ける
             self.ledger.update_mv_project(pid, params_patch={"listen": "skipped", "listen_error": job.error or "原因不明"})
             if state in RUNNING:
                 self._advance(pid)
             else:
                 self._set(pid, "paused", "一時停止しました")
         elif job.status == "failed":
-            self._set(pid, "failed", f"{STAGE_LABEL[job.kind]}に失敗しました", error=job.error or "原因不明")
+            self._set(pid, "failed", f"{label}に失敗しました", error=job.error or "原因不明")
         elif state == "paused":       # 一時停止で取り下げた(まだ始まっていなかった)ジョブ
             self._set(pid, "paused", "一時停止しました")
         elif state in RUNNING:       # 管理役の画面の外(ジョブの一覧など)から、このジョブだけ中止された
-            self._set(pid, "paused", f"{STAGE_LABEL[job.kind]}が中止されたので一時停止しました")
+            self._set(pid, "paused", f"{label}が中止されたので一時停止しました")
 
 
 def _int(value, name: str) -> int:

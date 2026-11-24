@@ -73,6 +73,7 @@ class Ctx:
     outputs_dir: Path
     transport: object = None
     llm: object = None            # studio.llm.Llm(歌詞づくりなど、LLM を使う prepare が使う)
+    tts: object = None            # studio.tts.Tts(ショート動画が、セリフ・ナレーションの読み上げに使う)
 
 
 @dataclass
