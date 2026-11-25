@@ -1,4 +1,4 @@
-# h3-creator-studio 仕様(第 1 版)
+# YUZU Creator Studio(h3-creator-studio)仕様(第 1 版)
 
 誰でも使える簡易な画像・動画・音楽の制作スタジオ。MiniMax-H3(動画+音声、静止画)、MiniMax-H3-Image(画像)、ACE-Step(音楽)、AivisSpeech(TTS)を 1 つの画面から使う。GPU には常に 1 つの部品だけを載せ、VRAM と CPU メモリを見ながら載せ替えるのがこのアプリの役目。
 

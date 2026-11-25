@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""h3-creator-studio のセットアップ(setup.sh / setup.bat から呼ばれる)。
+"""YUZU Creator Studio のセットアップ(setup.sh / setup.bat から呼ばれる)。
 
 部品(minimax-h3 / minimax-h3-image-server / ACE-Step-1.5-fast / AivisSpeech-Engine)を components/ に取り込み、
 それぞれ自分のセットアップスクリプトで環境とモデルを用意する。何度実行してもよく、済んでいる所は飛ばし、
@@ -618,7 +618,7 @@ def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> N
 
 
 def parse_args(argv: list = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="h3-creator-studio のセットアップ(何度実行しても安全。続きから進みます)")
+    p = argparse.ArgumentParser(description="YUZU Creator Studio のセットアップ(何度実行しても安全。続きから進みます)")
     p.add_argument("--no-models", action="store_true", help="環境だけ作り、モデルは取得しない")
     p.add_argument("--only", default="", help="対象の部品をカンマ区切りで(h3,h3image,ace,aivis。mvtools は MV の音声処理の道具だけを指す)")
     p.add_argument("--components-dir", default="", help="部品を取り込むフォルダ(既定は studio.toml の components_dir)")

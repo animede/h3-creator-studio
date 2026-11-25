@@ -1,4 +1,4 @@
-# h3-creator-studio の既定設定(リポジトリに含める)。
+# YUZU Creator Studio の既定設定(リポジトリに含める)。
 # 個人の設定は studio.local.toml(git 管理外)に同じ形式で書くと、こちらを上書きする。
 
 host = "127.0.0.1"

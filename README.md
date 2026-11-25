@@ -1,6 +1,8 @@
-# h3-creator-studio
+# YUZU Creator Studio
 
-**最新版: 2026-11-25 09:30 JST** — 6 つ目のタブ「編集」を追加: ギャラリーの動画・画像・曲を、GPU を使わず ffmpeg だけで簡単に編集する(つなぐ・区間を削除・途中に挿入・色調・境目のクロスフェード・フェードイン/アウト・曲の差し替え。元の動画は変わらず、元に戻す/やり直す、プレビューつき)。他のタブの動作は変わらない。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+(リポジトリ名: `h3-creator-studio`。旧名の h3-creator-studio から改名)
+
+**最新版: 2026-11-25 11:10 JST** — 名前を **YUZU Creator Studio** に(リポジトリ名はそのまま)。ライセンスを Apache-2.0 に、画面の下に著作権と部品のクレジット、題を大きく明るいレモン色に。編集タブ(第 4 版)。編集タブ(第 4 版)。元の動画は変わらず、元に戻す/やり直す、プレビューつき)。他のタブの動作は変わらない。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 **mv-V3 や story のシンプル版を統合した、誰でも使える簡易な画像・動画・音楽コンテンツ制作スタジオ。**
 ブラウザ 1 枚の画面で、画像・動画(音声つき)・音楽を作る。ComfyUI のようにノードをつなぐ必要はない。
@@ -396,9 +398,19 @@ h3-creator-studio/
 └── docs/SPEC.md           仕様
 ```
 
+## クレジット
+
+- **このアプリ**: © 2026 ゆずき(YUZUKI、GitHub: animede)。コードは Apache License 2.0([LICENSE](LICENSE)、[NOTICE](NOTICE))。
+- **[MiniMax-H3 / MiniMax-H3-Image](https://huggingface.co/MiniMaxAI)**(MiniMax): 動画・音声・静止画・画像のモデル。モデルの重みは MiniMax Community License(非商用は無料、商用は年商 $20M 未満まで、要クレジット。本家のモデルカードを確認)。このアプリは [Diffusers_minimax-h3](https://github.com/animede/Diffusers_minimax-h3) と [minimax-h3-image-server](https://github.com/animede/minimax-h3-image-server)(どちらも MIT)を部品として動かす。
+- **[ACE-Step](https://github.com/ace-step/ACE-Step)**(ACE Studio / StepFun): 音楽のモデル(MIT)。部品は [ACE-Step-1.5-fast](https://github.com/animede/ACE-Step-1.5-fast)(MIT)。
+- **[AivisSpeech-Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)**(Aivis Project): 読み上げ(LGPL-3.0。別プロセスとして HTTP で呼ぶだけで、組み込まない)。音声モデル(aivm)は、それぞれの作者の利用規約に従う。
+- そのほか: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)と Google の Gemma 4(Gemma 利用規約)、[Demucs](https://github.com/facebookresearch/demucs)(MIT)、[librosa](https://librosa.org/)(ISC)、[ffmpeg](https://ffmpeg.org/)(LGPL/GPL。PATH のものを使う)。
+
+画面の下にも、著作権と主な部品のクレジットを出している。
+
 ## ライセンス
 
-MIT([LICENSE](LICENSE))。部品とモデルは、それぞれのライセンスに従う。MV のシーン分割と演出の組み立て(`studio/mvtools/`、`studio/mvscript.py`、`studio/mvclip.py`)は [Minimax-H3-lipsync-mv](https://github.com/animede/Minimax-H3-lipsync-mv)(Apache-2.0)からの移植([NOTICE](NOTICE))。
+Apache License 2.0([LICENSE](LICENSE))。© 2026 YUZUKI(ゆずき)。再配布のときは著作権表示と [NOTICE](NOTICE) を保つ(Apache-2.0 第 4 条)。部品とモデルは、それぞれのライセンスに従う。MV のシーン分割と演出の組み立て(`studio/mvtools/`、`studio/mvscript.py`、`studio/mvclip.py`、`studio/mvdescribe.py`、`studio/mvsub.py`)は、同じ作者の [Minimax-H3-lipsync-mv](https://github.com/animede/Minimax-H3-lipsync-mv)(Apache-2.0)からの移植([NOTICE](NOTICE))。
 
 ## 謝辞
 

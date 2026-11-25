@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
     ledger.close()
 
 
-app = FastAPI(title="h3-creator-studio", lifespan=lifespan)
+app = FastAPI(title="YUZU Creator Studio", lifespan=lifespan)
 
 
 def _comp(name: str):
@@ -950,7 +950,7 @@ app.mount("/", StaticFiles(directory=str(REPO_ROOT / "web"), html=True), name="w
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="h3-creator-studio 管理役")
+    ap = argparse.ArgumentParser(description="YUZU Creator Studio 管理役")
     ap.add_argument("--host", default=settings.host)
     ap.add_argument("--port", type=int, default=settings.port)
     args = ap.parse_args()

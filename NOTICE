@@ -1,6 +1,11 @@
-h3-creator-studio
-Copyright (c) 2026 animede
-Licensed under the MIT License (see LICENSE), except for the files listed below.
+YUZU Creator Studio (repository: h3-creator-studio)
+Copyright 2026 YUZUKI (ゆずき, github: animede)
+
+Licensed under the Apache License, Version 2.0 (see LICENSE). Keep this
+copyright notice and this NOTICE file when redistributing (Apache-2.0, §4).
+
+The files listed below were ported from Minimax-H3-lipsync-mv, by the same
+author, and carry their own headers describing the changes.
 
 ----------------------------------------------------------------------
 studio/mvtools/ (separate.py, analyze.py)
