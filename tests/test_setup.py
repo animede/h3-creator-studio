@@ -64,11 +64,18 @@ class DecideSourceTest(unittest.TestCase):
         self.assertIn("Diffusers_minimax-h3.git", s.message)
         self.assertTrue(s.run_setup)
 
+    def installed(self, *parts):
+        """既に入れてあるエンジンらしいフォルダ(git の取り込み + Python 環境)を作る。"""
+        d = self.home.joinpath(*parts)
+        (d / ".git").mkdir(parents=True)
+        (d / "venv").mkdir()
+        return d
+
     def test_home_dir_is_reported_not_cloned(self):
-        (self.home / "minimax-h3").mkdir()
+        self.installed("minimax-h3")
         s = S.decide_source("h3", self.cfg, self.home)
         self.assertEqual(s.action, "home")
-        self.assertIn("~/minimax-h3 が見つかりました", s.message)
+        self.assertIn(f"{self.home / 'minimax-h3'} が見つかりました", s.message)
         self.assertIn("studio.local.toml に dir を書いてください", s.message)
         self.assertIn("[components.h3]", s.message)
         self.assertIn(f"dir = '{self.home / 'minimax-h3'}'", s.message)
@@ -80,9 +87,35 @@ class DecideSourceTest(unittest.TestCase):
         self.assertEqual(s.action, "clone")
 
     def test_home_dir_uses_configured_repo_name(self):
-        (self.home / "my-h3").mkdir()
+        self.installed("my-h3")
         cfg = Settings({"components": {"h3": {"repo": "my-h3"}}}, self.root)
         self.assertEqual(S.decide_source("h3", cfg, self.home).action, "home")
+
+    def test_finds_installs_under_ai_folders_and_by_alias_and_ignores_empty_folders(self):
+        (self.home / "minimax-h3").mkdir()                                   # 空のフォルダ(環境が無い)は既存と見なさない
+        found = self.installed("AI", "Diffusers_minimax-h3")                 # ホームの AI の下、リポジトリの別名
+        s = S.decide_source("h3", self.cfg, self.home)
+        self.assertEqual((s.action, s.path), ("home", found))
+
+    def test_windows_candidates_include_drive_roots(self):
+        c = [str(x) for x in S.existing_candidates("ace", "ACE-Step-1.5-fast", Path("C:/Users/u"), "win32")]
+        self.assertTrue(any(x.replace("\\", "/").startswith("C:/AI") and x.endswith("ACE-Step-1.5-fast") for x in c), c)
+        self.assertTrue(any(x.startswith("D:") for x in c))
+
+    def test_write_local_dir_adds_or_replaces_only_dir(self):
+        t = self.root / "studio.local.toml"
+        S.write_local_dir(t, "h3", Path("/x/minimax-h3"))
+        t.write_text(t.read_text() + "[components.ace]\nenabled = false\n", encoding="utf-8")
+        S.write_local_dir(t, "h3", Path("/y/minimax-h3"))
+        S.write_local_dir(t, "ace", Path("/z/ACE"))
+        import tomllib
+        cfg = tomllib.loads(t.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["components"]["h3"], {"dir": "/y/minimax-h3"})
+        self.assertEqual(cfg["components"]["ace"], {"dir": "/z/ACE", "enabled": False})
+
+    def test_ask_yes_is_false_without_a_terminal(self):
+        with mock.patch.object(sys, "stdin", None):
+            self.assertFalse(S.ask_yes("?"))
 
     def test_aivis_download_present_and_blocked(self):
         with mock.patch.object(sys, "platform", "linux"):

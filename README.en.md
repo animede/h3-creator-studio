@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: 2026-11-25 20:10 JST** — A detailed usage guide (docs/USAGE.en.md) and a **Help** (使い方) button at the top right (opens in a floating window at the section for the current tab). The "destination" setting in Music Video and Short Video is now **aspect** (adds landscape 4:5 and custom size), and quality adds **Low VRAM** (512 on the long side). Each tab has a **Sample** button (loads a bundled example: fills in the inputs and materials and lets you watch the result; one Short Video and one Music Video). The README now has example GIFs and a screenshot. For the change history, see the [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: 2026-11-26 10:00 JST** — setup finds engines you already installed and, after a Y/n confirmation, writes their paths into studio.local.toml. A detailed usage guide (docs/USAGE.en.md) and a **Help** (使い方) button at the top right (opens in a floating window at the section for the current tab). The "destination" setting in Music Video and Short Video is now **aspect** (adds landscape 4:5 and custom size), and quality adds **Low VRAM** (512 on the long side). Each tab has a **Sample** button (loads a bundled example: fills in the inputs and materials and lets you watch the result; one Short Video and one Music Video). The README now has example GIFs and a screenshot. For the change history, see the [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -179,7 +179,7 @@ dir = "/home/you/ACE-Step-1.5-fast"
 ```
 
 - For engines with `dir` set, setup skips both cloning and model downloads. The environment and models in that folder are assumed to be ready.
-- Even without `dir`, if setup finds something like `~/minimax-h3` in your home folder, it tells you to set dir if you want to use it, and skips that engine (it won't clone again on its own).
+- Even without `dir`, setup looks for engines you already installed (your home folder and its `AI`, `Documents`, `github`, `src` subfolders; on Windows also each drive root and `\AI`; aliases such as `Diffusers_minimax-h3` included). When it finds one it asks "Use this? [Y/n]" — **press Enter (yes) and it writes the path into `studio.local.toml` for you**, skipping clone and model download. Answer n to leave the file alone and skip that engine (it never re-clones on its own; use `--clone-anyway` for that).
 
 ## Starting and using it
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -146,6 +147,67 @@ def find_aivis_exe(d: Path, plat: str = None) -> Optional[Path]:
     return None
 
 
+# 既に入れてあるエンジンを探すときのフォルダ名(リポジトリ名の別名も)
+REPO_ALIASES = {"h3": ("minimax-h3", "Diffusers_minimax-h3"), "h3image": ("minimax-h3-image-server",),
+                "ace": ("ACE-Step-1.5-fast", "ACE-Step-1.5", "ACE-Step"), "aivis": ("AivisSpeech-Engine", "AivisSpeech")}
+
+
+def existing_candidates(name: str, repo: str, home: Path, plat: str = None) -> list:
+    """既に入れてあるかもしれない場所: ホーム直下・ホームの AI / ai / Documents・(Windows)各ドライブの直下と AI フォルダ。"""
+    names = [repo, *[a for a in REPO_ALIASES.get(name, ()) if a != repo]]
+    bases = [Path(home), *(Path(home) / d for d in ("AI", "ai", "Documents", "github", "src"))]
+    if is_win(plat):
+        for drive in "CDEF":
+            root = Path(f"{drive}:/")       # WindowsPath では C:\ になる
+            bases += [root, root / "AI", root / "ai"]
+    out = []
+    for b in bases:
+        for n in names:
+            c = b / n
+            if c not in out:
+                out.append(c)
+    return out
+
+
+def looks_installed(name: str, d: Path, plat: str = None) -> bool:
+    """そのフォルダが、そのエンジンを入れたものらしいか(AivisSpeech は実行ファイル、他は git の取り込み + Python 環境)。"""
+    try:
+        if not d.is_dir():
+            return False
+        if name == "aivis":
+            return find_aivis_exe(d, plat) is not None
+        return (d / ".git").exists() and any((d / v).is_dir() for v in ("venv", ".venv"))
+    except OSError:
+        return False
+
+
+def write_local_dir(local_toml: Path, name: str, path: Path) -> None:
+    """studio.local.toml に [components.<name>] dir = '...' を足す(無ければ作る)。同じ節があれば、その節の dir の行を置き換える。"""
+    lines = local_toml.read_text(encoding="utf-8").splitlines() if local_toml.is_file() else []
+    head, entry = f"[components.{name}]", f"dir = '{path}'"
+    if head in (ln.strip() for ln in lines):
+        i = next(k for k, ln in enumerate(lines) if ln.strip() == head)
+        j = next((k for k in range(i + 1, len(lines)) if lines[k].lstrip().startswith("[")), len(lines))
+        body = [ln for ln in lines[i + 1:j] if not re.match(r"\s*dir\s*=", ln)]
+        lines = lines[:i + 1] + [entry] + body + lines[j:]
+    else:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines += [head, entry]
+    local_toml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def ask_yes(question: str, default: bool = True) -> bool:
+    """端末で [Y/n] を聞く。端末でなければ(自動実行)既定にしない: False。"""
+    if not sys.stdin or not sys.stdin.isatty():
+        return False
+    try:
+        ans = input(f"{question} [{'Y/n' if default else 'y/N'}] ").strip().lower()
+    except EOFError:
+        return False
+    return default if not ans else ans in ("y", "yes", "はい")
+
+
 def decide_source(name: str, cfg: Settings, home: Path, clone_anyway: bool = False, plat: str = None) -> Source:
     """エンジン 1 つについて「既存を使う / 取り込み済み / 取り込む」を決める。何もダウンロードしない。"""
     comp = COMPS[name]
@@ -167,9 +229,9 @@ def decide_source(name: str, cfg: Settings, home: Path, clone_anyway: bool = Fal
                       f"{target} は空ではなく、AivisSpeech の実行ファイル({aivis_exe_name(plat)})もありません。"
                       "中身を確認して、不要ならそのフォルダを消してからやり直してください", False)
     repo = str(cfg.components.get(name, {}).get("repo", comp.repo))
-    in_home = Path(home) / repo
-    if in_home.is_dir():
-        msg = (f"~/{repo} が見つかりました。これを使うなら studio.local.toml に dir を書いてください(例):\n"
+    in_home = next((c for c in existing_candidates(name, repo, home, plat) if looks_installed(name, c, plat)), None)
+    if in_home is not None:
+        msg = (f"{in_home} が見つかりました。これを使うなら studio.local.toml に dir を書いてください(例):\n"
                + "\n".join("    " + ln for ln in toml_dir_example(name, in_home).splitlines())
                + "\n  新しく取り込み直すなら --clone-anyway を付けて setup をやり直してください(このエンジンは飛ばします)")
         if not clone_anyway:
@@ -665,6 +727,11 @@ def main(argv: list = None) -> int:
         sources = {}
         for name in selected:
             src = decide_source(name, cfg, Path.home(), args.clone_anyway)
+            if src.action == "home":
+                say(f"[{name}] 既に入れてある {COMPS[name].label} が見つかりました: {src.path}")
+                if ask_yes(f"  これを使いますか?(studio.local.toml に場所を書きます。取り込みもモデル取得もしません)"):
+                    write_local_dir(Path(cfg.root) / "studio.local.toml", name, src.path)
+                    src = Source("existing", src.path, f"既存を使います: {src.path}(studio.local.toml に書きました)", False)
             sources[name] = src
             say(f"[{name}] {src.message}")
             if src.action == "clone":
