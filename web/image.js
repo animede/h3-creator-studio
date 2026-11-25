@@ -47,14 +47,14 @@ function renderRefs() {
     img.draggable = false;
     c.append(img, el("span", "num", String(i + 1)));
     const x = el("button", "rdel", "×");
-    x.title = "外す";
+    x.title = t("外す");
     x.onclick = () => { refs.splice(i, 1); renderRefs(); };
     c.append(x);
     makeDraggable(c, r.id);
     list.append(c);
   });
   im("refs-empty").hidden = refs.length > 0;
-  im("mode").textContent = refs.length ? `${refs.length} 枚` : "";
+  im("mode").textContent = refs.length ? t("{n} 枚", { n: refs.length }) : "";
 }
 
 // ---- 作り方(H3-Image の略語): t2i = テキストから、edit = 参照画像で編集 ----
@@ -68,17 +68,17 @@ function setMode(m) {
 document.querySelectorAll("#im-modes button").forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
 
 function addRef(item) {
-  if (item.kind !== "image") { showMsg("参照にできるのは画像だけです"); return false; }
+  if (item.kind !== "image") { showMsg(t("参照にできるのは画像だけです")); return false; }
   if (mode !== "edit") setMode("edit");      // 参照を入れたら編集モードへ
-  if (refs.some((r) => r.id === item.id)) { showMsg("その画像はすでに参照に入っています"); return false; }
-  if (refs.length >= MAX_REFS) { showMsg(`参照画像は最大 ${MAX_REFS} 枚です`); return false; }
+  if (refs.some((r) => r.id === item.id)) { showMsg(t("その画像はすでに参照に入っています")); return false; }
+  if (refs.length >= MAX_REFS) { showMsg(t("参照画像は最大 {n} 枚です", { n: MAX_REFS })); return false; }
   refs.push(item);
   showMsg("");
   renderRefs();
   return true;
 }
 
-studio.actions.image = (item) => (item.kind === "image" ? [{ label: "参照に使う", run: () => { setTab("image"); setMode("edit"); addRef(item); } }] : []);
+studio.actions.image = (item) => (item.kind === "image" ? [{ label: t("参照に使う"), run: () => { setTab("image"); setMode("edit"); addRef(item); } }] : []);
 // 消された画像は参照から外す(消したとき(studio-deleted)と、一覧を読み直したらギャラリーに無かったとき)
 function dropGone(gone) {
   const before = refs.length;
@@ -92,9 +92,9 @@ async function uploadAndAdd(files) {
   try {
     const skipped = [];
     for (const rec of await uploadFiles(files, im("refs"))) if (rec.kind === "image") addRef(rec); else skipped.push(rec.filename);
-    if (skipped.length) showMsg(`画像以外(${skipped.join("、")})はギャラリーに保存しました(参照には使えません)`);
+    if (skipped.length) showMsg(t("画像以外({names})はギャラリーに保存しました(参照には使えません)", { names: skipped.join(t("、")) }));
   } catch (e) {
-    showMsg(`取り込めませんでした: ${e.message || e}`);
+    showMsg(t("取り込めませんでした: {err}", { err: e.message || e }));
   }
 }
 
@@ -110,10 +110,10 @@ function setBusy(busy) {
 
 async function generate() {
   const prompt = im("prompt").value.trim();
-  if (!prompt) { showMsg("プロンプトを入力してください"); im("prompt").focus(); return; }
+  if (!prompt) { showMsg(t("プロンプトを入力してください")); im("prompt").focus(); return; }
   showMsg("");
   const seed = im("random").checked || im("seed").value === "" ? null : parseInt(im("seed").value, 10);
-  if (mode === "edit" && !refs.length) { showMsg("edit は参照画像が要ります。画像を参照欄に落としてください"); return; }
+  if (mode === "edit" && !refs.length) { showMsg(t("edit は参照画像が要ります。画像を参照欄に落としてください")); return; }
   tracker.submit(mode === "edit" ? "h3image.edit" : "h3image.t2i", {
     prompt, width: +im("w").value, height: +im("h").value, seed, steps: im("steps").value ? +im("steps").value : null,
     references: mode === "edit" ? refs.map((r) => r.id) : [],
@@ -141,7 +141,7 @@ function applyPresetValues(v) {
   if (v.mode === "t2i" || v.mode === "edit") setMode(v.mode);
   if (typeof v.prompt === "string" && v.prompt.trim()) presetSet(im("prompt"), v.prompt);
   for (const [key, id] of [["width", "w"], ["height", "h"]]) if (Number.isFinite(v[key])) presetSet(im(id), v[key]);      // change で 32 の倍数に丸め、サイズの選択も合う
-  if ("steps" in v && !presetSet(im("steps"), v.steps == null ? "" : v.steps)) skipped.push("ステップ数");
+  if ("steps" in v && !presetSet(im("steps"), v.steps == null ? "" : v.steps)) skipped.push(t("ステップ数"));
   if ("seed" in v) presetSetSeed(im("seed"), im("random"), v.seed);
   return skipped;
 }

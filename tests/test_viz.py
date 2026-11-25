@@ -16,7 +16,7 @@ def viz(expr: str):
     """viz.js を node に読み込み、式 expr の値(JSON にできるもの)を返す。"""
     script = ("const vm = require('vm'), fs = require('fs');"
               "const ctx = vm.createContext({ console, window: {}, document: {}, localStorage: {} });"
-              f"vm.runInContext(fs.readFileSync({json.dumps(str(WEB / 'viz.js'))}, 'utf8'), ctx);"
+              f"vm.runInContext(fs.readFileSync({json.dumps(str(WEB / 'i18n.js'))}, 'utf8') + fs.readFileSync({json.dumps(str(WEB / 'viz.js'))}, 'utf8'), ctx);"
               f"process.stdout.write(JSON.stringify(vm.runInContext({json.dumps(expr)}, ctx)));")
     r = subprocess.run(["node", "-e", script], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -27,7 +27,7 @@ def music_list(name: str, pairs: bool = False) -> list:
     """music.js の const NAME = [...] の中身(pairs なら [値, 表示] の値だけ)。"""
     src = (WEB / "music.js").read_text(encoding="utf-8")
     block = re.search(rf"const {name} = (\[.*?\]);", src, re.S).group(1)
-    return re.findall(r'\["([^"]+)", "', block) if pairs else re.findall(r'"([^"]+)"', block)
+    return re.findall(r'\["([^"]+)", (?:t\()?"', block) if pairs else re.findall(r'"([^"]+)"', block)
 
 
 @needs_node

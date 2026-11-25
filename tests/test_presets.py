@@ -63,7 +63,7 @@ class BuiltinFilesTest(unittest.TestCase):
 
     def music_list(self, name: str, pairs: bool = False) -> list:
         block = re.search(rf"const {name} = (\[.*?\]);", self.music_js, re.S).group(1)
-        return re.findall(r'\["([^"]+)", "', block) if pairs else re.findall(r'"([^"]+)"', block)
+        return re.findall(r'\["([^"]+)", (?:t\()?"', block) if pairs else re.findall(r'"([^"]+)"', block)
 
     def text_ok(self, value, field: str) -> bool:
         return isinstance(value, str) and len(value) <= int(self.form.attrs[field]["maxlength"])

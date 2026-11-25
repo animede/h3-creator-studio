@@ -9,16 +9,16 @@ function wireSamples({ tab, box, apply }) {
   let busy = false;
   let loaded = false;             // 一覧を読めたか(タブを開くたびに読み直す。途中で増えた・消えたぶんを拾う)
 
-  const toggle = el("button", "mini", "サンプル");
+  const toggle = el("button", "mini", t("サンプル"));
   toggle.type = "button";
-  toggle.title = "同梱の作り方の見本を開きます(読み込むと、入力欄と素材が見本のとおりになります。生成はしません)";
+  toggle.title = t("同梱の作り方の見本を開きます(読み込むと、入力欄と素材が見本のとおりになります。生成はしません)");
   toggle.setAttribute("aria-expanded", "false");
   const panel = el("div", "sample-panel");
   panel.hidden = true;
   const note = el("div", "preset-note");
   note.hidden = true;
   box.setAttribute("role", "group");
-  box.setAttribute("aria-label", "サンプル");
+  box.setAttribute("aria-label", t("サンプル"));
   box.append(toggle, panel, note);
 
   function say(text, err = false) {
@@ -33,16 +33,16 @@ function wireSamples({ tab, box, apply }) {
   };
 
   async function api(url, method = "GET") {
-    const r = await fetch(url, { method });
+    const r = await fetch(url, { method, headers: langHeaders() });
     const js = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : `通信に失敗しました(${r.status})`);
+    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : t("通信に失敗しました({status})", { status: r.status }));
     return js;
   }
 
   // 素材の数(「画像 1 枚・曲 1 曲」)
   function assetSummary(s) {
     const n = (kind) => s.assets.filter((a) => a.kind === kind).length;
-    return [n("image") ? `画像 ${n("image")} 枚` : "", n("audio") ? `曲 ${n("audio")} 曲` : ""].filter(Boolean).join("・") || "素材なし(物語の文章だけ)";
+    return [n("image") ? t("画像 {n} 枚", { n: n("image") }) : "", n("audio") ? t("曲 {n} 曲", { n: n("audio") }) : ""].filter(Boolean).join(t("・")) || t("素材なし(物語の文章だけ)");
   }
 
   function card(s, goBtns) {
@@ -56,11 +56,11 @@ function wireSamples({ tab, box, apply }) {
       head.append(img);
     }
     const text = el("div", "sample-text");
-    text.append(el("div", "sample-title", s.title), el("div", "sample-desc", s.description || ""), el("div", "note", `素材: ${assetSummary(s)}`));
+    text.append(el("div", "sample-title", t(s.title)), el("div", "sample-desc", s.description ? t(s.description) : ""), el("div", "note", t("素材: {assets}", { assets: assetSummary(s) })));
     head.append(text);
-    const go = el("button", "mini", "読み込む");
+    const go = el("button", "mini", t("読み込む"));
     go.type = "button";
-    go.title = "入力欄と素材を、このサンプルのとおりにします(生成はしません)";
+    go.title = t("入力欄と素材を、このサンプルのとおりにします(生成はしません)");
     go.onclick = () => load(s);
     goBtns.push(go);
     c.append(head, go);
@@ -72,7 +72,7 @@ function wireSamples({ tab, box, apply }) {
       v.src = s.video_url;
       c.append(v);
     }
-    if (s.license) c.append(el("div", "note", `ライセンス: ${s.license}`));
+    if (s.license) c.append(el("div", "note", t("ライセンス: {license}", { license: s.license })));
     return c;
   }
 
@@ -88,14 +88,14 @@ function wireSamples({ tab, box, apply }) {
     if (busy) return;
     busy = true;
     buttons.forEach((b) => { b.disabled = true; });
-    say("素材を取り込んでいます…");
+    say(t("素材を取り込んでいます…"));
     try {
       const js = await api(`/api/samples/${encodeURIComponent(s.id)}/load`, "POST");
       apply(js.values || {}, js.assets || []);
-      say(`「${s.title}」を読み込みました`);
+      say(t("「{title}」を読み込みました", { title: t(s.title) }));
       loadGallery();            // 取り込んだ素材(画像・曲)がギャラリーに出る
     } catch (e) {
-      say(`「${s.title}」を読み込めませんでした: ${e.message || e}`, true);
+      say(t("「{title}」を読み込めませんでした: {err}", { title: t(s.title), err: e.message || e }), true);
     } finally {
       busy = false;
       buttons.forEach((b) => { b.disabled = false; });

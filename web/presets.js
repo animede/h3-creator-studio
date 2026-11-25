@@ -38,19 +38,20 @@ function wirePresets({ tab, box, get, apply }) {
   let busy = false;
   let onName = null;              // 名前の欄で OK(Enter)したときの処理(新しい名前での保存 / 名前の変更)
   const current = () => list.find((p) => p.id === selected) || null;
+  const pname = (p) => (p.builtin ? t(p.name) : p.name);      // 表示用の名前(同梱のものは訳す。自分のものはそのまま)
 
   async function api(url, method = "GET", body) {
-    const r = await fetch(url, { method, headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    const r = await fetch(url, { method, headers: langHeaders(body !== undefined ? { "Content-Type": "application/json" } : undefined),
       body: body !== undefined ? JSON.stringify(body) : undefined });
     const js = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? "入力を確認してください" : `通信に失敗しました(${r.status})`);
+    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? t("入力を確認してください") : t("通信に失敗しました({status})", { status: r.status }));
     return js;
   }
 
   box.setAttribute("role", "group");
-  box.setAttribute("aria-label", "プリセット");
+  box.setAttribute("aria-label", t("プリセット"));
   const select = el("select");
-  select.setAttribute("aria-label", "プリセットを選ぶ");
+  select.setAttribute("aria-label", t("プリセットを選ぶ"));
   const mk = (text, title, fn) => {
     const b = el("button", "mini", text);
     b.type = "button";
@@ -59,24 +60,24 @@ function wirePresets({ tab, box, get, apply }) {
     return b;
   };
   const btn = {
-    save: mk("保存", "自分のプリセットを選んでいれば、いまの入力で上書きします。そうでなければ、新しい名前で保存します", () => save()),
-    saveAs: mk("別名で保存", "いまの入力を、新しい名前のプリセットとして保存します", () => { const p = current(); saveAs(p ? `${p.name} のコピー` : ""); }),
-    rename: mk("名前の変更", "選んでいる自分のプリセットの名前を変えます", () => rename()),
-    del: mk("削除", "選んでいる自分のプリセットを削除します", () => remove()),
-    export: mk("書き出し", "自分のプリセットを JSON のファイルに書き出します", () => exportFile()),
-    import: mk("読み込み", "書き出した JSON のファイルから、プリセットを読み込みます", () => file.click()),
+    save: mk(t("保存"), t("自分のプリセットを選んでいれば、いまの入力で上書きします。そうでなければ、新しい名前で保存します"), () => save()),
+    saveAs: mk(t("別名で保存"), t("いまの入力を、新しい名前のプリセットとして保存します"), () => { const p = current(); saveAs(p ? t("{name} のコピー", { name: pname(p) }) : ""); }),
+    rename: mk(t("名前の変更"), t("選んでいる自分のプリセットの名前を変えます"), () => rename()),
+    del: mk(t("削除"), t("選んでいる自分のプリセットを削除します"), () => remove()),
+    export: mk(t("書き出し"), t("自分のプリセットを JSON のファイルに書き出します"), () => exportFile()),
+    import: mk(t("読み込み"), t("書き出した JSON のファイルから、プリセットを読み込みます"), () => file.click()),
   };
   const btns = el("div", "preset-btns");
   btns.append(...Object.values(btn));
   const nameIn = el("input");
   nameIn.type = "text";
   nameIn.maxLength = 60;
-  nameIn.placeholder = "プリセットの名前";
-  nameIn.setAttribute("aria-label", "プリセットの名前");
-  const okBtn = mk("OK", "この名前で確定します(Enter)", () => submitName());
+  nameIn.placeholder = t("プリセットの名前");
+  nameIn.setAttribute("aria-label", t("プリセットの名前"));
+  const okBtn = mk("OK", t("この名前で確定します(Enter)"), () => submitName());
   const nameRow = el("div", "inline preset-name");
   nameRow.hidden = true;
-  nameRow.append(nameIn, okBtn, mk("取消", "名前の入力をやめます(Esc)", () => closeName()));
+  nameRow.append(nameIn, okBtn, mk(t("取消"), t("名前の入力をやめます(Esc)"), () => closeName()));
   const note = el("div", "preset-note");
   note.hidden = true;
   const file = el("input");
@@ -114,12 +115,12 @@ function wirePresets({ tab, box, get, apply }) {
   }
 
   function renderSelect() {
-    select.replaceChildren(new Option("プリセット…", ""));
-    for (const [label, items] of [["同梱", list.filter((p) => p.builtin)], ["自分のプリセット", list.filter((p) => !p.builtin)]]) {
+    select.replaceChildren(new Option(t("プリセット…"), ""));
+    for (const [label, items] of [[t("同梱"), list.filter((p) => p.builtin)], [t("自分のプリセット"), list.filter((p) => !p.builtin)]]) {
       if (!items.length) continue;
       const g = el("optgroup");
       g.label = label;
-      g.append(...items.map((p) => new Option(p.name, p.id)));
+      g.append(...items.map((p) => new Option(pname(p), p.id)));
       select.append(g);
     }
     if (!current()) selected = "";
@@ -131,7 +132,7 @@ function wirePresets({ tab, box, get, apply }) {
     try {
       list = await api(`/api/presets?tab=${tab}`);
     } catch (e) {
-      say(`プリセットを読み込めません: ${e.message || e}`, true);
+      say(t("プリセットを読み込めません: {err}", { err: e.message || e }), true);
       return;
     }
     renderSelect();
@@ -145,9 +146,9 @@ function wirePresets({ tab, box, get, apply }) {
     if (!p) { say(""); return; }
     try {
       const skipped = apply(p.values) || [];
-      say(`「${p.name}」を入力欄に反映しました` + (skipped.length ? `(選べない値だったので、そのままにした項目: ${skipped.join("、")})` : ""), skipped.length > 0);
+      say(t("「{name}」を入力欄に反映しました", { name: pname(p) }) + (skipped.length ? t("(選べない値だったので、そのままにした項目: {items})", { items: skipped.join(t("、")) }) : ""), skipped.length > 0);
     } catch (e) {
-      say(`「${p.name}」を反映できませんでした: ${e.message || e}`, true);
+      say(t("「{name}」を反映できませんでした: {err}", { name: pname(p), err: e.message || e }), true);
     }
   };
 
@@ -167,7 +168,7 @@ function wirePresets({ tab, box, get, apply }) {
   async function submitName() {
     const name = nameIn.value.trim();
     if (busy) return;
-    if (!name) { say("名前を入れてください", true); nameIn.focus(); return; }
+    if (!name) { say(t("名前を入れてください"), true); nameIn.focus(); return; }
     if (onName && await run(() => onName(name))) closeName();
   }
   nameIn.addEventListener("keydown", (e) => {
@@ -179,12 +180,12 @@ function wirePresets({ tab, box, get, apply }) {
 
   function save() {
     const p = current();
-    if (!p || p.builtin) { saveAs(p ? `${p.name} のコピー` : ""); return; }      // 同梱のものは上書きできないので、別の名前で保存する
-    if (!confirm(`「${p.name}」を、いまの入力で上書きしますか?`)) return;
+    if (!p || p.builtin) { saveAs(p ? t("{name} のコピー", { name: pname(p) }) : ""); return; }      // 同梱のものは上書きできないので、別の名前で保存する
+    if (!confirm(t("「{name}」を、いまの入力で上書きしますか?", { name: p.name }))) return;
     run(async () => {
       const saved = await api(`/api/presets/${encodeURIComponent(p.id)}`, "PUT", { values: get() });
       await load();
-      say(`「${saved.name}」を上書き保存しました`);
+      say(t("「{name}」を上書き保存しました", { name: saved.name }));
     });
   }
 
@@ -193,7 +194,7 @@ function wirePresets({ tab, box, get, apply }) {
       const created = await api("/api/presets", "POST", { tab, name, values: get() });
       selected = created.id;
       await load();
-      say(`「${created.name}」として保存しました` + (created.name !== name ? "(同じ名前があったので、番号を付けました)" : ""));
+      say(t("「{name}」として保存しました", { name: created.name }) + (created.name !== name ? t("(同じ名前があったので、番号を付けました)") : ""));
     });
   }
 
@@ -204,32 +205,32 @@ function wirePresets({ tab, box, get, apply }) {
       if (name === p.name) return;
       const saved = await api(`/api/presets/${encodeURIComponent(p.id)}`, "PUT", { name });
       await load();
-      say(`「${p.name}」を「${saved.name}」に変えました`);
+      say(t("「{old}」を「{name}」に変えました", { old: p.name, name: saved.name }));
     });
   }
 
   function remove() {
     const p = current();
-    if (!p || p.builtin || !confirm(`「${p.name}」を削除しますか?\n元に戻せません。`)) return;
+    if (!p || p.builtin || !confirm(t("「{name}」を削除しますか?\n元に戻せません。", { name: p.name }))) return;
     run(async () => {
       await api(`/api/presets/${encodeURIComponent(p.id)}`, "DELETE");
       selected = "";
       await load();
-      say(`「${p.name}」を削除しました`);
+      say(t("「{name}」を削除しました", { name: p.name }));
     });
   }
 
   // ---- 書き出し・読み込み(JSON のファイル) ----
 
   function exportFile() {
-    if (!list.some((p) => !p.builtin)) { say("書き出せる自分のプリセットがありません", true); return; }
+    if (!list.some((p) => !p.builtin)) { say(t("書き出せる自分のプリセットがありません"), true); return; }
     const a = el("a");
     a.href = `/api/presets/export?tab=${tab}`;
     a.download = "";
     document.body.append(a);
     a.click();
     a.remove();
-    say("自分のプリセットを JSON に書き出しました");
+    say(t("自分のプリセットを JSON に書き出しました"));
   }
 
   file.onchange = () => {
@@ -238,11 +239,11 @@ function wirePresets({ tab, box, get, apply }) {
     if (!f) return;
     run(async () => {
       let data;
-      try { data = JSON.parse(await f.text()); } catch (e) { throw new Error(`${f.name} は JSON として読めません`); }
+      try { data = JSON.parse(await f.text()); } catch (e) { throw new Error(t("{file} は JSON として読めません", { file: f.name })); }
       const created = await api("/api/presets/import", "POST", data);
       await load();
       const mine = created.filter((p) => p.tab === tab).length;
-      say(`${created.length} 件のプリセットを読み込みました` + (mine < created.length ? `(このタブ用は ${mine} 件。残りは、ほかのタブで選べます)` : ""));
+      say(t("{n} 件のプリセットを読み込みました", { n: created.length }) + (mine < created.length ? t("(このタブ用は {mine} 件。残りは、ほかのタブで選べます)", { mine }) : ""));
     });
   };
 

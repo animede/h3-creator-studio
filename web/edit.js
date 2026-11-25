@@ -59,7 +59,7 @@ const EDIT_LOGIC = (() => {
     const tot = total(state.clips);
     a = Math.max(0, r3(a));
     b = Math.min(tot, r3(b));
-    if (!(b - a > EPS)) throw new Error("区間の終了は、開始より後にしてください");
+    if (!(b - a > EPS)) throw new Error(t("区間の終了は、開始より後にしてください"));
     const s = clone(state), tl = timeline(s.clips), tr = {}, pieces = [];      // pieces: { clip, idx(元の添字), head(先頭が元のまま), tail(末尾が元のまま) }
     for (const x of s.transitions || []) if (x.type !== "cut") tr[x.after] = x;
     tl.forEach((x, i) => {
@@ -80,19 +80,19 @@ const EDIT_LOGIC = (() => {
 
   // 時刻 t にクリップ clip を挿入する(サーバの insert_at と同じ: 境目から MIN_CLIP_S 以内ならその境目に、そうでなければ t を含むクリップを分けて入れる)。
   // 入れた位置の境目の効果は消え(cut)、後ろの境目は 1 つずれ、効果の区間は挿入した分だけ後ろへずれる
-  function insertAt(state, t, clip) {
+  function insertAt(state, pos, clip) {
     const len = clipLen(clip);
-    if (!longEnough(len)) throw new Error(`挿入するクリップは短すぎます(${MIN_CLIP_S} 秒以上にしてください)`);
-    t = Math.max(0, Math.min(Number(t), total(state.clips)));
+    if (!longEnough(len)) throw new Error(t("挿入するクリップは短すぎます({min} 秒以上にしてください)", { min: MIN_CLIP_S }));
+    pos = Math.max(0, Math.min(Number(pos), total(state.clips)));
     let base = state, bs = bounds(state.clips);
-    let near = bs.map((x, i) => (Math.abs(t - x) < MIN_CLIP_S - E3 ? i : -1)).filter((i) => i >= 0);
+    let near = bs.map((x, i) => (Math.abs(pos - x) < MIN_CLIP_S - E3 ? i : -1)).filter((i) => i >= 0);
     if (!near.length) {
-      base = splitAt(state, t).state;
+      base = splitAt(state, pos).state;
       bs = bounds(base.clips);
-      near = [nearest(bs, t)];
+      near = [nearest(bs, pos)];
     }
     const first = near[0], last = near[near.length - 1];
-    const b = Math.abs(t - bs[first]) <= Math.abs(t - bs[last]) ? first : last, p = bs[b];
+    const b = Math.abs(pos - bs[first]) <= Math.abs(pos - bs[last]) ? first : last, p = bs[b];
     const s = clone(base);
     s.clips.splice(b, 0, clip);
     s.transitions = (s.transitions || []).filter((x) => x.after !== b - 1).map((x) => (x.after >= b ? { ...x, after: x.after + 1 } : x));
@@ -112,14 +112,14 @@ const EDIT_LOGIC = (() => {
     const s = clone(state), c = s.clips[i];
     if (c.kind === "image") {
       const d = r3(patch.duration);
-      if (!longEnough(d)) throw new Error(`画像の秒数は ${MIN_CLIP_S} 以上にしてください`);
+      if (!longEnough(d)) throw new Error(t("画像の秒数は {min} 以上にしてください", { min: MIN_CLIP_S }));
       c.in = 0; c.out = d; c.duration = d;
     } else {
       const a = r3(patch.in != null ? patch.in : c.in), b = r3(patch.out != null ? patch.out : c.out);
-      if (!(a >= 0)) throw new Error("in は 0 以上にしてください");
-      if (!(b > a)) throw new Error("out は、in より後にしてください");
-      if (!longEnough(b - a)) throw new Error(`クリップは ${MIN_CLIP_S} 秒以上にしてください(out − in)`);
-      if (length != null && b > length + EPS) throw new Error(`out は、元の長さ(${r3(length)} 秒)までです`);
+      if (!(a >= 0)) throw new Error(t("in は 0 以上にしてください"));
+      if (!(b > a)) throw new Error(t("out は、in より後にしてください"));
+      if (!longEnough(b - a)) throw new Error(t("クリップは {min} 秒以上にしてください(out − in)", { min: MIN_CLIP_S }));
+      if (length != null && b > length + EPS) throw new Error(t("out は、元の長さ({len} 秒)までです", { len: r3(length) }));
       c.in = a; c.out = b;
       if ("duration" in c) c.duration = r3(b - a);
     }
@@ -142,7 +142,7 @@ const EDIT_LOGIC = (() => {
     if (type !== "cut") {
       const half = Math.floor(Math.min(clipLen(s.clips[after]), clipLen(s.clips[after + 1])) / 2 * 10 + 1e-6) / 10;
       const d = Math.min(duration, half);
-      if (!(d >= 0.5)) throw new Error("前後のクリップが短くて、境目の効果を付けられません(両方とも 1 秒以上が要ります)");
+      if (!(d >= 0.5)) throw new Error(t("前後のクリップが短くて、境目の効果を付けられません(両方とも 1 秒以上が要ります)"));
       s.transitions.push({ after, type, duration: r3(d) });
       s.transitions.sort((x, y) => x.after - y.after);
     }
@@ -212,22 +212,22 @@ const EDIT_LOGIC = (() => {
   const KEY = "edit-project";                       // 最後に開いていた編集プロジェクト(localStorage。使えなくても動く)
   const POLL_MS = 2000;
   const FX = {
-    mono: { label: "モノクロ" },
-    saturation: { label: "彩度", min: 0, max: 3, step: 0.1, def: 1.5 },
-    contrast: { label: "コントラスト", min: 0, max: 3, step: 0.1, def: 1.3 },
-    brightness: { label: "明るさ", min: -1, max: 1, step: 0.05, def: 0.2 },
-    fade_to_black: { label: "黒へフェード" }, fade_from_black: { label: "黒からフェード" }, black: { label: "黒にする" },
-    fade_to_white: { label: "白へフェード" }, fade_from_white: { label: "白からフェード" },
-    zoom_in: { label: "ズームイン", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" }, zoom_out: { label: "ズームアウト", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" },
-    pan_right: { label: "右へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" }, pan_left: { label: "左へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" },
-    pan_down: { label: "下へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" }, pan_up: { label: "上へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" },
-    zoom_in_right: { label: "ズームインしながら右へ", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" },
-    zoom_in_left: { label: "ズームインしながら左へ", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" },
-    sepia: { label: "セピア" }, warm: { label: "暖色" }, cool: { label: "寒色" }, vintage: { label: "フィルム風(退色)" },
-    vignette: { label: "周辺を暗く" }, negate: { label: "色を反転" }, blur: { label: "ぼかし" },
+    mono: { label: t("モノクロ") },
+    saturation: { label: t("彩度"), min: 0, max: 3, step: 0.1, def: 1.5 },
+    contrast: { label: t("コントラスト"), min: 0, max: 3, step: 0.1, def: 1.3 },
+    brightness: { label: t("明るさ"), min: -1, max: 1, step: 0.05, def: 0.2 },
+    fade_to_black: { label: t("黒へフェード") }, fade_from_black: { label: t("黒からフェード") }, black: { label: t("黒にする") },
+    fade_to_white: { label: t("白へフェード") }, fade_from_white: { label: t("白からフェード") },
+    zoom_in: { label: t("ズームイン"), min: 1.05, max: 2, step: 0.05, def: 1.3, unit: t("倍") }, zoom_out: { label: t("ズームアウト"), min: 1.05, max: 2, step: 0.05, def: 1.3, unit: t("倍") },
+    pan_right: { label: t("右へパン"), min: 1.05, max: 2, step: 0.05, def: 1.2, unit: t("倍") }, pan_left: { label: t("左へパン"), min: 1.05, max: 2, step: 0.05, def: 1.2, unit: t("倍") },
+    pan_down: { label: t("下へパン"), min: 1.05, max: 2, step: 0.05, def: 1.2, unit: t("倍") }, pan_up: { label: t("上へパン"), min: 1.05, max: 2, step: 0.05, def: 1.2, unit: t("倍") },
+    zoom_in_right: { label: t("ズームインしながら右へ"), min: 1.05, max: 2, step: 0.05, def: 1.3, unit: t("倍") },
+    zoom_in_left: { label: t("ズームインしながら左へ"), min: 1.05, max: 2, step: 0.05, def: 1.3, unit: t("倍") },
+    sepia: { label: t("セピア") }, warm: { label: t("暖色") }, cool: { label: t("寒色") }, vintage: { label: t("フィルム風(退色)") },
+    vignette: { label: t("周辺を暗く") }, negate: { label: t("色を反転") }, blur: { label: t("ぼかし") },
   };
-  const TR_LABEL = { cut: "カット", crossfade: "クロスフェード", fadeblack: "黒を挟む" };
-  const AUDIO_LABEL = { original: "元の音", music: "曲に差し替え", mix: "元の音 + 曲", none: "音なし" };
+  const TR_LABEL = { cut: t("カット"), crossfade: t("クロスフェード"), fadeblack: t("黒を挟む") };
+  const AUDIO_LABEL = { original: t("元の音"), music: t("曲に差し替え"), mix: t("元の音 + 曲"), none: t("音なし") };
   const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];      // 目盛りの間隔(秒)の候補
 
   let projects = [];                // 編集プロジェクトの一覧(新しい順)
@@ -298,7 +298,7 @@ const EDIT_LOGIC = (() => {
       const v = await api(`/api/edit/${id}`);
       if (current === id) setView(v);
     } catch (e) {
-      showMsg(`開けませんでした: ${errText(e)}`);
+      showMsg(t("開けませんでした: {err}", { err: errText(e) }));
       await loadList();
     }
   }
@@ -312,12 +312,12 @@ const EDIT_LOGIC = (() => {
     const sel = ed("proj");
     sel.replaceChildren();
     if (!projects.length) {
-      const o = el("option", "", "(編集プロジェクトがありません)");
+      const o = el("option", "", t("(編集プロジェクトがありません)"));
       o.value = "";
       sel.append(o);
     }
     for (const p of projects) {
-      const o = el("option", "", p.name || "無題");
+      const o = el("option", "", p.name || t("無題"));
       o.value = p.id;
       sel.append(o);
     }
@@ -327,26 +327,26 @@ const EDIT_LOGIC = (() => {
   ed("proj").onchange = () => { if (ed("proj").value) selectProject(ed("proj").value); };
 
   ed("new").onclick = async () => {
-    const name = prompt("編集プロジェクトの名前", "");
+    const name = prompt(t("編集プロジェクトの名前"), "");
     if (name === null) return;
     try {
-      const v = await api("/api/edit", "POST", { name: name.trim() || "無題" });
+      const v = await api("/api/edit", "POST", { name: name.trim() || "無題" });      // i18n-skip サーバへ送る既定の名前
       current = v.id;
       remember(v.id);
       await loadList();
       setView(v);
-    } catch (e) { showMsg(`作れませんでした: ${errText(e)}`); }
+    } catch (e) { showMsg(t("作れませんでした: {err}", { err: errText(e) })); }
   };
 
   ed("rename").onclick = async () => {
     if (!view) return;
-    const name = prompt("新しい名前", view.name || "");
+    const name = prompt(t("新しい名前"), view.name || "");
     if (name === null || !name.trim()) return;
     try {
       const v = await api(`/api/edit/${view.id}`, "PATCH", { name: name.trim() });
       if (current === v.id) setView(v);
       await loadList();
-    } catch (e) { showMsg(`名前を変えられませんでした: ${errText(e)}`); }
+    } catch (e) { showMsg(t("名前を変えられませんでした: {err}", { err: errText(e) })); }
   };
 
   ed("del").onclick = () => { if (view) removeProjects([view.id]); };
@@ -354,9 +354,10 @@ const EDIT_LOGIC = (() => {
   // 編集プロジェクトを消す(確認は 1 回。書き出した動画はギャラリーに残る)。消したら true
   async function removeProjects(ids) {
     const names = ids.map((id) => (projects.find((p) => p.id === id) || {}).name || id);
-    if (!confirm(`編集プロジェクト${ids.length === 1 ? `「${names[0]}」` : ` ${ids.length} 件`}を削除しますか?\n書き出した動画はギャラリーに残ります。元のクリップも消えません。`)) return false;
+    if (!confirm(ids.length === 1 ? t("編集プロジェクト「{name}」を削除しますか?\n書き出した動画はギャラリーに残ります。元のクリップも消えません。", { name: names[0] })
+      : t("編集プロジェクト {n} 件を削除しますか?\n書き出した動画はギャラリーに残ります。元のクリップも消えません。", { n: ids.length }))) return false;
     for (const id of ids) {
-      try { await api(`/api/edit/${id}`, "DELETE"); } catch (e) { showMsg(`削除できませんでした: ${errText(e)}`); }
+      try { await api(`/api/edit/${id}`, "DELETE"); } catch (e) { showMsg(t("削除できませんでした: {err}", { err: errText(e) })); }
       if (current === id) { current = null; view = null; remember(null); }
     }
     await refresh();
@@ -392,7 +393,7 @@ const EDIT_LOGIC = (() => {
       setView(v);
       if (previewAfter && v.state.clips.length) {
         try { if (current === id) setView(await api(`/api/edit/${id}/preview`, "POST")); }
-        catch (e) { showMsg(`プレビューを作れませんでした: ${errText(e)}`); }
+        catch (e) { showMsg(t("プレビューを作れませんでした: {err}", { err: errText(e) })); }
       }
     } catch (e) {
       failedInRow = true;
@@ -418,8 +419,8 @@ const EDIT_LOGIC = (() => {
   // 開始・終了(秒)。誤りは Error。終了が全体の長さの 0.01 秒手前より後なら、末尾まで(2 桁で入れた末尾から、切れ端を残さない)
   function getRange() {
     const a = num(ed("start")), b = num(ed("end")), tot = totalTl();
-    if (!(a >= 0) || !(b > a)) throw new Error("区間は、開始 < 終了(秒)で入れてください");
-    if (a >= tot) throw new Error(`開始は、全体の長さ(${f(tot)} 秒)より前にしてください`);
+    if (!(a >= 0) || !(b > a)) throw new Error(t("区間は、開始 < 終了(秒)で入れてください"));
+    if (a >= tot) throw new Error(t("開始は、全体の長さ({len} 秒)より前にしてください", { len: f(tot) }));
     return [a, b > tot - 0.01 ? tot : b];
   }
 
@@ -436,7 +437,7 @@ const EDIT_LOGIC = (() => {
       ed("end").value = f3(b);
     }
     ed("start").max = ed("end").max = f3(tot);
-    ed("range-note").textContent = view ? `全体 ${f3(tot)} 秒(つないだだけの長さ)` : "";
+    ed("range-note").textContent = view ? t("全体 {len} 秒(つないだだけの長さ)", { len: f3(tot) }) : "";
     renderSel();
   }
 
@@ -449,7 +450,7 @@ const EDIT_LOGIC = (() => {
     sel.hidden = false;
     sel.style.left = `${Math.min(100, x / dur * 100)}%`;
     sel.style.width = `${Math.max(0.3, Math.min(100 - x / dur * 100, (y - x) / dur * 100))}%`;
-    ed("sel-text").textContent = `区間 ${f3(a)}〜${f3(b)} 秒`;
+    ed("sel-text").textContent = t("区間 {a}〜{b} 秒", { a: f3(a), b: f3(b) });
   }
   const typedRange = () => { rangeCleared = false; renderSel(); };      // 自分で入れたら、「クリア」の印は外す
   ed("start").oninput = ed("end").oninput = typedRange;
@@ -476,14 +477,14 @@ const EDIT_LOGIC = (() => {
   // いまのコマを画像にしてギャラリーへ(元の動画から元の解像度で。効果は掛からない)
   ed("grab").onclick = async () => {
     const v = ed("video");
-    if (!view || !v.getAttribute("src")) { showMsg("プレビューを作ってから、止めた位置で押してください"); return; }
+    if (!view || !v.getAttribute("src")) { showMsg(t("プレビューを作ってから、止めた位置で押してください")); return; }
     ed("grab").disabled = true;
     try {
       const rec = await api(`/api/edit/${view.id}/frame`, "POST", { t: v.currentTime || 0 });
-      showMsg(`画像をギャラリーに入れました: ${rec.filename}(${rec.width}×${rec.height})`);
+      showMsg(t("画像をギャラリーに入れました: {file}({w}×{h})", { file: rec.filename, w: rec.width, h: rec.height }));
       if (typeof loadGallery === "function") loadGallery();
     } catch (e) {
-      showMsg(`コマを抜き出せませんでした: ${errText(e)}`);
+      showMsg(t("コマを抜き出せませんでした: {err}", { err: errText(e) }));
     } finally {
       ed("grab").disabled = false;
     }
@@ -508,7 +509,7 @@ const EDIT_LOGIC = (() => {
 
   function addItems(items) {
     const ok = items.filter(isClipKind);
-    if (!ok.length) { showMsg("クリップには動画か画像を落としてください(曲は、下の「音声」の欄へ)"); return; }
+    if (!ok.length) { showMsg(t("クリップには動画か画像を落としてください(曲は、下の「音声」の欄へ)")); return; }
     mutate(async (v) => {
       const s = L.clone(v.state);
       for (const it of ok) s.clips.push(L.newClip({ ...(await probe(it)), id: it.id }, 3));      // 画像は 3 秒(あとで行の欄で変えられる)
@@ -517,7 +518,7 @@ const EDIT_LOGIC = (() => {
   }
 
   function setIns(item) {
-    if (!isClipKind(item)) { showMsg("挿入には動画か画像を落としてください"); return; }
+    if (!isClipKind(item)) { showMsg(t("挿入には動画か画像を落としてください")); return; }
     insItem = item;
     showMsg("");
     renderIns();
@@ -527,14 +528,14 @@ const EDIT_LOGIC = (() => {
     const body = ed("ins-body");
     body.replaceChildren();
     ed("ins-go").disabled = !insItem || !view || working;
-    if (!insItem) { body.append(el("div", "refs-empty", "挿入する動画・画像をここにドロップ")); return; }
+    if (!insItem) { body.append(el("div", "refs-empty", t("挿入する動画・画像をここにドロップ"))); return; }
     const row = el("div", "edinsitem");
     const img = el("img");
     img.src = insItem.thumb_url || insItem.url;
     img.draggable = false;
     const x = el("button", "rdel", "×");
     x.type = "button";
-    x.title = "外す";
+    x.title = t("外す");
     x.onclick = () => { insItem = null; renderIns(); };
     row.append(img, el("span", "edname", insItem.filename || insItem.id), x);
     body.append(row);
@@ -543,8 +544,8 @@ const EDIT_LOGIC = (() => {
   ed("ins-go").onclick = async () => {
     if (!insItem) return;
     const item = insItem, at = num(ed("start")), sec = num(ed("ins-sec"));
-    if (!(at >= 0)) { showMsg("挿入する位置を、開始(秒)に入れてください"); return; }
-    if (item.kind === "image" && !(sec >= 0.5)) { showMsg("画像の秒数は 0.5 以上にしてください"); return; }
+    if (!(at >= 0)) { showMsg(t("挿入する位置を、開始(秒)に入れてください")); return; }
+    if (item.kind === "image" && !(sec >= 0.5)) { showMsg(t("画像の秒数は 0.5 以上にしてください")); return; }
     const ok = await mutate(async (v) => L.insertAt(v.state, at, L.newClip({ ...(await probe(item)), id: item.id }, sec)));
     if (ok && insItem === item) { insItem = null; renderIns(); }      // サーバが受けてから外す(断られたら、そのままもう一度押せる)
   };
@@ -597,24 +598,24 @@ const EDIT_LOGIC = (() => {
     let r;
     try { r = getRange(); } catch (e) { showMsg(errText(e)); return; }
     const inside = view.timeline.slice(0, -1).map((t, i) => [i, t.end]).filter(([, end]) => end > r[0] + 1e-6 && end < r[1] - 1e-6).map(([i]) => i);
-    if (!inside.length) { showMsg("区間の中に境目がありません(境目をまたぐように区間を選んでください)"); return; }
+    if (!inside.length) { showMsg(t("区間の中に境目がありません(境目をまたぐように区間を選んでください)")); return; }
     const type = ed("tr-type").value, d = Math.min(2, Math.max(0.5, L.r3(r[1] - r[0])));
     mutate((v) => { let s = v.state; for (const i of inside) s = L.setTransition(s, i, type, d); return s; });
   };
 
-  const fxText = (e) => { const d = FX[e.type] || { label: e.type }; return `${d.label}${d.step ? ` ${f(e.value)}${d.unit || ""}` : ""}  ${e.start == null ? "全体" : `${f(e.start)}〜${f(e.end)} 秒`}`; };
+  const fxText = (e) => { const d = FX[e.type] || { label: e.type }; return `${d.label}${d.step ? ` ${f(e.value)}${d.unit || ""}` : ""}  ${e.start == null ? t("全体") : t("{a}〜{b} 秒", { a: f(e.start), b: f(e.end) })}`; };
 
   function renderFxList() {
     const box = ed("fx-list");
     box.replaceChildren();
     const list = view ? view.state.effects || [] : [];
-    if (!list.length) { box.append(el("div", "note", "色調・調整・区間の効果は、まだ付けていません")); return; }
+    if (!list.length) { box.append(el("div", "note", t("色調・調整・区間の効果は、まだ付けていません"))); return; }
     list.forEach((e, i) => {
       const row = el("div", "edfxrow");
       row.append(el("span", `edfxdot fx-${e.type}`), el("span", "edname", fxText(e)));
       const x = el("button", "rdel", "×");
       x.type = "button";
-      x.title = "この効果を外す";
+      x.title = t("この効果を外す");
       x.onclick = () => mutate((v) => { const s = L.clone(v.state); s.effects.splice(i, 1); return s; });
       row.append(x);
       box.append(row);
@@ -625,13 +626,13 @@ const EDIT_LOGIC = (() => {
     const box = ed("trans");
     box.replaceChildren();
     const n = view ? view.state.clips.length : 0;
-    if (n < 2) { box.append(el("div", "note", "クリップが 2 つ以上になると、境目ごとに選べます")); return; }
+    if (n < 2) { box.append(el("div", "note", t("クリップが 2 つ以上になると、境目ごとに選べます"))); return; }
     for (let i = 0; i < n - 1; i++) {
       const t = (view.state.transitions || []).find((x) => x.after === i && x.type !== "cut");
       const row = el("div", "edtrow");
       row.append(el("span", "edtlabel", `${i + 1} → ${i + 2}`));
       const sel = el("select");
-      sel.setAttribute("aria-label", `${i + 1} 番目と ${i + 2} 番目の境目`);
+      sel.setAttribute("aria-label", t("{a} 番目と {b} 番目の境目", { a: i + 1, b: i + 2 }));
       for (const [v, label] of Object.entries(TR_LABEL)) { const o = el("option", "", label); o.value = v; sel.append(o); }
       sel.value = t ? t.type : "cut";
       const sec = el("input");
@@ -639,18 +640,18 @@ const EDIT_LOGIC = (() => {
       sec.value = t ? f(t.duration) : "1";
       sec.disabled = !t;
       sec.className = "edsmall";
-      sec.setAttribute("aria-label", "境目の秒数");
+      sec.setAttribute("aria-label", t("境目の秒数"));
       const apply = () => mutate((v) => L.setTransition(v.state, i, sel.value, Math.min(2, Math.max(0.5, num(sec) || 1))));
       sel.onchange = apply;
       sec.onchange = apply;
-      row.append(sel, sec, el("span", "edunit", "秒"));
+      row.append(sel, sec, el("span", "edunit", t("秒")));
       box.append(row);
     }
   }
 
   function setFade(key, input) {
     const x = num(input);
-    if (!(x >= 0)) { showMsg("フェードの秒数は 0 以上にしてください"); renderOps(true); return; }
+    if (!(x >= 0)) { showMsg(t("フェードの秒数は 0 以上にしてください")); renderOps(true); return; }
     mutate((v) => { const s = L.clone(v.state); s[key] = L.r3(x); return s; });
   }
   ed("fadein").onchange = () => setFade("fade_in", ed("fadein"));
@@ -663,14 +664,14 @@ const EDIT_LOGIC = (() => {
     mutate((v) => {
       const s = L.clone(v.state);
       s.audio = s.audio || { mode: "original", song_id: null, song_db: -14 };
-      if ((mode === "music" || mode === "mix") && !s.audio.song_id) throw new Error("曲に差し替えるには、先に曲をドロップしてください(音楽タブの曲・ギャラリー・PC の音声ファイル)");
+      if ((mode === "music" || mode === "mix") && !s.audio.song_id) throw new Error(t("曲に差し替えるには、先に曲をドロップしてください(音楽タブの曲・ギャラリー・PC の音声ファイル)"));
       s.audio.mode = mode;
       return s;
     });
   };
 
   function setSong(item) {
-    if (!item || item.kind !== "audio") { showMsg("曲には音声を落としてください(音楽タブの曲、または音声ファイル)"); return; }
+    if (!item || item.kind !== "audio") { showMsg(t("曲には音声を落としてください(音楽タブの曲、または音声ファイル)")); return; }
     songs[item.id] = item;
     mutate((v) => {
       const s = L.clone(v.state);
@@ -694,16 +695,16 @@ const EDIT_LOGIC = (() => {
     const body = ed("song-body");
     body.replaceChildren();
     const id = view && view.state.audio && view.state.audio.song_id;
-    if (!id) { body.append(el("div", "refs-empty", "ここに曲をドロップ")); return; }
+    if (!id) { body.append(el("div", "refs-empty", t("ここに曲をドロップ"))); return; }
     const song = songs[id] || byId(id);
     const c = el("div", "songitem");
     const text = el("div", "stext");
     const p = (song && song.params) || {};
-    text.append(el("div", "stitle", p.theme || (song && song.filename) || "曲"),
+    text.append(el("div", "stitle", p.theme || (song && song.filename) || t("曲")),
       el("div", "sinfo", [song && song.duration_s ? fmtDur(song.duration_s) : "", song && song.filename].filter(Boolean).join("  ")));
     const x = el("button", "rdel", "×");
     x.type = "button";
-    x.title = "外す";
+    x.title = t("外す");
     x.onclick = clearSong;
     c.append(el("div", "aicon", "🎵"), text, x);
     body.append(c);
@@ -715,15 +716,15 @@ const EDIT_LOGIC = (() => {
   async function upload(files, box, kinds, label, use) {
     try {
       const recs = (await uploadFiles(files, box)).filter((r) => kinds.includes(r.kind));
-      if (!recs.length) { showMsg(`${label}のファイルではありません(ギャラリーには保存しました)`); return; }
+      if (!recs.length) { showMsg(t("{kind}のファイルではありません(ギャラリーには保存しました)", { kind: label })); return; }
       use(recs);
-    } catch (e) { showMsg(`取り込めませんでした: ${errText(e)}`); }
+    } catch (e) { showMsg(t("取り込めませんでした: {err}", { err: errText(e) })); }
   }
 
   const active = () => studio.tab === "edit" && !!view;      // 操作の途中に落としたものも受ける(後ろに並ぶ)
-  wireDrop(ed("clips-drop"), { active, msg: showMsg, onItem: (it) => addItems([it]), onFiles: (files) => upload(files, ed("clips-drop"), ["video", "image"], "動画・画像", addItems) });
-  wireDrop(ed("ins-drop"), { active, msg: showMsg, onItem: setIns, onFiles: (files) => upload(files, ed("ins-drop"), ["video", "image"], "動画・画像", (recs) => setIns(recs[0])) });
-  wireDrop(ed("song"), { active, msg: showMsg, onItem: setSong, onFiles: (files) => upload(files, ed("song"), ["audio"], "音声", (recs) => setSong(recs[0])) });
+  wireDrop(ed("clips-drop"), { active, msg: showMsg, onItem: (it) => addItems([it]), onFiles: (files) => upload(files, ed("clips-drop"), ["video", "image"], t("動画・画像"), addItems) });
+  wireDrop(ed("ins-drop"), { active, msg: showMsg, onItem: setIns, onFiles: (files) => upload(files, ed("ins-drop"), ["video", "image"], t("動画・画像"), (recs) => setIns(recs[0])) });
+  wireDrop(ed("song"), { active, msg: showMsg, onItem: setSong, onFiles: (files) => upload(files, ed("song"), ["audio"], t("音声"), (recs) => setSong(recs[0])) });
 
   // ---- クリップの列 ----
 
@@ -741,13 +742,13 @@ const EDIT_LOGIC = (() => {
       img.src = c.thumb_url || "";
       img.alt = c.filename || "";
       img.draggable = false;
-      img.title = "クリックで、その位置を再生します";
+      img.title = t("クリックで、その位置を再生します");
       img.onclick = () => seekOut(starts[i]);
       const main = el("div", "edmain");
       const head = el("div", "edhead");
       const name = el("span", "edname", `${i + 1}. ${c.filename || c.id}`);
       name.title = c.filename || c.id;
-      head.append(name, el("span", "edlen", c.missing ? "見つかりません" : `${f(L.clipLen(sc))} 秒${sc.kind === "video" && c.length_s ? `(元 ${f(c.length_s)} 秒)` : ""}`));
+      head.append(name, el("span", "edlen", c.missing ? t("見つかりません") : t("{len} 秒", { len: f(L.clipLen(sc)) }) + (sc.kind === "video" && c.length_s ? t("(元 {len} 秒)", { len: f(c.length_s) }) : "")));
       const fields = el("div", "edfields");
       const mk = (label, value, min, title, max) => {
         const lab = el("label", "edfield");
@@ -760,11 +761,11 @@ const EDIT_LOGIC = (() => {
         return inp;
       };
       if (sc.kind === "image") {
-        const dur = mk("秒数", sc.duration != null ? sc.duration : sc.out, 0.1, "画像を出す秒数");
+        const dur = mk(t("秒数"), sc.duration != null ? sc.duration : sc.out, 0.1, t("画像を出す秒数"));
         dur.onchange = () => mutate((v) => L.setClip(v.state, i, { duration: num(dur) }, null));
       } else {
-        const a = mk("in", sc.in, 0, "元の動画の、使い始めの秒", c.length_s);
-        const b = mk("out", sc.out, 0, "元の動画の、使い終わりの秒", c.length_s);
+        const a = mk("in", sc.in, 0, t("元の動画の、使い始めの秒"), c.length_s);
+        const b = mk("out", sc.out, 0, t("元の動画の、使い終わりの秒"), c.length_s);
         const go = () => mutate((v) => L.setClip(v.state, i, { in: num(a), out: num(b) }, c.length_s));
         a.onchange = go;
         b.onchange = go;
@@ -779,9 +780,9 @@ const EDIT_LOGIC = (() => {
         b.onclick = fn;
         btns.append(b);
       };
-      mkb("▲", "前へ", () => mutate((v) => L.moveClip(v.state, i, -1)), i === 0);
-      mkb("▼", "後ろへ", () => mutate((v) => L.moveClip(v.state, i, 1)), i === clips.length - 1);
-      mkb("×", "このクリップを外す(元の動画は残ります)", () => {
+      mkb("▲", t("前へ"), () => mutate((v) => L.moveClip(v.state, i, -1)), i === 0);
+      mkb("▼", t("後ろへ"), () => mutate((v) => L.moveClip(v.state, i, 1)), i === clips.length - 1);
+      mkb("×", t("このクリップを外す(元の動画は残ります)"), () => {
         const tl = L.timeline(view.state.clips)[i];
         mutate((v) => L.deleteRange(v.state, tl.start, tl.end));
       });
@@ -814,14 +815,14 @@ const EDIT_LOGIC = (() => {
     }
     vid.hidden = !url;
     ed("empty").hidden = !!url;
-    ed("empty-text").textContent = !view ? "編集プロジェクトを選ぶか、新規に作ってください"
-      : !view.state.clips.length ? "クリップを追加すると、ここにプレビューが出ます" : job ? "プレビューを作っています…" : "プレビューがありません";
+    ed("empty-text").textContent = !view ? t("編集プロジェクトを選ぶか、新規に作ってください")
+      : !view.state.clips.length ? t("クリップを追加すると、ここにプレビューが出ます") : job ? t("プレビューを作っています…") : t("プレビューがありません");
     const previewing = !!job && job.kind === "edit.preview";
     ed("stage").classList.toggle("busy", previewing);
     ed("wait").hidden = !job;
     if (job) {
       const pct = job.progress != null ? ` ${Math.round(job.progress * 100)}%` : "";
-      const head = job.kind === "edit.export" ? "書き出し中" : "プレビューを作っています";
+      const head = job.kind === "edit.export" ? t("書き出し中") : t("プレビューを作っています");
       ed("wait-text").textContent = `${head}${pct}${job.message ? " - " + job.message : ""}${job.error ? " - " + job.error : ""}`;
       const bar = ed("wait-bar");
       bar.classList.toggle("indet", job.progress == null);
@@ -829,7 +830,7 @@ const EDIT_LOGIC = (() => {
     }
     const stale = !!pv && pv.stale && !previewing;
     ed("stale").hidden = !(stale || (!url && view && view.state.clips.length && !job));
-    ed("stale").firstChild.textContent = stale ? "プレビューは古い版です " : "プレビューがありません ";
+    ed("stale").firstChild.textContent = stale ? t("プレビューは古い版です ") : t("プレビューがありません ");
     updateTime();
   }
 
@@ -840,8 +841,8 @@ const EDIT_LOGIC = (() => {
     if (!view.error || errShown.get(view.id) === view.error) return;
     errShown.set(view.id, view.error);
     const kind = jobKinds.get(view.id);
-    const what = kind === "edit.export" ? "書き出し" : kind === "edit.preview" ? "プレビューの作成" : "プレビューの作成・書き出し";
-    showMsg(`${what}に失敗しました: ${view.error}`);
+    const what = kind === "edit.export" ? t("書き出し") : kind === "edit.preview" ? t("プレビューの作成") : t("プレビューの作成・書き出し");
+    showMsg(t("{what}に失敗しました: {err}", { what, err: view.error }));
   }
   ed("regen").onclick = () => work(async (id) => api(`/api/edit/${id}/preview`, "POST"), false);
 
@@ -866,11 +867,11 @@ const EDIT_LOGIC = (() => {
       seg.append(el("span", "", String(j + 1)));
       segs.append(seg);
       if (j > 0) {
-        const t = (st.transitions || []).find((y) => y.after === j - 1 && y.type !== "cut");
-        const mark = el("div", "edjoin" + (t ? ` ${t.type}` : ""));
+        const tr = (st.transitions || []).find((y) => y.after === j - 1 && y.type !== "cut");
+        const mark = el("div", "edjoin" + (tr ? ` ${tr.type}` : ""));
         mark.style.left = pct(starts[j]);
-        if (t) mark.style.width = pct(t.duration);
-        mark.title = `境目 ${j} → ${j + 1}: ${TR_LABEL[t ? t.type : "cut"]}${t ? ` ${f(t.duration)} 秒` : ""}`;
+        if (tr) mark.style.width = pct(tr.duration);
+        mark.title = t("境目 {a} → {b}: {type}", { a: j, b: j + 1, type: TR_LABEL[tr ? tr.type : "cut"] }) + (tr ? " " + t("{len} 秒", { len: f(tr.duration) }) : "");
         segs.append(mark);
       }
     });
@@ -907,7 +908,7 @@ const EDIT_LOGIC = (() => {
     const cur = v.getAttribute("src") ? v.currentTime || 0 : 0;
     ed("play").style.left = dur ? `${Math.max(0, Math.min(100, cur / dur * 100))}%` : "0";
     const tl = view && view.state.clips.length ? L.outToTl(view.state, cur) : 0;
-    ed("time").textContent = view ? `再生位置 ${mmss(cur)} / ${mmss(dur)}${dur ? `(プロジェクトの ${f(tl)} 秒)` : ""}` : "";
+    ed("time").textContent = view ? t("再生位置 {cur} / {dur}", { cur: mmss(cur), dur: mmss(dur) }) + (dur ? t("(プロジェクトの {len} 秒)", { len: f(tl) }) : "") : "";
   }
   ed("video").addEventListener("timeupdate", updateTime);
   ed("video").addEventListener("seeked", updateTime);
@@ -921,7 +922,7 @@ const EDIT_LOGIC = (() => {
       shownOutput = o.url;
       ed("out-video").src = o.url;
       const n = el("span", "edoutname", o.filename || "");
-      n.title = "ほかのタブへドラッグして使えます";
+      n.title = t("ほかのタブへドラッグして使えます");
       makeDraggable(n, o.id);        // ふつうの動画として、他のタブへ落とせる
       ed("out-name").replaceChildren(n);
     }
@@ -1012,28 +1013,28 @@ const EDIT_LOGIC = (() => {
   // ---- 右下: 編集プロジェクトの一覧(履歴の欄。ギャラリーに切り替え可) ----
 
   function projectNode(p) {
-    const t = el("div", "thumb");
+    const tile = el("div", "thumb");
     if (p.thumb_url) {
       const img = el("img");
       img.src = p.thumb_url;
       img.alt = p.name || "";
       img.loading = "lazy";
       img.draggable = false;
-      t.append(img);
+      tile.append(img);
     } else {
-      t.append(el("div", "nothumb video", "編集"));
+      tile.append(el("div", "nothumb video", t("編集")));
     }
-    t.append(el("span", "tbadge top", p.name || "無題"));
-    t.append(el("span", "tbadge", `${p.duration ? fmtDur(p.duration) + " · " : ""}${p.clips || 0} クリップ`));
-    t.classList.toggle("sel", !studio.select.on && p.id === current);
-    if (studio.select.on) { pickable(t, p.id); return t; }          // 選択モード: クリックは選び直し(×もドラッグも無し)
-    t.onclick = () => { if (p.id !== current) selectProject(p.id); };
+    tile.append(el("span", "tbadge top", p.name || t("無題")));
+    tile.append(el("span", "tbadge", (p.duration ? fmtDur(p.duration) + " · " : "") + t("{n} クリップ", { n: p.clips || 0 })));
+    tile.classList.toggle("sel", !studio.select.on && p.id === current);
+    if (studio.select.on) { pickable(tile, p.id); return tile; }          // 選択モード: クリックは選び直し(×もドラッグも無し)
+    tile.onclick = () => { if (p.id !== current) selectProject(p.id); };
     const x = el("button", "tdel", "×");
-    x.title = "削除";
+    x.title = t("削除");
     x.onclick = (e) => { e.stopPropagation(); removeProjects([p.id]); };
-    t.append(x);
-    if (p.output && p.output.id) makeDraggable(t, p.output.id);      // 書き出した動画は、ふつうの動画として他のタブへ落とせる
-    return t;
+    tile.append(x);
+    if (p.output && p.output.id) makeDraggable(tile, p.output.id);      // 書き出した動画は、ふつうの動画として他のタブへ落とせる
+    return tile;
   }
 
   // 一覧が変わっていなければ描き直さない(ドラッグ中のカードを作り直さないように)。タブの切り替えなどでは force で描く
@@ -1044,7 +1045,7 @@ const EDIT_LOGIC = (() => {
     if (!force && sig === cardsSig) return;
     cardsSig = sig;
     grid.replaceChildren();
-    if (!projects.length) grid.append(el("div", "placeholder", "編集プロジェクトがここに並びます"));
+    if (!projects.length) grid.append(el("div", "placeholder", t("編集プロジェクトがここに並びます")));
     for (const p of projects) grid.append(projectNode(p));
     renderSelectBar();
   }
@@ -1052,7 +1053,7 @@ const EDIT_LOGIC = (() => {
   studio.own.edit = {
     history: () => renderCards(true),
     open: (item) => {          // ギャラリーでクリック: 動画・画像はクリップの末尾に、曲は音声に(ギャラリーは開いたまま。続けて選べる)
-      if (!view) { showMsg("先に編集プロジェクトを選ぶか、新規に作ってください"); return true; }
+      if (!view) { showMsg(t("先に編集プロジェクトを選ぶか、新規に作ってください")); return true; }
       if (isClipKind(item)) addItems([item]);
       else if (item.kind === "audio") setSong(item);
       return true;

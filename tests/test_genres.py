@@ -201,7 +201,7 @@ class VizRulesTest(unittest.TestCase):
                   "Shoegaze", "和風エレクトロ", "", "House", "Trance", "PHONK", "lofi", "lo-fi", "game music"]
         script = ("const vm = require('vm'), fs = require('fs');"
                   "const ctx = vm.createContext({ console, window: {}, document: {}, localStorage: {} });"
-                  f"vm.runInContext(fs.readFileSync({json.dumps(str(WEB / 'viz.js'))}, 'utf8'), ctx);"
+                  f"vm.runInContext(fs.readFileSync({json.dumps(str(WEB / 'i18n.js'))}, 'utf8') + fs.readFileSync({json.dumps(str(WEB / 'viz.js'))}, 'utf8'), ctx);"
                   f"process.stdout.write(JSON.stringify({json.dumps(probes)}.map((g) => vm.runInContext('vizThemeId(\"\", ' + JSON.stringify(g) + ')', ctx))));")
         r = subprocess.run(["node", "-e", script], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -213,7 +213,7 @@ class VizRulesTest(unittest.TestCase):
         self.assertEqual(re.findall(r"^  (\w+):", block, re.M), list(genres.VIZ_IDS))
         music = (WEB / "music.js").read_text(encoding="utf-8")
         themes = re.search(r"const VIZ_THEMES = (\[.*?\]);", music, re.S).group(1)
-        self.assertEqual(re.findall(r'\["(\w+)", "', themes), list(genres.VIZ_IDS))
+        self.assertEqual(re.findall(r'\["(\w+)", (?:t\()?"', themes), list(genres.VIZ_IDS))
 
 
 class FakeLlmApiBase(unittest.TestCase):

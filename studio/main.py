@@ -43,7 +43,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
-    _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
+    _QUIET = ("/api/status", "/i18n.js", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
               "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/presets", "/api/samples", "/outputs/", "/samples/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
               "/presets.js", "/samples.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/help.js", "/api/help", "/docs/img/", "/favicon.ico")
 
@@ -871,15 +871,17 @@ def _sample_errors():
 
 
 HELP_MD = REPO_ROOT / "docs" / "USAGE.md"      # 画面の「使い方」の窓に出す説明(テストは差し替える)
+HELP_MD_EN = REPO_ROOT / "docs" / "USAGE.en.md"   # 英語の画面のとき(無ければ日本語のほうを出す)
 HELP_IMG_DIR = REPO_ROOT / "docs" / "img"
 
 
 @app.get("/api/help")
-async def api_help():
-    """「使い方」の窓の中身(docs/USAGE.md の Markdown)。毎回読む(説明を直したら、再起動なしで出る)。mtime は、窓が読み直すかの目印。"""
+async def api_help(lang: str = "ja"):
+    """「使い方」の窓の中身(docs/USAGE.md の Markdown。lang=en なら docs/USAGE.en.md)。毎回読む(説明を直したら、再起動なしで出る)。mtime は、窓が読み直すかの目印。"""
+    path = HELP_MD_EN if lang == "en" and HELP_MD_EN.is_file() else HELP_MD
     try:
-        text = await asyncio.to_thread(HELP_MD.read_text, encoding="utf-8")
-        mtime = HELP_MD.stat().st_mtime
+        text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+        mtime = path.stat().st_mtime
     except OSError:
         raise HTTPException(404, "使い方の説明(docs/USAGE.md)が見つかりません")
     return {"markdown": text, "mtime": mtime}

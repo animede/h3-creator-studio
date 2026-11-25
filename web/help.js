@@ -1,7 +1,9 @@
 // 「使い方」の窓: 右上のボタンで開く、動かせて大きさを変えられる窓。中身は docs/USAGE.md(/api/help)を、小さな Markdown 変換で描く。
 // いまのタブの節から表示し、左の目次(## の見出し)で飛べる。窓の位置と大きさは localStorage に覚える。
-const HELP_GITHUB = "https://github.com/animede/h3-creator-studio/blob/main/docs/USAGE.md";
-const HELP_TAB_HEADING = { image: "画像タブ", video: "動画タブ", music: "音楽タブ", mv: "MV(ミュージックビデオ)タブ", short: "ショート動画タブ", edit: "編集タブ" };
+const HELP_GITHUB = `https://github.com/animede/h3-creator-studio/blob/main/docs/${LANG === "en" ? "USAGE.en.md" : "USAGE.md"}`;
+// 各タブの節の見出し(説明書の見出しと突き合わせる文字なので訳さない。英語の説明書は HELP_TAB_HEADING_EN)
+const HELP_TAB_HEADING = { image: "画像タブ", video: "動画タブ", music: "音楽タブ", mv: "MV(ミュージックビデオ)タブ", short: "ショート動画タブ", edit: "編集タブ" };      // i18n-skip 説明書の見出し
+const HELP_TAB_HEADING_EN = { image: "Image tab", video: "Video tab", music: "Music tab", mv: "Music Video tab", short: "Short Video tab", edit: "Edit tab" };
 const HELP_KEY = "yuzu.help.win";
 const HELP_NARROW = 560;      // この幅より狭いとき、目次は上のプルダウンにする
 
@@ -197,7 +199,7 @@ const HELP_LOGIC = { renderMarkdown, helpSlug };      // node での検査用(we
 
   // 説明を取りに行く。開くたびに確かめ、mtime が同じなら描き直さない
   async function fetchHelp() {
-    const r = await fetch("/api/help");
+    const r = await fetch(`/api/help?lang=${LANG}`, { headers: langHeaders() });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const j = await r.json();
     if (loaded && loaded.mtime === j.mtime) return false;
@@ -208,7 +210,7 @@ const HELP_LOGIC = { renderMarkdown, helpSlug };      // node での検査用(we
 
   // いまのタブの節へ(見出しが ## の「画像タブ」などで始まるもの)
   function toTabSection() {
-    const want = HELP_TAB_HEADING[typeof studio !== "undefined" ? studio.tab : "image"];
+    const want = (LANG === "en" ? HELP_TAB_HEADING_EN : HELP_TAB_HEADING)[typeof studio !== "undefined" ? studio.tab : "image"];
     const x = want && headings.find((y) => y.h.textContent.trim().startsWith(want));
     if (x) scrollToHeading(x.h, false);
   }
@@ -218,13 +220,13 @@ const HELP_LOGIC = { renderMarkdown, helpSlug };      // node での検査用(we
     place(load());
     win.classList.toggle("narrow", win.clientWidth < HELP_NARROW);
     btn.setAttribute("aria-expanded", "true"); btn.classList.add("on");
-    if (!loaded) content.replaceChildren(el("p", "help-note", "読み込み中…"));
+    if (!loaded) content.replaceChildren(el("p", "help-note", t("読み込み中…")));
     try {
       await fetchHelp();
       toTabSection();
       markCurrent();
     } catch (e) {
-      content.replaceChildren(el("p", "help-note err", `使い方を読み込めません: ${e.message || e}`));
+      content.replaceChildren(el("p", "help-note err", t("使い方を読み込めません: {error}", { error: e.message || e })));
       toc.replaceChildren(); sel.replaceChildren(); headings = []; loaded = null;
     }
   }

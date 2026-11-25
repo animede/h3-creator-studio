@@ -12,7 +12,9 @@ WEB = REPO_ROOT / "web"
 # 偽の DOM(何を呼んでも落ちない要素)で edit.js を読み込み、EDIT_LOGIC を取り出す(L)。下の 2 つの検査の共通の頭
 NODE_PRELUDE = r"""
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
-const src = fs.readFileSync(process.argv[process.argv.length - 1], "utf8");
+const edPath = process.argv[process.argv.length - 1];
+// 画面の文言の t() などを先に読む(ページと同じ順)
+const src = fs.readFileSync(require("path").join(require("path").dirname(edPath), "i18n.js"), "utf8") + "\n" + fs.readFileSync(edPath, "utf8");
 const fake = () => {
   const base = { value: "mono", dataset: {}, style: {}, hidden: false, textContent: "", classList: { toggle() {}, add() {}, remove() {} } };
   const p = new Proxy(base, { get: (t, k) => (k in t ? t[k] : k === "then" ? undefined : () => p), set: (t, k, v) => { t[k] = v; return true; } });
@@ -176,7 +178,7 @@ const out = cases.map(([name, s, op]) => {
 console.log(JSON.stringify(out));
 """
 
-TAB_BUTTON = '<button class="tab" data-tab="edit" role="tab" aria-selected="false" aria-controls="tab-edit">編集</button>'
+TAB_BUTTON = '<button class="tab" data-tab="edit" role="tab" aria-selected="false" aria-controls="tab-edit" data-i18n>編集</button>'
 # 契約(編集タブの API)にある入り口。edit.js はこれ以外の /api/edit を使わない
 API_PATHS = {"/api/edit", "/api/edit/probe", "/api/edit/${id}", "/api/edit/${id}/state", "/api/edit/${id}/undo", "/api/edit/${id}/redo",
              "/api/edit/${id}/preview", "/api/edit/${id}/export", "/api/edit/${view.id}", "/api/edit/${view.id}/frame"}

@@ -1,5 +1,5 @@
 // 管理役の画面: メモリ計・エンジンの状態表示(折りたたみ可)。タブ・生成物・ギャラリーは gallery.js / image.js。
-const STATE_LABEL = { stopped: "停止", starting: "起動中", ready: "準備完了", unloaded: "退避中", stopping: "停止中", error: "エラー" };
+const STATE_LABEL = { stopped: t("停止"), starting: t("起動中"), ready: t("準備完了"), unloaded: t("退避中"), stopping: t("停止中"), error: t("エラー") };
 const LANE_LABEL = { h3: "H3", h3image: "H3-Image", ace: "ACE", cpu: "CPU" };      // レーン(エンジン)の短い名前
 const rows = {};          // エンジン名 -> {el, parts}
 const openLogs = new Set();
@@ -29,7 +29,7 @@ function el(tag, cls, text) {
 }
 
 async function post(url) {
-  const r = await fetch(url, { method: "POST" });
+  const r = await fetch(url, { method: "POST", headers: langHeaders() });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   return r.json();
 }
@@ -38,15 +38,15 @@ function buildRow(name, c) {
   const row = el("div", "row");
   const parts = {
     label: el("span", "label", c.label), badge: el("span", "badge"), tag: el("span", "tag", "GPU"),
-    ext: el("span", "tag ext", "外部"), port: el("span", "meta"), rss: el("span", "meta"),
+    ext: el("span", "tag ext", t("外部")), port: el("span", "meta"), rss: el("span", "meta"),
     btns: el("span", "btns"), log: el("pre", "log"),
   };
   parts.log.hidden = true;
   const mk = (text, fn) => { const b = el("button", "", text); b.onclick = fn; parts.btns.append(b); return b; };
-  parts.bStart = mk("起動", () => act(name, "start"));
-  parts.bStop = mk("停止", () => act(name, "stop"));
-  parts.bEnsure = mk("準備", () => act(name, "ensure"));
-  mk("ログ", async () => {
+  parts.bStart = mk(t("起動"), () => act(name, "start"));
+  parts.bStop = mk(LANG === "en" ? "Stop" : "停止", () => act(name, "stop"));      // i18n-skip 状態の「停止」(Stopped)と同じ鍵になるので、ボタンだけ別に
+  parts.bEnsure = mk(t("準備"), () => act(name, "ensure"));
+  mk(t("ログ"), async () => {
     if (openLogs.has(name)) { openLogs.delete(name); parts.log.hidden = true; }
     else { openLogs.add(name); parts.log.hidden = false; await refreshLog(name); }
   });
@@ -61,10 +61,10 @@ async function act(name, action) {
 }
 
 async function refreshLog(name) {
-  const r = await fetch(`/api/components/${name}/log?lines=100`).then((x) => x.json());
+  const r = await fetch(`/api/components/${name}/log?lines=100`, { headers: langHeaders() }).then((x) => x.json());
   const pre = rows[name].log;
   const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
-  pre.textContent = r.log || "(ログはまだありません)";
+  pre.textContent = r.log || t("(ログはまだありません)");
   if (atEnd) pre.scrollTop = pre.scrollHeight;
 }
 
@@ -74,29 +74,29 @@ function showOp(op) {
   line.classList.toggle("err", !!(op && op.error));
   if (!op) return;
   const last = op.steps.length ? op.steps[op.steps.length - 1].msg : "";
-  line.append(document.createTextNode(op.error ? `失敗: ${op.error}` : last));
+  line.append(document.createTextNode(op.error ? t("失敗: {error}", { error: op.error }) : last));
   if (op.error && op.log_tail) line.append(el("pre", "", op.log_tail));
 }
 
 // 状態バーの 2 行目: レーンごとの実行中のジョブ(種類と進み)と順番待ちの数。share のときは、GPU に載っているエンジンと利用枠も出す
 function renderLanes(s) {
   const share = s.gpu_mode === "share";
-  const items = [el("span", "lane", share ? "GPU: 共有(複数のエンジンを同時に載せる)" : "GPU: エンジン 1 つずつ")];
+  const items = [el("span", "lane", share ? t("GPU: 共有(複数のエンジンを同時に載せる)") : t("GPU: エンジン 1 つずつ"))];
   for (const [name, l] of Object.entries(s.lanes || {})) {
     const jobs = l.running_jobs || [];
     if (!jobs.length && !l.queued) continue;
-    const parts = jobs.map((j) => `${j.kind.split(".").pop()} ${j.status === "running" ? Math.round((j.progress || 0) * 100) + "%" : "準備中"}`);
-    if (l.queued) parts.push(`待ち ${l.queued}`);
+    const parts = jobs.map((j) => j.kind.split(".").pop() + " " + (j.status === "running" ? Math.round((j.progress || 0) * 100) + "%" : t("準備中")));
+    if (l.queued) parts.push(t("待ち {n}", { n: l.queued }));
     items.push(el("span", "lane run", `${LANE_LABEL[name] || name}: ${parts.join(" / ")}`));
   }
-  if (share) for (const r of s.residents || []) items.push(el("span", "lane res" + (r.busy ? " busy" : ""), `${LANE_LABEL[r.name] || r.name} 利用枠 ${gib(r.budget_mib)} GiB${r.busy ? "(仕事中)" : ""}`));
+  if (share) for (const r of s.residents || []) items.push(el("span", "lane res" + (r.busy ? " busy" : ""), (r.busy ? t("{name} 利用枠 {gib} GiB(仕事中)", { name: LANE_LABEL[r.name] || r.name, gib: gib(r.budget_mib) }) : t("{name} 利用枠 {gib} GiB", { name: LANE_LABEL[r.name] || r.name, gib: gib(r.budget_mib) }))));
   $("lanes").replaceChildren(...items);
 }
 
 function render(s) {
   const gpu = s.gpu;
   if (gpu) setGauge("g-vram", gpu.used_mib, gpu.total_mib, `${gib(gpu.used_mib)} / ${gib(gpu.total_mib)} GiB`);
-  else setGauge("g-vram", 0, 0, "GPU なし");
+  else setGauge("g-vram", 0, 0, t("GPU なし"));
   $("g-shared").hidden = s.shared_gpu_mib == null;
   if (s.shared_gpu_mib != null) {      // Windows の共有 GPU メモリ。上限はサーバが知っていればそれ(ふつう CPU メモリの半分)、無ければ 4GiB で目安にする
     const total = s.shared_gpu_total_mib || 4096;
@@ -134,7 +134,7 @@ function summarize(s) {
   const comps = Object.values(s.components);
   const res = comps.filter((c) => c.gpu_resident);       // share では複数載っている
   const op = s.operation && !s.operation.done ? s.operation : null;
-  let text = res.length ? `GPU: ${res.map((c) => `${c.label}(${STATE_LABEL[c.state] || c.state})`).join("、")}` : "GPU: 空き";
+  let text = res.length ? `GPU: ${res.map((c) => `${c.label}(${STATE_LABEL[c.state] || c.state})`).join(t("、"))}` : t("GPU: 空き");
   const starting = comps.find((c) => c.state === "starting" || c.state === "stopping");
   if (op && op.steps.length) text += " - " + op.steps[op.steps.length - 1].msg;
   else if (starting) text += ` - ${starting.label}: ${STATE_LABEL[starting.state]}`;
@@ -160,7 +160,7 @@ async function poll() {
   clearTimeout(timer);
   let busy = false;
   try {
-    const s = await fetch("/api/status").then((r) => r.json());
+    const s = await fetch("/api/status", { headers: langHeaders() }).then((r) => r.json());
     render(s);
     busy = s.busy || Object.values(s.lanes || {}).some((l) => (l.running_jobs || []).length || l.queued);     // 仕事が走っている間は 1 秒おき
     if (s.jobs_done_counter != null) {
@@ -169,11 +169,11 @@ async function poll() {
     }
   } catch (e) {
     $("warning").hidden = false;
-    $("warning").textContent = "管理役に接続できません";
+    $("warning").textContent = t("管理役に接続できません");
   }
   timer = setTimeout(poll, busy ? 1000 : 2000);
 }
 
-document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setTab(t.dataset.tab)));   // setTab は gallery.js
+document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));   // setTab は gallery.js
 
 poll();

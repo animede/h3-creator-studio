@@ -8,8 +8,8 @@
 //   vizBox(audio, { viz, mood, genre, caption })                         -> canvas と表示の選択を入れた枠(音楽のカードに入れる)
 //   detachVisualizers(root)                                -> root の中の分を片付ける(root の中身を入れ替える前に呼ぶ)
 
-const VIZ_MODES = [["spectrum", "スペクトラム"], ["wave", "波形"], ["ring", "リング"], ["particles", "粒子"], ["pulse", "脈動"],
-  ["aurora", "オーロラ"], ["fireworks", "花火"], ["matrix", "マトリックス"], ["orbit", "軌道"], ["fire", "炎"], ["auto", "おまかせ"]];
+const VIZ_MODES = [["spectrum", t("スペクトラム")], ["wave", t("波形")], ["ring", t("リング")], ["particles", t("粒子")], ["pulse", t("脈動")],
+  ["aurora", t("オーロラ")], ["fireworks", t("花火")], ["matrix", t("マトリックス")], ["orbit", t("軌道")], ["fire", t("炎")], ["auto", t("おまかせ")]];
 const VIZ_MODE_KEY = "studio.viz.mode";
 const VIZ_DEFAULT_MODE = "spectrum";
 const VIZ_FFT = 1024;           // AnalyserNode の fftSize(スペクトルと波形は、その半分の 512 点)
@@ -44,16 +44,16 @@ const GENRE_TO_VIZ = [
 // 当たった語の数が最も多い雰囲気を選び、同数なら下の並びの先(具体的な雰囲気が先で、既定の energetic は最後)。1 つも当たらなければ、ジャンルで決める。
 // 別の意味の語を拾わないよう、fun は funk を、grand は grand piano を、切な は「大切な」を除いてある。g 付きなので、数えるのは String.match で(test では lastIndex が残る)
 const CAPTION_TO_VIZ = [
-  ["melancholic", /\b(?:sad(?:ness|ly)?\b|melanchol|bittersweet|wistful|longing|lonel)|切な[いくさげ]|悲し|寂し|哀愁|孤独|せつな|かなし|さびし|メランコリ/gi],
-  ["healing", /\b(?:calm|gentl|sooth|relax|peace|lo-?fi|chill|ambient)|癒|穏や|安らぎ|静か|落ち着|優し|やさし|おだや|ヒーリング|リラックス/gi],
-  ["epic", /\b(?:epic|grand(?:iose|ly)?\b(?!\s*piano)|heroic|cinematic|orchestr|anthem|intense|dramatic|triumph)|壮大|荘厳|勇壮|エピック|シネマティック|オーケストラ/gi],
-  ["cyber", /\b(?:electro|synth|futuris|cyber|edm\b|techno\b|neon)|電子|サイバー|ネオン|近未来|テクノ|シンセ|エレクトロ/gi],
-  ["romantic", /\b(?:romanti|lov(?:e|ing)|tender|sensual)|恋|愛|ロマンチック|ラブ/gi],
-  ["dark", /\b(?:dark|heavy|gloom|ominous)|暗|闇|ダーク/gi],
-  ["festive", /\b(?:party|festiv|celebrat|danc|playful|fun\b)|祭|楽し|賑やか|たのし|パーティ|ダンス/gi],
-  ["nostalgic", /\b(?:nostalg|retro|vintage|(?:19)?[789]0'?s\b|traditional)|懐かし|レトロ|昭和|[789]0\s*年代|なつかし|ノスタルジ/gi],
-  ["mystical", /\b(?:dream|ethereal|mystic|mysteri|magic|fantas|otherworld)|幻想|神秘|夢|ファンタジー|ミステリアス/gi],
-  ["energetic", /\b(?:upbeat|energ|driving|bright|happy|uplifting|cheer|joy)|元気|明る|軽快|爽やか|げんき|あかる|ハッピー|アップテンポ/gi],
+  ["melancholic", /\b(?:sad(?:ness|ly)?\b|melanchol|bittersweet|wistful|longing|lonel)|切な[いくさげ]|悲し|寂し|哀愁|孤独|せつな|かなし|さびし|メランコリ/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["healing", /\b(?:calm|gentl|sooth|relax|peace|lo-?fi|chill|ambient)|癒|穏や|安らぎ|静か|落ち着|優し|やさし|おだや|ヒーリング|リラックス/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["epic", /\b(?:epic|grand(?:iose|ly)?\b(?!\s*piano)|heroic|cinematic|orchestr|anthem|intense|dramatic|triumph)|壮大|荘厳|勇壮|エピック|シネマティック|オーケストラ/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["cyber", /\b(?:electro|synth|futuris|cyber|edm\b|techno\b|neon)|電子|サイバー|ネオン|近未来|テクノ|シンセ|エレクトロ/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["romantic", /\b(?:romanti|lov(?:e|ing)|tender|sensual)|恋|愛|ロマンチック|ラブ/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["dark", /\b(?:dark|heavy|gloom|ominous)|暗|闇|ダーク/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["festive", /\b(?:party|festiv|celebrat|danc|playful|fun\b)|祭|楽し|賑やか|たのし|パーティ|ダンス/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["nostalgic", /\b(?:nostalg|retro|vintage|(?:19)?[789]0'?s\b|traditional)|懐かし|レトロ|昭和|[789]0\s*年代|なつかし|ノスタルジ/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["mystical", /\b(?:dream|ethereal|mystic|mysteri|magic|fantas|otherworld)|幻想|神秘|夢|ファンタジー|ミステリアス/gi],      // i18n-skip 雰囲気の判定に使う語
+  ["energetic", /\b(?:upbeat|energ|driving|bright|happy|uplifting|cheer|joy)|元気|明る|軽快|爽やか|げんき|あかる|ハッピー|アップテンポ/gi],      // i18n-skip 雰囲気の判定に使う語
 ];
 
 // キャプションの言葉から雰囲気の名前。当たる語が無い(キャプションが無い・文字でない)ときは ""(次の手がかりへ)
@@ -413,7 +413,7 @@ function makeVizPainter() {
       for (let c = 0; c < cols; c++) matrixDrops.push({ y: Math.random() * H, speed: 2 + Math.random() * 4 });
     }
 
-    const chars = "アイウエオカキクケコ01サシスセソタチツテト10";
+    const chars = "アイウエオカキクケコ01サシスセソタチツテト10";      // i18n-skip 画面の飾りの文字
     const hue1 = moodHue(0.3);
     const hue2 = moodHue(0.7);
     ctx.font = "13px monospace";
@@ -616,7 +616,7 @@ const vizLive = new Set();        // AnalyserNode をつないでいるコント
 function vizAudioContext() {
   if (!vizContext) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) throw new Error("この環境では Web Audio が使えません");
+    if (!AC) throw new Error(t("この環境では Web Audio が使えません"));
     vizContext = new AC();
   }
   return vizContext;
@@ -724,7 +724,7 @@ function attachVisualizer(audio, canvas, opts = {}) {
       vizLive.add(ctl);
     } catch (e) {
       failed = true;
-      console.warn("スペクトラムを出せません(音は普通に鳴ります):", e);
+      console.warn("スペクトラムを出せません(音は普通に鳴ります):", e);      // i18n-skip ログ
       try { if (source) source.connect(vizContext.destination); } catch (e2) { /* 音の経路は、もう作れない */ }
     }
     return !!graph;
@@ -752,7 +752,7 @@ function attachVisualizer(audio, canvas, opts = {}) {
       begin();
       painter.draw(current(), g2d, w, h, dpr);
     } catch (e) {
-      console.error("スペクトラムの描画に失敗しました:", e);
+      console.error("スペクトラムの描画に失敗しました:", e);      // i18n-skip ログ
       failed = true;
       sync();
     }
@@ -829,14 +829,14 @@ function vizBox(audio, opts = {}) {
     const ctl = attachVisualizer(audio, canvas, opts);
     const sel = document.createElement("select");
     sel.className = "vizmode";
-    sel.title = "スペクトラムの表示。おまかせは、曲の雰囲気に合う表示を選びます(選んだものは覚えておきます)";
-    sel.setAttribute("aria-label", "スペクトラムの表示");
+    sel.title = t("スペクトラムの表示。おまかせは、曲の雰囲気に合う表示を選びます(選んだものは覚えておきます)");
+    sel.setAttribute("aria-label", t("スペクトラムの表示"));
     for (const [v, label] of VIZ_MODES) sel.append(new Option(label, v));
     sel.value = ctl.getMode();
     sel.onchange = () => { ctl.setMode(sel.value); vizSaveMode(sel.value); };
     box.append(canvas, sel);
   } catch (e) {
-    console.warn("スペクトラムを付けられませんでした:", e);
+    console.warn("スペクトラムを付けられませんでした:", e);      // i18n-skip ログ
     box.hidden = true;
   }
   return box;

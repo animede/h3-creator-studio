@@ -19,6 +19,10 @@ class HelpApiTest(unittest.TestCase):
         p = mock.patch.object(main, "HELP_MD", self.md)
         p.start()
         self.addCleanup(p.stop)
+        self.md_en = self.dir / "USAGE.en.md"
+        p = mock.patch.object(main, "HELP_MD_EN", self.md_en)
+        p.start()
+        self.addCleanup(p.stop)
         self.client = TestClient(main.app)
 
     def test_returns_the_file_as_utf8_with_mtime(self):
@@ -41,6 +45,17 @@ class HelpApiTest(unittest.TestCase):
         r = self.client.get("/api/help")
         self.assertEqual(r.status_code, 404)
         self.assertIn("見つかりません", r.json()["detail"])
+
+    def test_lang_en_serves_the_english_file(self):
+        self.md.write_text("# 使い方", encoding="utf-8")
+        self.md_en.write_text("# User guide", encoding="utf-8")
+        self.assertEqual(self.client.get("/api/help?lang=en").json()["markdown"], "# User guide")
+        self.assertEqual(self.client.get("/api/help?lang=ja").json()["markdown"], "# 使い方")
+        self.assertEqual(self.client.get("/api/help").json()["markdown"], "# 使い方")
+
+    def test_lang_en_falls_back_to_japanese_when_missing(self):
+        self.md.write_text("# 使い方", encoding="utf-8")
+        self.assertEqual(self.client.get("/api/help?lang=en").json()["markdown"], "# 使い方")
 
 
 class HelpImagesTest(unittest.TestCase):

@@ -5,6 +5,8 @@
 
 **Latest: 2026-11-25 20:10 JST** — A detailed usage guide (docs/USAGE.en.md) and a **Help** (使い方) button at the top right (opens in a floating window at the section for the current tab). The "destination" setting in Music Video and Short Video is now **aspect** (adds landscape 4:5 and custom size), and quality adds **Low VRAM** (512 on the long side). Each tab has a **Sample** button (loads a bundled example: fills in the inputs and materials and lets you watch the result; one Short Video and one Music Video). The README now has example GIFs and a screenshot. For the change history, see the [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
+The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress and error messages from the server are still in Japanese for now.
+
 **Images, videos with audio, music, text-to-speech, music videos, story videos and editing, all in one browser tab. Everything runs locally, and there are no nodes to wire up.**
 A creative studio for everyone that brings the ideas of mv-V3 and story-studio together in one place.
 

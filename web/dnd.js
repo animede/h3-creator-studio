@@ -2,8 +2,8 @@
 // ギャラリー・履歴の生成物(OUT_MIME)も、PC のファイル(Files)も、同じドロップ欄に落とせる。
 
 function dragType(e) {
-  const t = [...(e.dataTransfer?.types || [])];
-  return t.includes(OUT_MIME) ? "output" : t.includes("Files") ? "files" : null;
+  const ty = [...(e.dataTransfer?.types || [])];
+  return ty.includes(OUT_MIME) ? "output" : ty.includes("Files") ? "files" : null;
 }
 
 // box をドロップ欄にする。zone(既定は box 自身)の上へ落とされたものを受け、box を光らせる。
@@ -21,7 +21,7 @@ function wireDrop(box, { zone = box, active = () => true, onItem, onFiles, msg =
     box.classList.remove("over");
     const id = e.dataTransfer.getData(OUT_MIME);
     const files = [...e.dataTransfer.files];     // drop の中で同期的に取り出す
-    if (id) { const it = byId(id); if (it) onItem(it); else msg("その生成物は見つかりません"); }
+    if (id) { const it = byId(id); if (it) onItem(it); else msg(t("その生成物は見つかりません")); }
     else if (files.length) onFiles(files);
   });
 }
@@ -32,7 +32,7 @@ async function uploadFiles(files, box) {
   try {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
-    const r = await fetch("/api/uploads", { method: "POST", body: fd });
+    const r = await fetch("/api/uploads", { method: "POST", headers: langHeaders(), body: fd });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     return await r.json();
   } finally {

@@ -10,14 +10,14 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
   async function submit(kind, params) {
     setBusy(true);
     try {
-      const r = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tab, kind, params }) });
+      const r = await fetch("/api/jobs", { method: "POST", headers: langHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ tab, kind, params }) });
       const js = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "入力を確認してください");
+      if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : t("入力を確認してください"));
       last = null;
-      track({ id: js.id, status: "queued", progress: 0, message: "順番を待っています", wait_reason: "順番を待っています", steps: [], created: Date.now() / 1000 });
+      track({ id: js.id, status: "queued", progress: 0, message: t("順番を待っています"), wait_reason: t("順番を待っています"), steps: [], created: Date.now() / 1000 });
     } catch (e) {
       setBusy(false);
-      showMsg(`生成を始められませんでした: ${e.message || e}`);
+      showMsg(t("生成を始められませんでした: {error}", { error: e.message || e }));
     }
   }
 
@@ -33,7 +33,7 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
     const id = active && active.id;
     if (!id) return;
     try {
-      const r = await fetch(`/api/jobs/${id}`);
+      const r = await fetch(`/api/jobs/${id}`, { headers: langHeaders() });
       if (r.status === 404) { active = null; setBusy(false); render(); return; }
       const job = await r.json();
       if (["completed", "failed", "cancelled"].includes(job.status)) { await finish(job); return; }
@@ -62,7 +62,7 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
 
   async function stop() {
     if (!active) return;
-    try { await fetch(`/api/jobs/${active.id}/cancel`, { method: "POST" }); } catch (e) { /* 次の周で状態が分かる */ }
+    try { await fetch(`/api/jobs/${active.id}/cancel`, { method: "POST", headers: langHeaders() }); } catch (e) { /* 次の周で状態が分かる */ }
   }
 
   const fmtElapsed = (created) => {
@@ -85,8 +85,8 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
     bar.classList.toggle("indet", j.status !== "running" || pct === 0);
     bar.querySelector("i").style.width = j.status === "running" && pct > 0 ? pct + "%" : "";
     // 順番待ちのジョブは、待っている理由(順番 / GPU の空き待ち)を出す
-    $("pmsg").textContent = failed ? `失敗: ${j.error || "原因不明"}` : cancelled ? "中止しました"
-      : `${(j.status === "queued" && j.wait_reason) || j.message || ""}  (経過 ${fmtElapsed(j.created)})`;
+    $("pmsg").textContent = failed ? t("失敗: {error}", { error: j.error || t("原因不明") }) : cancelled ? t("中止しました")
+      : t("{msg}  (経過 {time})", { msg: (j.status === "queued" && j.wait_reason) || j.message || "", time: fmtElapsed(j.created) });
     const steps = $("psteps");
     steps.replaceChildren();
     if (j.status === "preparing") (j.steps || []).slice(-4, -1).forEach((t) => steps.append(el("li", "", t)));
@@ -97,7 +97,7 @@ function createTracker(tab, { setBusy, showMsg, onJob = () => {} }) {
   // ページを開き直したとき、進行中のジョブがあれば追跡を再開する(同時に複数あれば、走っているものを先に)
   async function resume() {
     try {
-      const jobs = await fetch(`/api/jobs?tab=${tab}&limit=10`).then((r) => r.json());
+      const jobs = await fetch(`/api/jobs?tab=${tab}&limit=10`, { headers: langHeaders() }).then((r) => r.json());
       const run = jobs.find((j) => ["preparing", "running"].includes(j.status)) || jobs.find((j) => j.status === "queued");
       if (run) track(run);
     } catch (e) { /* 管理役がまだ起きていない */ }
@@ -114,23 +114,23 @@ function wireEnhance({ tab, ta, btn, undo, note, body = () => ({}), showMsg }) {
   undo.onclick = (e) => { e.preventDefault(); if (orig !== null) ta.value = orig; undo.hidden = true; note.textContent = ""; };
   btn.onclick = async () => {
     const text = ta.value.trim();
-    if (!text) { showMsg("プロンプトを入力してください"); ta.focus(); return; }
+    if (!text) { showMsg(t("プロンプトを入力してください")); ta.focus(); return; }
     showMsg("");
     btn.disabled = true;
     undo.hidden = true;
-    note.textContent = "強化しています…(エンジンや LLM を起こすので、数分かかることがあります)";
+    note.textContent = t("強化しています…(エンジンや LLM を起こすので、数分かかることがあります)");
     try {
-      const r = await fetch("/api/enhance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tab, text, ...body() }) });
+      const r = await fetch("/api/enhance", { method: "POST", headers: langHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ tab, text, ...body() }) });
       const js = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "強化できませんでした");
+      if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : t("強化できませんでした"));
       orig = ta.value;
       ta.value = js.text;
       undo.hidden = false;
-      undo.title = `元の文: ${orig}`;
-      note.textContent = js.suggested_width ? `推奨サイズ: ${js.suggested_width}×${js.suggested_height}` : "";
+      undo.title = t("元の文: {text}", { text: orig });
+      note.textContent = js.suggested_width ? t("推奨サイズ: {w}×{h}", { w: js.suggested_width, h: js.suggested_height }) : "";
     } catch (e) {
       note.textContent = "";
-      showMsg(`強化できませんでした: ${e.message || e}`);
+      showMsg(t("強化できませんでした: {error}", { error: e.message || e }));
     } finally {
       btn.disabled = false;
     }

@@ -3,14 +3,14 @@
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
   const GENRES = ["J-POP", "Rock", "Ballad", "Anime", "Hip Hop", "R&B", "Enka", "EDM", "Reggaeton", "K-POP", "City Pop", "Jazz"];
   // 自作のジャンルのスペクトラムの雰囲気(曲のカードの色。web/viz.js の VIZ_MOOD_THEMES の 10 種)
-  const VIZ_THEMES = [["energetic", "活気"], ["melancholic", "物憂い"], ["healing", "癒し"], ["epic", "壮大"], ["cyber", "電脳"],
-    ["romantic", "ロマンチック"], ["dark", "闇"], ["festive", "祭り"], ["nostalgic", "ノスタルジック"], ["mystical", "神秘"]];
+  const VIZ_THEMES = [["energetic", t("活気")], ["melancholic", t("物憂い")], ["healing", t("癒し")], ["epic", t("壮大")], ["cyber", t("電脳")],
+    ["romantic", t("ロマンチック")], ["dark", t("闇")], ["festive", t("祭り")], ["nostalgic", t("ノスタルジック")], ["mystical", t("神秘")]];
   const GENRE_BTNS = ["genre-add-go", "free-save", "free-name-go", "gedit-save", "gedit-del"];      // 通信中(AI がジャンルを作っている間など)は押せない
-  const MOODS = [["bright and happy", "😊 明るい"], ["bittersweet and sad", "😢 切ない"], ["intense and powerful", "🔥 激しい"],
-    ["calm and gentle", "🍃 穏やか"], ["mysterious and fantastical", "✨ 神秘的"], ["romantic and tender", "💕 ロマンチック"],
-    ["playful and fun", "🎉 楽しい"], ["melancholic and dark", "🌙 メランコリック"], ["epic and grand", "🏔️ 壮大"], ["cool and stylish", "😎 クール"]];
-  const VOCALS = [["female vocal", "👩 女性"], ["male vocal", "👨 男性"], ["powerful vocal", "🎤 力強い"],
-    ["breathy whisper vocal", "🌬️ ウィスパー"], ["falsetto vocal", "🎵 ファルセット"], ["vocal harmonies", "👥 ハーモニー"]];
+  const MOODS = [["bright and happy", t("😊 明るい")], ["bittersweet and sad", t("😢 切ない")], ["intense and powerful", t("🔥 激しい")],
+    ["calm and gentle", t("🍃 穏やか")], ["mysterious and fantastical", t("✨ 神秘的")], ["romantic and tender", t("💕 ロマンチック")],
+    ["playful and fun", t("🎉 楽しい")], ["melancholic and dark", t("🌙 メランコリック")], ["epic and grand", t("🏔️ 壮大")], ["cool and stylish", t("😎 クール")]];
+  const VOCALS = [["female vocal", t("👩 女性")], ["male vocal", t("👨 男性")], ["powerful vocal", t("🎤 力強い")],
+    ["breathy whisper vocal", t("🌬️ ウィスパー")], ["falsetto vocal", t("🎵 ファルセット")], ["vocal harmonies", t("👥 ハーモニー")]];
   const DEFAULT_NEGATIVE = "low quality, noisy, distorted, muddy, clipping, off-key, out of tune, amateur, poorly mixed";
   const PLAN_LINES = 8;           // プランの歌詞は、先頭の数行だけ見せる
   const MODEL_KEY = "studio.ace.model";
@@ -52,7 +52,7 @@
     // インストのときは、歌詞とボーカルは使わない
     const noVocal = inst();
     mu("lyrics").disabled = noVocal;
-    mu("lyrics").placeholder = noVocal ? "インストなので歌詞はありません" : "自分の歌詞を使うときだけ書きます";
+    mu("lyrics").placeholder = noVocal ? t("インストなので歌詞はありません") : t("自分の歌詞を使うときだけ書きます");
     mu("vocals").classList.toggle("off", noVocal);
     mu("regen").hidden = !(simple && !noVocal && val("lyrics"));
   }
@@ -93,14 +93,14 @@
     making = true;
     updateButtons();
     const btn = mu(name + "-go"), text = btn.textContent;
-    btn.textContent = "作っています…";
+    btn.textContent = t("作っています…");
     try {
-      const r = await fetch("/api/music/" + name, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await fetch("/api/music/" + name, { method: "POST", headers: langHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) });
       const js = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "作れませんでした");
+      if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : t("作れませんでした"));
       return js;
     } catch (e) {
-      showMsg(`${label}を作れませんでした: ${e.message || e}`);
+      showMsg(t("{label}を作れませんでした: {err}", { label, err: e.message || e }));
       return null;
     } finally {
       making = false;
@@ -121,24 +121,24 @@
   mu("theme-go").onclick = async () => {
     const b = base();
     if (!b) return;
-    const js = await llm("theme", { ...b, caption: userCaption() }, "テーマ");
+    const js = await llm("theme", { ...b, caption: userCaption() }, t("テーマ"));
     if (js) mu("theme").value = js.theme;
   };
   mu("lyrics-go").onclick = async () => {
     const b = base();
     if (!b) return;
-    const js = await llm("lyrics", { ...b, theme: val("theme"), mood, vocal, caption: userCaption() }, "歌詞");
+    const js = await llm("lyrics", { ...b, theme: val("theme"), mood, vocal, caption: userCaption() }, t("歌詞"));
     if (!js) return;
     if (!val("theme")) mu("theme").value = js.theme;      // テーマが空だったときは、一緒に作ったテーマを入れる
     mu("lyrics").value = js.lyrics;
-    mu("lyrics-note").textContent = `AI の推奨の長さ: 約 ${js.recommended_duration} 秒`;
+    mu("lyrics-note").textContent = t("AI の推奨の長さ: 約 {sec} 秒", { sec: js.recommended_duration });
     render();
   };
   mu("caption-go").onclick = async () => {
     const b = base();
     if (!b) return;
     const js = await llm("caption", { ...b, theme: val("theme"), lyrics: inst() ? "" : val("lyrics"), mood, vocal: inst() ? "" : vocal,
-      thinking: mu("thinking").checked, instrumental: inst() }, "キャプション");
+      thinking: mu("thinking").checked, instrumental: inst() }, t("キャプション"));
     if (js) { mu("caption").value = js.caption; captionEdited = true; }     // 作ったものは「手で書いた」扱い(生成で作り直さない)
   };
   mu("theme-clear").onclick = () => { mu("theme").value = ""; };
@@ -160,10 +160,10 @@
   }
 
   async function api(url, method = "GET", body) {
-    const r = await fetch(url, { method, headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    const r = await fetch(url, { method, headers: langHeaders(body !== undefined ? { "Content-Type": "application/json" } : undefined),
       body: body !== undefined ? JSON.stringify(body) : undefined });
     const js = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? "入力を確認してください" : `通信に失敗しました(${r.status})`);
+    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? t("入力を確認してください") : t("通信に失敗しました({status})", { status: r.status }));
     return js;
   }
 
@@ -172,7 +172,7 @@
     genreSay("");
     if (genreMode !== "free") return genre;
     const text = val("free").replace(/\s+/g, " ");
-    if (!text) { genreSay("ジャンルを自由に書く欄が空です。書くか、チップを選んでください", true); mu("free").focus(); }
+    if (!text) { genreSay(t("ジャンルを自由に書く欄が空です。書くか、チップを選んでください"), true); mu("free").focus(); }
     return text || null;
   }
 
@@ -195,8 +195,8 @@
       return b;
     };
     mu("genres").replaceChildren(...GENRES.map((g) => genreChip(g, false)), ...custom.map((g) => genreChip(g.name, true)),
-      act("add", "＋ 追加", "ジャンルの名前から、AI が世界観・場面・感情の定義を作って、自分のチップに加えます", () => toggleAdd()),
-      act("free", "✎ 自由に書く", "チップの代わりに、曲の様子を文で書きます(例: 90 年代のシティポップに三味線を混ぜた曲)", () => selectFree(genreMode !== "free")));
+      act("add", t("＋ 追加"), t("ジャンルの名前から、AI が世界観・場面・感情の定義を作って、自分のチップに加えます"), () => toggleAdd()),
+      act("free", t("✎ 自由に書く"), t("チップの代わりに、曲の様子を文で書きます(例: 90 年代のシティポップに三味線を混ぜた曲)"), () => selectFree(genreMode !== "free")));
     markGenre();
   }
 
@@ -254,10 +254,10 @@
       mu("genre-add").hidden = true;
       renderGenres();
       mu("genre-edit").open = true;
-      genreSay(`「${js.name}」を作りました。中身は直せます`);
+      genreSay(t("「{name}」を作りました。中身は直せます", { name: js.name }));
       return true;
     } catch (e) {
-      genreSay(`ジャンルを作れませんでした: ${e.message || e}`, true);
+      genreSay(t("ジャンルを作れませんでした: {err}", { err: e.message || e }), true);
       return false;
     } finally {
       gbusy = making = false;
@@ -275,7 +275,7 @@
   // ＋ 追加: 名前と、任意の一言の説明
   const addGenre = async () => {
     const name = val("genre-name");
-    if (!name) { genreSay("ジャンルの名前を入れてください", true); mu("genre-name").focus(); return; }
+    if (!name) { genreSay(t("ジャンルの名前を入れてください"), true); mu("genre-name").focus(); return; }
     if (await createGenre(name, val("genre-desc"))) { mu("genre-name").value = ""; mu("genre-desc").value = ""; }
   };
   mu("genre-add-go").onclick = addGenre;
@@ -284,13 +284,13 @@
 
   // ✎ 自由に書く: その文を「ジャンルとして保存」すると、短い名前を付けた自作のチップになる(文は説明になる)
   mu("free-save").onclick = () => {
-    if (!val("free")) { genreSay("ジャンルとして保存する文を、先に書いてください", true); mu("free").focus(); return; }
+    if (!val("free")) { genreSay(t("ジャンルとして保存する文を、先に書いてください"), true); mu("free").focus(); return; }
     mu("free-name-row").hidden = false;
     mu("free-name").focus();
   };
   const saveFree = async () => {
     const name = val("free-name");
-    if (!name) { genreSay("ジャンルの名前を入れてください", true); mu("free-name").focus(); return; }
+    if (!name) { genreSay(t("ジャンルの名前を入れてください"), true); mu("free-name").focus(); return; }
     if (await createGenre(name, val("free").replace(/\s+/g, " "))) { mu("free-name-row").hidden = true; mu("free-name").value = ""; }
   };
   mu("free-name-go").onclick = saveFree;
@@ -341,19 +341,19 @@
       custom = custom.map((x) => (x.id === js.id ? js : x));
       genre = js.name;
       renderGenres();
-      genreSay(`「${js.name}」を保存しました。次の曲から使われます`);
+      genreSay(t("「{name}」を保存しました。次の曲から使われます", { name: js.name }));
     });
   };
 
   mu("gedit-del").onclick = () => {
     const g = selectedCustom();
-    if (!g || making || gbusy || !confirm(`「${g.name}」を削除しますか?\n元に戻せません。`)) return;
+    if (!g || making || gbusy || !confirm(t("「{name}」を削除しますか?\n元に戻せません。", { name: g.name }))) return;
     genreCall(async () => {
       await api(`/api/music/genres/${encodeURIComponent(g.id)}`, "DELETE");
       custom = custom.filter((x) => x.id !== g.id);
       genre = "J-POP";
       renderGenres();
-      genreSay(`「${g.name}」を削除しました`);
+      genreSay(t("「{name}」を削除しました", { name: g.name }));
     });
   };
 
@@ -387,14 +387,14 @@
     const sel = mu("model"), keep = sel.value, known = defaultModel;
     let js = { models: [] };
     try {
-      const r = await fetch("/api/music/models");
+      const r = await fetch("/api/music/models", { headers: langHeaders() });
       if (r.ok) js = await r.json();
     } catch (e) { /* 管理役がまだ起きていない */ }
     defaultModel = js.default_model || "";
-    sel.replaceChildren(new Option("ACE の既定", ""));
+    sel.replaceChildren(new Option(t("ACE の既定"), ""));
     const sorted = [...(Array.isArray(js.models) ? js.models : [])].sort((a, b) => (b.is_loaded - a.is_loaded) || (isTurbo(b.name) - isTurbo(a.name)) || a.name.localeCompare(b.name));
     for (const m of sorted) {
-      const o = new Option(`${m.name}${m.is_loaded ? "  ✓読込済" : "  (未読込。選ぶと読み込みます)"}${m.vram_ok ? "" : "  (VRAM 不足)"}`, m.name);
+      const o = new Option(m.name + (m.is_loaded ? t("  ✓読込済") : t("  (未読込。選ぶと読み込みます)")) + (m.vram_ok ? "" : t("  (VRAM 不足)")), m.name);
       o.disabled = !m.vram_ok;
       sel.append(o);
     }
@@ -402,7 +402,7 @@
     try { saved = localStorage.getItem(MODEL_KEY) || ""; } catch (e) { /* 無ければ既定 */ }
     const ok = (v) => v && [...sel.options].some((o) => o.value === v && !o.disabled);
     sel.value = [keep, saved, js.default_model].find(ok) || "";      // いま選んでいるもの → 前回のもの → ACE の既定
-    mu("model-note").textContent = js.note ? `${js.note}(既定のモデルで作ります)` : "選んだモデルが読み込まれていなければ、生成の前に自動で読み込みます(数十秒)";
+    mu("model-note").textContent = js.note ? t("{note}(既定のモデルで作ります)", { note: js.note }) : t("選んだモデルが読み込まれていなければ、生成の前に自動で読み込みます(数十秒)");
     if (sel.value !== keep || (!sel.value && defaultModel !== known)) onModel();      // 「ACE の既定」のままでも、既定のモデルが分かった(変わった)なら STEP を合わせ直す
   }
   mu("adv").addEventListener("toggle", () => { if (mu("adv").open) loadModels(); });
@@ -419,11 +419,11 @@
     const plan = job.result && job.result.plan;
     if (!plan) return;
     mu("plan").hidden = false;
-    mu("plan-head").textContent = job.kind === "ace.omakase" ? "おまかせ" : "曲のプラン";
+    mu("plan-head").textContent = job.kind === "ace.omakase" ? t("おまかせ") : t("曲のプラン");
     mu("plan-theme").textContent = plan.theme;
     mu("plan-cap").textContent = plan.caption;
     const lines = (plan.lyrics || "").split("\n").filter((l) => l.trim());
-    mu("plan-lyrics").textContent = !lines.length || plan.lyrics === "[Instrumental]" ? (lines.length ? "(インスト)" : "")
+    mu("plan-lyrics").textContent = !lines.length || plan.lyrics === "[Instrumental]" ? (lines.length ? t("(インスト)") : "")
       : lines.slice(0, PLAN_LINES).join("\n") + (lines.length > PLAN_LINES ? "\n…" : "");
     if (fillPlan && job.kind === "ace.simple") {     // 作ったものを欄に残す(次は、それを使う / 歌詞だけ新しくする、が選べる)
       fillPlan = false;
@@ -465,7 +465,7 @@
     if (g === null) return;
     mu("plan").hidden = true;
     if (mode === "omakase") {
-      if (!val("query")) { showMsg("どんな曲か、一言入力してください"); mu("query").focus(); return; }
+      if (!val("query")) { showMsg(t("どんな曲か、一言入力してください")); mu("query").focus(); return; }
       tracker.submit("ace.omakase", { query: val("query"), language: mu("lang").value, instrumental: inst(), duration: +mu("dur").value, ...advanced() });
       return;
     }
@@ -513,8 +513,8 @@
     }
     if (v.mood === "" || MOODS.some(([k]) => k === v.mood)) { mood = v.mood; markMood(); }
     if (v.vocal === "" || VOCALS.some(([k]) => k === v.vocal)) { vocal = v.vocal; markVocal(); }
-    pick("language", "lang", "歌の言語");
-    pick("duration", "dur", "曲長");
+    pick("language", "lang", t("歌の言語"));
+    pick("duration", "dur", t("曲長"));
     if ("instrumental" in v) presetSet(mu("inst"), v.instrumental);
     text("query", "query");
     text("theme", "theme");
@@ -524,9 +524,9 @@
       captionEdited = !!v.caption.trim();      // 書いてあれば「自分で書いた」扱いで生成にも使う。空なら、生成のときに AI が作る
     }
     if ("caption_auto" in v) presetSet(mu("caption-auto"), v.caption_auto);
-    pick("model", "model", "モデル");
+    pick("model", "model", t("モデル"));
     pick("steps", "steps", "STEP");
-    pick("batch_size", "batch", "曲数");
+    pick("batch_size", "batch", t("曲数"));
     if ("thinking" in v) presetSet(mu("thinking"), v.thinking);
     if ("seed" in v) presetSetSeed(mu("seed"), mu("random"), v.seed);
     if (typeof v.negative_prompt === "string") presetSet(mu("neg"), v.negative_prompt);
@@ -544,7 +544,7 @@
   tracker.resume();
   render();
   // 前回のシード: 直近に完了した曲から拾う(ページを開き直しても「同じ骨格で作り直す」が使える)
-  fetch("/api/jobs?tab=music&limit=20").then((r) => r.json()).then((jobs) => {
+  fetch("/api/jobs?tab=music&limit=20", { headers: langHeaders() }).then((r) => r.json()).then((jobs) => {
     const done = jobs.find((j) => j.status === "completed" && j.result && j.result.seed != null);
     if (done) rememberSeed(done);
   }).catch(() => {});

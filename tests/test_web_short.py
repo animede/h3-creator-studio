@@ -18,7 +18,7 @@ class ShortPageTest(unittest.TestCase):
         cls.project = (WEB / "project.js").read_text(encoding="utf-8")
 
     def test_the_tab_and_its_panel_exist(self):
-        self.assertIn('<button class="tab" data-tab="short" role="tab" aria-selected="false" aria-controls="tab-short">ショート動画</button>', self.html)
+        self.assertIn('<button class="tab" data-tab="short" role="tab" aria-selected="false" aria-controls="tab-short" data-i18n>ショート動画</button>', self.html)
         self.assertIn('id="tab-short"', self.html)
         self.assertIn('<div class="mvproj" id="short-project"></div>', self.html)
 

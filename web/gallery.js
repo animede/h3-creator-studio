@@ -1,6 +1,6 @@
 // 生成物の共有部分: ギャラリー(全タブ共通)・履歴・生成物ビューア・タブ切り替え・ドラッグ元。
 const OUT_MIME = "application/x-studio-output";     // ドラッグするデータ: 生成物の ID
-const KIND_LABEL = { image: "画像", video: "動画", audio: "音楽" };
+const KIND_LABEL = { image: t("画像"), video: t("動画"), audio: t("音楽") };
 const TAB_KIND = { image: "image", video: "video", music: "audio" };
 
 const GALLERY_LIMIT = 500;   // 読む生成物の数(新しい順)。これより多ければ、古いものは studio.items に無い
@@ -20,12 +20,12 @@ const byId = (id) => studio.items.find((i) => i.id === id);
 // 一覧を読み直したとき、入力欄に入れた生成物が消えたとみなすか(一覧が全部で、そこに無い)。切れた一覧では、古くて載っていないだけかもしれないので外さない
 // (消したときは studio-deleted で外す)
 const goneFromGallery = (id) => studio.complete && !byId(id);
-const fmtSec = (s) => (s >= 60 ? `${Math.floor(s / 60)}分${Math.round(s % 60)}秒` : `${s.toFixed(1)}秒`);
+const fmtSec = (s) => (s >= 60 ? t("{m}分{s}秒", { m: Math.floor(s / 60), s: Math.round(s % 60) }) : t("{s}秒", { s: s.toFixed(1) }));
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
 async function loadGallery() {
   try {
-    const items = await fetch(`/api/gallery?limit=${GALLERY_LIMIT}`).then((r) => r.json());
+    const items = await fetch(`/api/gallery?limit=${GALLERY_LIMIT}`, { headers: langHeaders() }).then((r) => r.json());
     if (!Array.isArray(items)) return;
     studio.items = items;
     studio.complete = items.length < GALLERY_LIMIT;
@@ -51,33 +51,33 @@ function makeDraggable(node, id) {
 }
 
 function thumbNode(item, onClick, onDelete) {
-  const t = el("div", "thumb");
-  t.title = (item.kind === "audio" && item.params && item.params.theme) || `${item.filename || ""}${item.width ? `  ${item.width}×${item.height}` : ""}`;
+  const th = el("div", "thumb");
+  th.title = (item.kind === "audio" && item.params && item.params.theme) || `${item.filename || ""}${item.width ? `  ${item.width}×${item.height}` : ""}`;
   if (item.thumb_url) {
     const img = el("img");
     img.src = item.thumb_url;
     img.alt = item.filename || "";
     img.loading = "lazy";
     img.draggable = false;          // ドラッグ元は外側の div にそろえる
-    t.append(img);
+    th.append(img);
   } else {
-    t.append(el("div", "nothumb " + item.kind, item.kind === "audio" ? "🎵" : item.kind === "video" ? "▶" : KIND_LABEL[item.kind] || item.kind));
+    th.append(el("div", "nothumb " + item.kind, item.kind === "audio" ? "🎵" : item.kind === "video" ? "▶" : KIND_LABEL[item.kind] || item.kind));
   }
-  if (item.tab === "upload") t.append(el("span", "tbadge top", "取込"));
+  if (item.tab === "upload") th.append(el("span", "tbadge top", t("取込")));
   if (item.kind !== "image") {     // 動画は ▶ と長さ、音声は 🔊 と長さ
     const d = item.duration_s ? " " + fmtDur(item.duration_s) : "";
-    t.append(el("span", "tbadge", (item.kind === "video" ? "▶" : "🎵") + d));
+    th.append(el("span", "tbadge", (item.kind === "video" ? "▶" : "🎵") + d));
   }
-  if (studio.select.on) { pickable(t, item.id); return t; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
-  t.onclick = () => onClick(item);
+  if (studio.select.on) { pickable(th, item.id); return th; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
+  th.onclick = () => onClick(item);
   if (onDelete) {
     const x = el("button", "tdel", "×");
-    x.title = "削除";
+    x.title = t("削除");
     x.onclick = (e) => { e.stopPropagation(); onDelete(item); };
-    t.append(x);
+    th.append(x);
   }
-  makeDraggable(t, item.id);
-  return t;
+  makeDraggable(th, item.id);
+  return th;
 }
 
 // ---- 履歴(このタブの生成物) ----
@@ -91,7 +91,7 @@ function renderHistory() {
   const list = tabItems();
   const shown = currentItem();
   grid.replaceChildren();
-  if (!list.length) { grid.append(el("div", "placeholder", "このタブで作ったものがここに並びます")); return; }
+  if (!list.length) { grid.append(el("div", "placeholder", t("このタブで作ったものがここに並びます"))); return; }
   for (const it of list) {
     const t = thumbNode(it, (x) => { studio.viewing[studio.tab] = x.id; renderHistory(); renderViewer(); }, deleteItem);
     t.classList.toggle("sel", !studio.select.on && !!shown && shown.id === it.id);
@@ -115,7 +115,7 @@ function audioCard(item) {
   box.append(a);
   if (p.lyrics && p.lyrics !== "[Instrumental]") {
     const d = el("details", "alyrics");
-    d.append(el("summary", "", "歌詞"), el("pre", "", p.lyrics));
+    d.append(el("summary", "", t("歌詞")), el("pre", "", p.lyrics));
     box.append(d);
   }
   return box;
@@ -132,7 +132,7 @@ function renderViewer() {
   const v = $("viewer"), meta = $("vmeta");
   meta.hidden = !item;
   if (!item) {
-    if (v.dataset.id !== "none") { v.dataset.id = "none"; detachVisualizers(v); v.replaceChildren(el("div", "placeholder", "まだ生成物がありません")); }
+    if (v.dataset.id !== "none") { v.dataset.id = "none"; detachVisualizers(v); v.replaceChildren(el("div", "placeholder", t("まだ生成物がありません"))); }
     return;
   }
   if (v.dataset.id !== item.id) {       // 同じものを出し直さない(動画の再生が途切れないように)
@@ -157,7 +157,7 @@ function renderViewer() {
     if (p.key_scale) info.push(p.key_scale);
   }
   const sec = item.params && item.params.result && item.params.result.generation_seconds;
-  if (sec) info.push(`生成 ${fmtSec(sec)}`);
+  if (sec) info.push(t("生成 {time}", { time: fmtSec(sec) }));
   $("vinfo").textContent = info.join("  ");
   const save = $("vsave");
   save.href = item.url;
@@ -186,7 +186,7 @@ function renderGallery() {
   const grid = $("gal-grid");
   grid.replaceChildren();
   const list = galleryItems();
-  if (!list.length) { grid.append(el("div", "placeholder", "まだ何もありません")); return; }
+  if (!list.length) { grid.append(el("div", "placeholder", t("まだ何もありません"))); return; }
   for (const it of list) {
     grid.append(thumbNode(it, (x) => {      // クリック: その生成物を、いまのタブの生成物ビューアで開く(MV タブは、その MV を作った制作を開く)
       const own = studio.own[studio.tab];
@@ -205,22 +205,22 @@ function renderGallery() {
 async function removeOutputs(items) {
   let js;
   try {
-    const r = await fetch("/api/gallery/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: items.map((i) => i.id) }) });
+    const r = await fetch("/api/gallery/delete", { method: "POST", headers: langHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ ids: items.map((i) => i.id) }) });
     js = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "入力を確認してください");
-  } catch (e) { alert(`削除できませんでした: ${e.message || e}`); return; }
+    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : t("入力を確認してください"));
+  } catch (e) { alert(t("削除できませんでした: {error}", { error: e.message || e })); return; }
   await forget([...js.deleted, ...js.missing]);
   if (js.refused.length) alert(refusedText(js.refused));
 }
 
 // 断られた生成物を、理由ごとにまとめた文(1 回の alert で足りるように)
-function refusedText(refused, head = `${refused.length} 件は削除できませんでした。`) {
+function refusedText(refused, head = t("{n} 件は削除できませんでした。", { n: refused.length })) {
   const by = new Map();
   for (const f of refused) {
     const it = byId(f.id);
     by.set(f.reason, [...(by.get(f.reason) || []), (it && (it.filename || it.id)) || f.id]);
   }
-  return `${head}\n` + [...by].map(([reason, names]) => `・${reason}\n  ${names.slice(0, 5).join("、")}${names.length > 5 ? ` ほか ${names.length - 5} 件` : ""}`).join("\n");
+  return `${head}\n` + [...by].map(([reason, names]) => t("・{reason}\n  {names}", { reason, names: names.slice(0, 5).join(t("、")) + (names.length > 5 ? t(" ほか {n} 件", { n: names.length - 5 }) : "") })).join("\n");
 }
 
 // 消えた生成物の後始末: ビューアで見ていたものは外し(そのタブの、次に新しいものか、無ければ空の表示になる)、各タブの入力欄の参照も外させて、一覧を読み直す
@@ -231,13 +231,13 @@ async function forget(ids) {
 }
 
 async function deleteItem(item) {
-  if (!confirm(`「${item.filename || item.id}」を削除しますか?\nファイルも消え、元に戻せません。`)) return;
+  if (!confirm(t("「{name}」を削除しますか?\nファイルも消え、元に戻せません。", { name: item.filename || item.id }))) return;
   await removeOutputs([item]);
 }
 
 // 選んだものをまとめて消す(確認は 1 回)。消したら true、やめたら false
 async function deleteItems(items) {
-  if (!confirm(`${items.length} 件を削除しますか?\nファイルも消え、元に戻せません。`)) return false;
+  if (!confirm(t("{n} 件を削除しますか?\nファイルも消え、元に戻せません。", { n: items.length }))) return false;
   await removeOutputs(items);
   return true;
 }
@@ -274,7 +274,7 @@ function renderSelectBar() {
   document.querySelectorAll(".seltoggle").forEach((b) => { b.hidden = on; });
   document.querySelectorAll(".selbar").forEach((bar) => {
     bar.hidden = !on;
-    bar.querySelector(".selcount").textContent = `${n} 件を選択`;
+    bar.querySelector(".selcount").textContent = t("{n} 件を選択", { n });
     bar.querySelector(".seldel").disabled = !n;
   });
 }

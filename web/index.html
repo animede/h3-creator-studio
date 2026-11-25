@@ -12,17 +12,18 @@
   <div class="topright">
     <div class="gauges">
       <div class="gauge" id="g-vram"><span class="g-label">VRAM</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
-      <div class="gauge" id="g-shared" hidden><span class="g-label">共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
-      <div class="gauge" id="g-ram"><span class="g-label">CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
-      <button id="help-btn" class="mini help-btn" type="button" aria-expanded="false" aria-controls="help-win" title="使い方の説明を、動かせる窓で開きます(Esc で閉じる)">使い方</button>
+      <div class="gauge" id="g-shared" hidden><span class="g-label" data-i18n>共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+      <div class="gauge" id="g-ram"><span class="g-label" data-i18n>CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+      <button id="help-btn" class="mini help-btn" type="button" aria-expanded="false" aria-controls="help-win" title="使い方の説明を、動かせる窓で開きます(Esc で閉じる)" data-i18n-title data-i18n>使い方</button>
+      <select id="lang-select" class="mini lang-select" aria-label="Language / 言語"><option value="ja">日本語</option><option value="en">English</option></select>
     </div>
-    <div class="lanes" id="lanes" aria-label="ジョブの状況と GPU に載っているエンジン"></div>
+    <div class="lanes" id="lanes" aria-label="ジョブの状況と GPU に載っているエンジン" data-i18n-aria></div>
   </div>
 </header>
 <div id="warning" class="warning" hidden></div>
 
 <section class="panel" id="parts">
-  <h2 id="parts-head" role="button" tabindex="0" aria-expanded="true"><span class="caret">▾</span> エンジン <span id="parts-summary" class="summary"></span></h2>
+  <h2 id="parts-head" role="button" tabindex="0" aria-expanded="true"><span class="caret">▾</span> <span data-i18n>エンジン</span> <span id="parts-summary" class="summary"></span></h2>
   <div id="parts-body">
     <div id="rows"></div>
     <div id="opline" class="opline"></div>
@@ -30,214 +31,214 @@
 </section>
 
 <nav class="tabs" role="tablist">
-  <button class="tab active" data-tab="image" role="tab" aria-selected="true" aria-controls="tab-image">画像</button>
-  <button class="tab" data-tab="video" role="tab" aria-selected="false" aria-controls="tab-video">動画</button>
-  <button class="tab" data-tab="music" role="tab" aria-selected="false" aria-controls="tab-music">音楽</button>
-  <button class="tab" data-tab="mv" role="tab" aria-selected="false" aria-controls="tab-mv">MV(ミュージックビデオ)</button>
-  <button class="tab" data-tab="short" role="tab" aria-selected="false" aria-controls="tab-short">ショート動画</button>
-  <button class="tab" data-tab="edit" role="tab" aria-selected="false" aria-controls="tab-edit">編集</button>
+  <button class="tab active" data-tab="image" role="tab" aria-selected="true" aria-controls="tab-image" data-i18n>画像</button>
+  <button class="tab" data-tab="video" role="tab" aria-selected="false" aria-controls="tab-video" data-i18n>動画</button>
+  <button class="tab" data-tab="music" role="tab" aria-selected="false" aria-controls="tab-music" data-i18n>音楽</button>
+  <button class="tab" data-tab="mv" role="tab" aria-selected="false" aria-controls="tab-mv" data-i18n>MV(ミュージックビデオ)</button>
+  <button class="tab" data-tab="short" role="tab" aria-selected="false" aria-controls="tab-short" data-i18n>ショート動画</button>
+  <button class="tab" data-tab="edit" role="tab" aria-selected="false" aria-controls="tab-edit" data-i18n>編集</button>
 </nav>
 
 <main class="workspace" id="workspace" data-tab="image">
-  <section class="panel ops" id="ops" aria-label="操作">
-    <h2>操作</h2>
+  <section class="panel ops" id="ops" aria-label="操作" data-i18n-aria>
+    <h2 data-i18n>操作</h2>
     <div class="tabpanel" id="tab-image" role="tabpanel">
       <div class="presetbar" id="im-presets"><div class="samplebox" id="im-samples" hidden></div></div>
-      <div class="seg" id="im-modes" role="group" aria-label="作り方">
-        <button data-mode="t2i" class="active"><b>T2I</b><small>テキストから</small></button><button data-mode="edit"><b>edit</b><small>参照画像で編集</small></button>
+      <div class="seg" id="im-modes" role="group" aria-label="作り方" data-i18n-aria>
+        <button data-mode="t2i" class="active"><b>T2I</b><small data-i18n>テキストから</small></button><button data-mode="edit"><b>edit</b><small data-i18n>参照画像で編集</small></button>
       </div>
-      <label class="fld"><span class="fl">プロンプト</span>
-        <textarea id="im-prompt" rows="5" maxlength="8000" placeholder="作りたい画像を日本語や英語で書きます"></textarea></label>
-      <div class="enh"><button id="im-enh" type="button" title="H3-Image の公式ルールで、短い指示を詳しいプロンプトに書き直します(管理役の LLM を使います)">プロンプト強化</button>
-        <a href="#" id="im-enh-undo" hidden>元に戻す</a><span class="note" id="im-enh-note"></span></div>
-      <div class="fld"><span class="fl">サイズ</span>
+      <label class="fld"><span class="fl" data-i18n>プロンプト</span>
+        <textarea id="im-prompt" rows="5" maxlength="8000" placeholder="作りたい画像を日本語や英語で書きます" data-i18n-placeholder></textarea></label>
+      <div class="enh"><button id="im-enh" type="button" title="H3-Image の公式ルールで、短い指示を詳しいプロンプトに書き直します(管理役の LLM を使います)" data-i18n-title data-i18n>プロンプト強化</button>
+        <a href="#" id="im-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="im-enh-note"></span></div>
+      <div class="fld"><span class="fl" data-i18n>サイズ</span>
         <div class="inline">
           <select id="im-size">
             <option value="1024x1024">1024×1024</option><option value="1344x768">1344×768</option>
             <option value="768x1344">768×1344</option><option value="1536x1536">1536×1536</option>
-            <option value="2048x2048">2048×2048</option><option value="custom">自由入力</option>
+            <option value="2048x2048">2048×2048</option><option value="custom" data-i18n>自由入力</option>
           </select>
-          <input id="im-w" type="number" min="256" max="4096" step="32" value="1024" aria-label="幅">
+          <input id="im-w" type="number" min="256" max="4096" step="32" value="1024" aria-label="幅" data-i18n-aria>
           <span>×</span>
-          <input id="im-h" type="number" min="256" max="4096" step="32" value="1024" aria-label="高さ">
+          <input id="im-h" type="number" min="256" max="4096" step="32" value="1024" aria-label="高さ" data-i18n-aria>
         </div>
-        <span class="note">32 の倍数に丸めます(256〜4096)。VRAM が少ないときは小さめに</span></div>
+        <span class="note" data-i18n>32 の倍数に丸めます(256〜4096)。VRAM が少ないときは小さめに</span></div>
       <div class="fld two">
-        <label><span class="fl">ステップ数</span>
-          <select id="im-steps"><option value="">サーバ既定</option><option value="2">2</option><option value="3">3</option><option value="6">6</option></select></label>
-        <div><span class="fl">シード</span>
-          <div class="inline"><input id="im-seed" type="number" min="0" placeholder="例: 12345" disabled>
-            <label class="chk"><input id="im-random" type="checkbox" checked>ランダム</label></div></div>
+        <label><span class="fl" data-i18n>ステップ数</span>
+          <select id="im-steps"><option value="" data-i18n>サーバ既定</option><option value="2">2</option><option value="3">3</option><option value="6">6</option></select></label>
+        <div><span class="fl" data-i18n>シード</span>
+          <div class="inline"><input id="im-seed" type="number" min="0" placeholder="例: 12345" data-i18n-placeholder disabled>
+            <label class="chk"><input id="im-random" type="checkbox" checked><span data-i18n>ランダム</span></label></div></div>
       </div>
-      <div class="fld" id="im-refs-fld"><span class="fl">参照画像 <span id="im-mode" class="modetag"></span></span>
-        <div class="refs" id="im-refs" aria-label="参照画像のドロップ欄">
+      <div class="fld" id="im-refs-fld"><span class="fl"><span data-i18n>参照画像</span> <span id="im-mode" class="modetag"></span></span>
+        <div class="refs" id="im-refs" aria-label="参照画像のドロップ欄" data-i18n-aria>
           <div class="refs-list" id="im-refs-list"></div>
-          <div class="refs-empty" id="im-refs-empty">ここに画像をドロップ<br><small>PC のファイル、または右のギャラリー・履歴から</small></div>
-          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+          <div class="refs-empty" id="im-refs-empty"><span data-i18n>ここに画像をドロップ</span><br><small data-i18n>PC のファイル、または右のギャラリー・履歴から</small></div>
+          <div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div>
         </div>
-        <span class="note" id="im-refs-note">最大 16 枚。プロンプトでは &lt;Picture 1&gt; のように番号で指せます</span></div>
+        <span class="note" id="im-refs-note" data-i18n>最大 16 枚。プロンプトでは &lt;Picture 1&gt; のように番号で指せます</span></div>
       <div class="msg" id="im-msg" hidden></div>
-      <div class="actions"><button id="im-go" class="primary">生成</button><button id="im-stop" disabled>中止</button></div>
+      <div class="actions"><button id="im-go" class="primary" data-i18n>生成</button><button id="im-stop" disabled data-i18n>中止</button></div>
     </div>
     <div class="tabpanel" id="tab-video" role="tabpanel" hidden>
       <div class="presetbar" id="vd-presets"><div class="samplebox" id="vd-samples" hidden></div></div>
-      <div class="seg" id="vd-modes" role="group" aria-label="作り方">
-        <button data-mode="t2va" class="active"><b>T2VA</b><small>テキストから</small></button><button data-mode="fl2va"><b>FL2VA</b><small>最初・最後のフレームから</small></button>
-        <button data-mode="ref2va"><b>Ref2VA</b><small>参照から</small></button><button data-mode="still"><b>T2I / Ref2I</b><small>静止画</small></button>
+      <div class="seg" id="vd-modes" role="group" aria-label="作り方" data-i18n-aria>
+        <button data-mode="t2va" class="active"><b>T2VA</b><small data-i18n>テキストから</small></button><button data-mode="fl2va"><b>FL2VA</b><small data-i18n>最初・最後のフレームから</small></button>
+        <button data-mode="ref2va"><b>Ref2VA</b><small data-i18n>参照から</small></button><button data-mode="still"><b>T2I / Ref2I</b><small data-i18n>静止画</small></button>
       </div>
-      <label class="fld"><span class="fl">プロンプト <span id="vd-mode-tag" class="modetag"></span></span>
-        <textarea id="vd-prompt" rows="5" maxlength="8000" placeholder="作りたい動画の場面・動き・セリフ・音を、日本語や英語で書きます"></textarea></label>
-      <div class="enh"><button id="vd-enh" type="button" title="MiniMax 公式のプロンプトの書き方に沿って書き直します(管理役の LLM を使います)">プロンプト強化</button>
-        <a href="#" id="vd-enh-undo" hidden>元に戻す</a><span class="note" id="vd-enh-note"></span></div>
-      <div class="fld"><span class="fl">解像度</span>
+      <label class="fld"><span class="fl"><span data-i18n>プロンプト</span> <span id="vd-mode-tag" class="modetag"></span></span>
+        <textarea id="vd-prompt" rows="5" maxlength="8000" placeholder="作りたい動画の場面・動き・セリフ・音を、日本語や英語で書きます" data-i18n-placeholder></textarea></label>
+      <div class="enh"><button id="vd-enh" type="button" title="MiniMax 公式のプロンプトの書き方に沿って書き直します(管理役の LLM を使います)" data-i18n-title data-i18n>プロンプト強化</button>
+        <a href="#" id="vd-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="vd-enh-note"></span></div>
+      <div class="fld"><span class="fl" data-i18n>解像度</span>
         <select id="vd-res">
           <option value="768x768">768×768</option><option value="1344x768">1344×768</option><option value="768x1344">768×1344</option>
           <option value="512x512">512×512</option><option value="768x512">768×512</option><option value="512x768">512×768</option>
         </select>
-        <span class="note">ネイティブは短辺 768。6GB のカードは 512²〜768×512 が現実的</span></div>
-      <div class="fld" id="vd-secs-fld"><span class="fl">長さ <b id="vd-secs-val">5 秒</b></span>
+        <span class="note" data-i18n>ネイティブは短辺 768。6GB のカードは 512²〜768×512 が現実的</span></div>
+      <div class="fld" id="vd-secs-fld"><span class="fl"><span data-i18n>長さ</span> <b id="vd-secs-val" data-i18n>5 秒</b></span>
         <input id="vd-secs" type="range" min="5" max="15" step="1" value="5">
-        <label class="chk" id="vd-match-fld" hidden><input id="vd-match" type="checkbox">音声の長さに合わせる</label></div>
-      <div class="fld"><span class="fl">シード</span>
-        <div class="inline"><input id="vd-seed" type="number" min="0" placeholder="例: 12345" disabled>
-          <label class="chk"><input id="vd-random" type="checkbox" checked>ランダム</label></div></div>
+        <label class="chk" id="vd-match-fld" hidden><input id="vd-match" type="checkbox"><span data-i18n>音声の長さに合わせる</span></label></div>
+      <div class="fld"><span class="fl" data-i18n>シード</span>
+        <div class="inline"><input id="vd-seed" type="number" min="0" placeholder="例: 12345" data-i18n-placeholder disabled>
+          <label class="chk"><input id="vd-random" type="checkbox" checked><span data-i18n>ランダム</span></label></div></div>
       <div class="fld two" id="vd-frames" hidden>
-        <div><span class="fl">最初のフレーム(どちらか一方だけでも可)</span>
-          <div class="refs frame" id="vd-first"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
-        <div><span class="fl">最後のフレーム</span>
-          <div class="refs frame" id="vd-last"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
+        <div><span class="fl" data-i18n>最初のフレーム(どちらか一方だけでも可)</span>
+          <div class="refs frame" id="vd-first"><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div></div>
+        <div><span class="fl" data-i18n>最後のフレーム</span>
+          <div class="refs frame" id="vd-last"><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div></div>
       </div>
-      <div class="fld" id="vd-refs-fld" hidden><span class="fl" id="vd-refs-label">参照(画像・動画・音声、順番に意味があります)</span>
-        <div class="refs" id="vd-refs" aria-label="参照のドロップ欄">
+      <div class="fld" id="vd-refs-fld" hidden><span class="fl" id="vd-refs-label" data-i18n>参照(画像・動画・音声、順番に意味があります)</span>
+        <div class="refs" id="vd-refs" aria-label="参照のドロップ欄" data-i18n-aria>
           <div class="refs-list" id="vd-refs-list"></div>
-          <div class="refs-empty" id="vd-refs-empty">ここに画像・動画・音声をドロップ<br><small>PC のファイル、または右のギャラリー・履歴から</small></div>
-          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+          <div class="refs-empty" id="vd-refs-empty"><span data-i18n>ここに画像・動画・音声をドロップ</span><br><small data-i18n>PC のファイル、または右のギャラリー・履歴から</small></div>
+          <div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div>
         </div>
         <span class="note" id="vd-refs-count"></span>
-        <label class="chk" id="vd-vocal-fld" hidden><input id="vd-vocal" type="checkbox">Vocal Lock(参照の音声に口を合わせる)</label></div>
+        <label class="chk" id="vd-vocal-fld" hidden><input id="vd-vocal" type="checkbox"><span data-i18n>Vocal Lock(参照の音声に口を合わせる)</span></label></div>
       <details class="tts" id="vd-tts">
-        <summary>音声を作る(読み上げ)</summary>
+        <summary data-i18n>音声を作る(読み上げ)</summary>
         <div class="tts-body">
-          <textarea id="vd-tts-text" rows="3" maxlength="2000" placeholder="読み上げる文"></textarea>
-          <div class="inline"><select id="vd-tts-speaker" aria-label="話者"><option value="">話者を読み込み中…</option></select>
-            <label class="chk">話速 <input id="vd-tts-speed" type="range" min="0.5" max="2" step="0.1" value="1"><span id="vd-tts-speed-val">1.0</span></label></div>
-          <div class="inline"><button id="vd-tts-go">音声を作る</button><span class="note" id="vd-tts-note"></span></div>
+          <textarea id="vd-tts-text" rows="3" maxlength="2000" placeholder="読み上げる文" data-i18n-placeholder></textarea>
+          <div class="inline"><select id="vd-tts-speaker" aria-label="話者" data-i18n-aria><option value="" data-i18n>話者を読み込み中…</option></select>
+            <label class="chk"><span data-i18n>話速</span> <input id="vd-tts-speed" type="range" min="0.5" max="2" step="0.1" value="1"><span id="vd-tts-speed-val">1.0</span></label></div>
+          <div class="inline"><button id="vd-tts-go" data-i18n>音声を作る</button><span class="note" id="vd-tts-note"></span></div>
           <audio id="vd-tts-audio" controls hidden></audio>
         </div>
       </details>
       <div class="msg" id="vd-msg" hidden></div>
-      <div class="actions"><button id="vd-go" class="primary">生成</button><button id="vd-stop" disabled>中止</button></div>
+      <div class="actions"><button id="vd-go" class="primary" data-i18n>生成</button><button id="vd-stop" disabled data-i18n>中止</button></div>
     </div>
     <div class="tabpanel" id="tab-music" role="tabpanel" hidden>
       <div class="presetbar" id="mu-presets"><div class="samplebox" id="mu-samples" hidden></div></div>
-      <div class="seg" id="mu-modes" role="group" aria-label="作り方">
-        <button data-mode="simple" class="active">簡単(ジャンルから)</button><button data-mode="omakase">✨ おまかせ(一言から)</button>
+      <div class="seg" id="mu-modes" role="group" aria-label="作り方" data-i18n-aria>
+        <button data-mode="simple" class="active" data-i18n>簡単(ジャンルから)</button><button data-mode="omakase" data-i18n>✨ おまかせ(一言から)</button>
       </div>
       <div id="mu-omakase-box" hidden>
-        <label class="fld"><span class="fl">どんな曲?</span>
-          <input id="mu-query" type="text" maxlength="300" placeholder="例: 雨の夜に聴く切ないバラード"></label>
-        <span class="note omk-note">ACE-Step の LM が、キャプション・歌詞・BPM・調まで決めます(管理役の LLM は使いません)</span>
+        <label class="fld"><span class="fl" data-i18n>どんな曲?</span>
+          <input id="mu-query" type="text" maxlength="300" placeholder="例: 雨の夜に聴く切ないバラード" data-i18n-placeholder></label>
+        <span class="note omk-note" data-i18n>ACE-Step の LM が、キャプション・歌詞・BPM・調まで決めます(管理役の LLM は使いません)</span>
       </div>
       <div id="mu-simple-box">
-        <div class="fld"><span class="fl">ジャンル <small>(✦ は自分で作ったジャンル)</small></span>
-          <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル"></div>
+        <div class="fld"><span class="fl"><span data-i18n>ジャンル</span> <small data-i18n>(✦ は自分で作ったジャンル)</small></span>
+          <div class="chips genres" id="mu-genres" role="group" aria-label="ジャンル" data-i18n-aria></div>
           <div class="gform" id="mu-genre-add" hidden>
-            <div class="inline"><input id="mu-genre-name" type="text" maxlength="40" placeholder="ジャンルの名前(例: 和風エレクトロ)" aria-label="ジャンルの名前">
-              <button id="mu-genre-add-go" type="button" class="mini" title="AI がジャンルの世界観・場面・感情を作って、チップに加えます">追加</button>
-              <button id="mu-genre-add-cancel" type="button" class="mini x" title="やめる">✕</button></div>
-            <input id="mu-genre-desc" type="text" maxlength="200" placeholder="一言の説明(任意。例: 和楽器とシンセを混ぜた、夜の電子音楽)" aria-label="ジャンルの説明">
+            <div class="inline"><input id="mu-genre-name" type="text" maxlength="40" placeholder="ジャンルの名前(例: 和風エレクトロ)" data-i18n-placeholder aria-label="ジャンルの名前" data-i18n-aria>
+              <button id="mu-genre-add-go" type="button" class="mini" title="AI がジャンルの世界観・場面・感情を作って、チップに加えます" data-i18n-title data-i18n>追加</button>
+              <button id="mu-genre-add-cancel" type="button" class="mini x" title="やめる" data-i18n-title>✕</button></div>
+            <input id="mu-genre-desc" type="text" maxlength="200" placeholder="一言の説明(任意。例: 和楽器とシンセを混ぜた、夜の電子音楽)" data-i18n-placeholder aria-label="ジャンルの説明" data-i18n-aria>
           </div>
           <div class="gform" id="mu-genre-free" hidden>
-            <textarea id="mu-free" class="sm" rows="2" maxlength="200" placeholder="例: 90 年代のシティポップに三味線を混ぜた、夏の終わりの切ない曲" aria-label="ジャンルを自由に書く"></textarea>
-            <div class="gbtns"><button id="mu-free-save" type="button" class="mini" title="この文に名前を付けて、自分のジャンルのチップとして保存します(AI が定義を作ります)">ジャンルとして保存</button>
-              <span class="note">ジャンルの代わりに、この文を使います(テーマ・歌詞・キャプションを作るときも)</span></div>
+            <textarea id="mu-free" class="sm" rows="2" maxlength="200" placeholder="例: 90 年代のシティポップに三味線を混ぜた、夏の終わりの切ない曲" data-i18n-placeholder aria-label="ジャンルを自由に書く" data-i18n-aria></textarea>
+            <div class="gbtns"><button id="mu-free-save" type="button" class="mini" title="この文に名前を付けて、自分のジャンルのチップとして保存します(AI が定義を作ります)" data-i18n-title data-i18n>ジャンルとして保存</button>
+              <span class="note" data-i18n>ジャンルの代わりに、この文を使います(テーマ・歌詞・キャプションを作るときも)</span></div>
             <div class="inline" id="mu-free-name-row" hidden>
-              <input id="mu-free-name" type="text" maxlength="40" placeholder="短い名前(例: 夏の終わりシティポップ)" aria-label="ジャンルの名前">
-              <button id="mu-free-name-go" type="button" class="mini">保存</button>
-              <button id="mu-free-name-cancel" type="button" class="mini x" title="やめる">✕</button></div>
+              <input id="mu-free-name" type="text" maxlength="40" placeholder="短い名前(例: 夏の終わりシティポップ)" data-i18n-placeholder aria-label="ジャンルの名前" data-i18n-aria>
+              <button id="mu-free-name-go" type="button" class="mini" data-i18n>保存</button>
+              <button id="mu-free-name-cancel" type="button" class="mini x" title="やめる" data-i18n-title>✕</button></div>
           </div>
           <details class="adv" id="mu-genre-edit" hidden>
-            <summary>ジャンルの中身 <small id="mu-gedit-title"></small></summary>
+            <summary><span data-i18n>ジャンルの中身</span> <small id="mu-gedit-title"></small></summary>
             <div class="adv-body">
-              <label class="fld"><span class="fl">名前</span><input id="mu-gedit-name" type="text" maxlength="40"></label>
-              <label class="fld"><span class="fl">世界観 <small>(英語の一行。テーマの種になります)</small></span><input id="mu-gedit-vibe" type="text" maxlength="200"></label>
-              <label class="fld"><span class="fl">場面 <small>(1 行に 1 つ。英語)</small></span><textarea id="mu-gedit-settings" class="sm" rows="6"></textarea></label>
-              <label class="fld"><span class="fl">感情 <small>(1 行に 1 つ。英語)</small></span><textarea id="mu-gedit-emotions" class="sm" rows="5"></textarea></label>
-              <label class="fld"><span class="fl">スペクトラムの雰囲気 <small>(曲のカードの色)</small></span><select id="mu-gedit-viz"></select></label>
-              <div class="gbtns"><button id="mu-gedit-save" type="button" class="mini">保存</button><button id="mu-gedit-del" type="button" class="mini">削除</button>
-                <span class="note">保存すると、次の曲から使われます</span></div>
+              <label class="fld"><span class="fl" data-i18n>名前</span><input id="mu-gedit-name" type="text" maxlength="40"></label>
+              <label class="fld"><span class="fl"><span data-i18n>世界観</span> <small data-i18n>(英語の一行。テーマの種になります)</small></span><input id="mu-gedit-vibe" type="text" maxlength="200"></label>
+              <label class="fld"><span class="fl"><span data-i18n>場面</span> <small data-i18n>(1 行に 1 つ。英語)</small></span><textarea id="mu-gedit-settings" class="sm" rows="6"></textarea></label>
+              <label class="fld"><span class="fl"><span data-i18n>感情</span> <small data-i18n>(1 行に 1 つ。英語)</small></span><textarea id="mu-gedit-emotions" class="sm" rows="5"></textarea></label>
+              <label class="fld"><span class="fl"><span data-i18n>スペクトラムの雰囲気</span> <small data-i18n>(曲のカードの色)</small></span><select id="mu-gedit-viz"></select></label>
+              <div class="gbtns"><button id="mu-gedit-save" type="button" class="mini" data-i18n>保存</button><button id="mu-gedit-del" type="button" class="mini" data-i18n>削除</button>
+                <span class="note" data-i18n>保存すると、次の曲から使われます</span></div>
             </div>
           </details>
-          <div class="uploading" id="mu-genre-busy" hidden><span class="spin"></span>ジャンルを作っています…(CPU では 10〜60 秒かかります)</div>
+          <div class="uploading" id="mu-genre-busy" hidden><span class="spin"></span><span data-i18n>ジャンルを作っています…(CPU では 10〜60 秒かかります)</span></div>
           <div class="gnote" id="mu-genre-note" hidden></div></div>
       </div>
       <div class="fld two">
-        <label><span class="fl">歌の言語</span>
+        <label><span class="fl" data-i18n>歌の言語</span>
           <select id="mu-lang"><option value="Japanese">日本語</option><option value="English">English</option>
-            <option value="Chinese">中文</option><option value="Korean">한국어</option><option value="Spanish">Español</option>
+            <option value="Chinese" data-i18n>中文</option><option value="Korean">한국어</option><option value="Spanish">Español</option>
             <option value="French">Français</option><option value="German">Deutsch</option><option value="Italian">Italiano</option>
             <option value="Portuguese">Português</option><option value="Russian">Русский</option></select></label>
-        <label><span class="fl">曲長</span>
-          <select id="mu-dur"><option value="-1">自動</option><option value="30">30 秒</option><option value="60">60 秒</option>
-            <option value="90">90 秒</option><option value="120">120 秒</option><option value="180">180 秒</option><option value="240">240 秒</option></select></label>
+        <label><span class="fl" data-i18n>曲長</span>
+          <select id="mu-dur"><option value="-1" data-i18n>自動</option><option value="30" data-i18n>30 秒</option><option value="60" data-i18n>60 秒</option>
+            <option value="90" data-i18n>90 秒</option><option value="120" data-i18n>120 秒</option><option value="180" data-i18n>180 秒</option><option value="240" data-i18n>240 秒</option></select></label>
       </div>
-      <label class="chk fld"><input id="mu-inst" type="checkbox">楽器のみ(歌なし)</label>
+      <label class="chk fld"><input id="mu-inst" type="checkbox"><span data-i18n>楽器のみ(歌なし)</span></label>
       <div id="mu-simple-box2">
-        <div class="fld"><div class="lhead"><span class="fl">テーマ / シナリオ <small>(空ならおまかせ)</small></span>
-          <span class="mk"><button id="mu-theme-go" type="button" class="mini" title="ジャンル(と、自分で書いたキャプションの雰囲気)から、曲のテーマを AI が考えます">✨ テーマを作る</button>
-            <button id="mu-theme-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
-          <textarea id="mu-theme" class="sm" rows="2" maxlength="200" placeholder="例: 夜行バスの窓から見える朝焼け"></textarea></div>
-        <div class="fld"><div class="lhead"><span class="fl">歌詞 <small>(空なら AI 作詞。[Verse] [Chorus] などのタグが使えます)</small></span>
-          <span class="mk"><button id="mu-lyrics-go" type="button" class="mini" title="テーマとジャンル(と、自分で書いたキャプションの雰囲気)から AI が作詞します(テーマが空ならテーマも作ります)">✍️ 作詞する</button>
-            <button id="mu-lyrics-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
-          <textarea id="mu-lyrics" rows="6" maxlength="6000" placeholder="自分の歌詞を使うときだけ書きます"></textarea>
+        <div class="fld"><div class="lhead"><span class="fl"><span data-i18n>テーマ / シナリオ</span> <small data-i18n>(空ならおまかせ)</small></span>
+          <span class="mk"><button id="mu-theme-go" type="button" class="mini" title="ジャンル(と、自分で書いたキャプションの雰囲気)から、曲のテーマを AI が考えます" data-i18n-title data-i18n>✨ テーマを作る</button>
+            <button id="mu-theme-clear" type="button" class="mini x" title="クリア" data-i18n-title>✕</button></span></div>
+          <textarea id="mu-theme" class="sm" rows="2" maxlength="200" placeholder="例: 夜行バスの窓から見える朝焼け" data-i18n-placeholder></textarea></div>
+        <div class="fld"><div class="lhead"><span class="fl"><span data-i18n>歌詞</span> <small data-i18n>(空なら AI 作詞。[Verse] [Chorus] などのタグが使えます)</small></span>
+          <span class="mk"><button id="mu-lyrics-go" type="button" class="mini" title="テーマとジャンル(と、自分で書いたキャプションの雰囲気)から AI が作詞します(テーマが空ならテーマも作ります)" data-i18n-title data-i18n>✍️ 作詞する</button>
+            <button id="mu-lyrics-clear" type="button" class="mini x" title="クリア" data-i18n-title>✕</button></span></div>
+          <textarea id="mu-lyrics" rows="6" maxlength="6000" placeholder="自分の歌詞を使うときだけ書きます" data-i18n-placeholder></textarea>
           <span class="note" id="mu-lyrics-note"></span></div>
-        <div class="fld"><div class="lhead"><span class="fl">キャプション <small>(音の説明。英語)</small></span>
-          <span class="mk"><button id="mu-caption-go" type="button" class="mini" title="テーマ・歌詞・ムード・ボーカルから、AI がキャプションを書きます">🎵 キャプションを作る</button>
-            <button id="mu-caption-clear" type="button" class="mini x" title="クリア">✕</button></span></div>
-          <textarea id="mu-caption" class="sm" rows="3" maxlength="1000" placeholder="空なら、生成のときに AI が作ります" title="自分で書くと、AI が作るテーマ・歌詞もこの雰囲気に沿います"></textarea>
-          <label class="chk"><input id="mu-caption-auto" type="checkbox" checked>キャプション自動(空なら生成時に AI が作る)</label></div>
-        <div class="fld"><span class="fl">ムード <small>(任意。もう一度押すと外れます)</small></span>
-          <div class="chips wrap" id="mu-moods" role="group" aria-label="ムード"></div></div>
-        <div class="fld"><span class="fl">ボーカル <small>(任意)</small></span>
-          <div class="chips wrap" id="mu-vocals" role="group" aria-label="ボーカル"></div></div>
+        <div class="fld"><div class="lhead"><span class="fl"><span data-i18n>キャプション</span> <small data-i18n>(音の説明。英語)</small></span>
+          <span class="mk"><button id="mu-caption-go" type="button" class="mini" title="テーマ・歌詞・ムード・ボーカルから、AI がキャプションを書きます" data-i18n-title data-i18n>🎵 キャプションを作る</button>
+            <button id="mu-caption-clear" type="button" class="mini x" title="クリア" data-i18n-title>✕</button></span></div>
+          <textarea id="mu-caption" class="sm" rows="3" maxlength="1000" placeholder="空なら、生成のときに AI が作ります" data-i18n-placeholder title="自分で書くと、AI が作るテーマ・歌詞もこの雰囲気に沿います" data-i18n-title></textarea>
+          <label class="chk"><input id="mu-caption-auto" type="checkbox" checked><span data-i18n>キャプション自動(空なら生成時に AI が作る)</span></label></div>
+        <div class="fld"><span class="fl"><span data-i18n>ムード</span> <small data-i18n>(任意。もう一度押すと外れます)</small></span>
+          <div class="chips wrap" id="mu-moods" role="group" aria-label="ムード" data-i18n-aria></div></div>
+        <div class="fld"><span class="fl"><span data-i18n>ボーカル</span> <small data-i18n>(任意)</small></span>
+          <div class="chips wrap" id="mu-vocals" role="group" aria-label="ボーカル" data-i18n-aria></div></div>
       </div>
       <details class="adv" id="mu-adv">
-        <summary>詳細</summary>
+        <summary data-i18n>詳細</summary>
         <div class="adv-body">
-          <div class="fld"><span class="fl">モデル</span>
-            <select id="mu-model"><option value="">ACE の既定</option></select>
-            <span class="note" id="mu-model-note">選んだモデルが読み込まれていなければ、生成の前に自動で読み込みます(数十秒)</span></div>
+          <div class="fld"><span class="fl" data-i18n>モデル</span>
+            <select id="mu-model"><option value="" data-i18n>ACE の既定</option></select>
+            <span class="note" id="mu-model-note" data-i18n>選んだモデルが読み込まれていなければ、生成の前に自動で読み込みます(数十秒)</span></div>
           <div class="fld two">
             <label><span class="fl">STEP</span>
-              <select id="mu-steps"><option value="8" selected>8 (Turbo)</option><option value="20">20 (高速)</option><option value="50">50 (標準)</option>
-                <option value="80">80 (高品質)</option><option value="100">100 (最高品質)</option></select></label>
-            <label><span class="fl">曲数</span>
-              <select id="mu-batch"><option value="1">1 曲</option><option value="2">2 曲</option><option value="4">4 曲</option></select></label>
+              <select id="mu-steps"><option value="8" selected>8 (Turbo)</option><option value="20" data-i18n>20 (高速)</option><option value="50" data-i18n>50 (標準)</option>
+                <option value="80" data-i18n>80 (高品質)</option><option value="100" data-i18n>100 (最高品質)</option></select></label>
+            <label><span class="fl" data-i18n>曲数</span>
+              <select id="mu-batch"><option value="1" data-i18n>1 曲</option><option value="2" data-i18n>2 曲</option><option value="4" data-i18n>4 曲</option></select></label>
           </div>
-          <label class="chk fld"><input id="mu-thinking" type="checkbox" checked>Thinking(ACE-Step の LM で高品質に作る)</label>
-          <div class="fld"><span class="fl">シード</span>
-            <div class="inline"><input id="mu-seed" type="number" min="0" placeholder="例: 12345" disabled>
-              <label class="chk"><input id="mu-random" type="checkbox" checked>ランダム</label></div>
-            <button id="mu-lastseed" type="button" class="mini" disabled title="前回の曲と同じシードを使うので、歌詞やキャプションだけ変えても同じ骨格で作り直せます">同じ骨格で作り直す(前回のシードを使う)</button></div>
-          <label class="fld"><span class="fl">ネガティブプロンプト <small>(避けたい音。空なら下の既定)</small></span>
+          <label class="chk fld"><input id="mu-thinking" type="checkbox" checked><span data-i18n>Thinking(ACE-Step の LM で高品質に作る)</span></label>
+          <div class="fld"><span class="fl" data-i18n>シード</span>
+            <div class="inline"><input id="mu-seed" type="number" min="0" placeholder="例: 12345" data-i18n-placeholder disabled>
+              <label class="chk"><input id="mu-random" type="checkbox" checked><span data-i18n>ランダム</span></label></div>
+            <button id="mu-lastseed" type="button" class="mini" disabled title="前回の曲と同じシードを使うので、歌詞やキャプションだけ変えても同じ骨格で作り直せます" data-i18n-title data-i18n>同じ骨格で作り直す(前回のシードを使う)</button></div>
+          <label class="fld"><span class="fl"><span data-i18n>ネガティブプロンプト</span> <small data-i18n>(避けたい音。空なら下の既定)</small></span>
             <input id="mu-neg" type="text" maxlength="500"></label>
           <div class="fld two">
             <label><span class="fl">Shift</span>
-              <select id="mu-shift" title="低い値=音質・ディテール重視、高い値=構造・プロンプト忠実度重視"><option value="auto">自動</option>
-                <option value="1.0">1.0 (ディテール重視)</option><option value="2.0">2.0 (バランス)</option><option value="3.0">3.0 (Turbo 推奨)</option>
-                <option value="4.0">4.0 (構造重視)</option><option value="5.0">5.0 (最大)</option></select></label>
+              <select id="mu-shift" title="低い値=音質・ディテール重視、高い値=構造・プロンプト忠実度重視" data-i18n-title><option value="auto" data-i18n>自動</option>
+                <option value="1.0" data-i18n>1.0 (ディテール重視)</option><option value="2.0" data-i18n>2.0 (バランス)</option><option value="3.0" data-i18n>3.0 (Turbo 推奨)</option>
+                <option value="4.0" data-i18n>4.0 (構造重視)</option><option value="5.0" data-i18n>5.0 (最大)</option></select></label>
             <label><span class="fl">Sampler</span>
-              <select id="mu-infer" title="ODE=安定・再現性、SDE=多様・有機的な質感"><option value="auto">自動 (ODE)</option>
-                <option value="ODE">ODE (安定・クリーン)</option><option value="SDE">SDE (有機的・多様)</option></select></label>
+              <select id="mu-infer" title="ODE=安定・再現性、SDE=多様・有機的な質感" data-i18n-title><option value="auto" data-i18n>自動 (ODE)</option>
+                <option value="ODE" data-i18n>ODE (安定・クリーン)</option><option value="SDE" data-i18n>SDE (有機的・多様)</option></select></label>
           </div>
         </div>
       </details>
       <div class="msg" id="mu-msg" hidden></div>
-      <div class="actions"><button id="mu-go" class="primary">生成</button><button id="mu-stop" disabled>中止</button>
-        <button id="mu-regen" type="button" hidden title="歌詞を消して、テーマはそのままで歌詞とキャプションを作り直して生成します">✍️ 歌詞を新しくして生成</button></div>
+      <div class="actions"><button id="mu-go" class="primary" data-i18n>生成</button><button id="mu-stop" disabled data-i18n>中止</button>
+        <button id="mu-regen" type="button" hidden title="歌詞を消して、テーマはそのままで歌詞とキャプションを作り直して生成します" data-i18n-title data-i18n>✍️ 歌詞を新しくして生成</button></div>
       <div class="plan" id="mu-plan" hidden>
-        <div class="plan-head" id="mu-plan-head">曲のプラン</div>
+        <div class="plan-head" id="mu-plan-head" data-i18n>曲のプラン</div>
         <div class="plan-theme" id="mu-plan-theme"></div>
         <div class="plan-cap" id="mu-plan-cap"></div>
         <pre class="plan-lyrics" id="mu-plan-lyrics"></pre>
@@ -246,270 +247,270 @@
     <div class="tabpanel" id="tab-mv" role="tabpanel" hidden>
       <div class="presetbar" id="mv-presets"><div class="samplebox" id="mv-samples" hidden></div></div>
       <div class="msg" id="mv-tools" hidden></div>
-      <div class="fld" id="mv-song-fld"><span class="fl">曲 <span class="note inl" id="mv-song-note">音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
-        <div class="refs frame" id="mv-song" aria-label="曲のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
-      <div class="fld" id="mv-image-fld"><span class="fl">キャラクター画像 <span class="note inl" id="mv-image-note">画像タブの画像・ギャラリー・PC の画像ファイル</span></span>
-        <div class="refs frame" id="mv-image" aria-label="キャラクター画像のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div></div>
-      <div class="fld"><div class="lhead"><label class="fl" for="mv-char">人物の説明 <small>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
-        <span class="mk"><button id="mv-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)">🔍 画像から作る</button></span></div>
-        <textarea id="mv-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調"></textarea>
+      <div class="fld" id="mv-song-fld"><span class="fl"><span data-i18n>曲</span> <span class="note inl" id="mv-song-note" data-i18n>音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
+        <div class="refs frame" id="mv-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div></div>
+      <div class="fld" id="mv-image-fld"><span class="fl"><span data-i18n>キャラクター画像</span> <span class="note inl" id="mv-image-note" data-i18n>画像タブの画像・ギャラリー・PC の画像ファイル</span></span>
+        <div class="refs frame" id="mv-image" aria-label="キャラクター画像のドロップ欄" data-i18n-aria><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div></div>
+      <div class="fld"><div class="lhead"><label class="fl" for="mv-char"><span data-i18n>人物の説明</span> <small data-i18n>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
+        <span class="mk"><button id="mv-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)" data-i18n-title data-i18n>🔍 画像から作る</button></span></div>
+        <textarea id="mv-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調" data-i18n-placeholder></textarea>
         <div class="uploading" id="mv-char-busy" hidden><span class="spin"></span><span id="mv-char-busy-text"></span></div>
         <span class="note" id="mv-char-note" hidden></span>
-        <span class="note" id="mv-char-hint" hidden>空のまま作ると、自動で入れます</span></div>
-      <div class="fld"><div class="lhead"><label class="fl" for="mv-concept">曲の内容・世界観 <small>(任意。空なら曲のテーマ・キャプション・ジャンル、無ければ曲を聞いて作ります)</small></label>
-        <span class="mk"><button id="mv-concept-go" type="button" class="mini" disabled title="曲の一部(30 秒を最大 2 か所)を LLM(Gemma 4)が聞き、言語・ジャンル・雰囲気・楽器などを読み取って、曲の内容・世界観の案を書きます(歌詞は聞き取りません)。CPU では 20〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)。音楽タブで作った曲は、聞かずに、テーマ・キャプションから書きます">🎧 曲から作る</button></span></div>
-        <textarea id="mv-concept" class="sm" rows="3" maxlength="1000" placeholder="例: 夜明けの駅で、旅立つ人を見送る歌"></textarea>
+        <span class="note" id="mv-char-hint" hidden data-i18n>空のまま作ると、自動で入れます</span></div>
+      <div class="fld"><div class="lhead"><label class="fl" for="mv-concept"><span data-i18n>曲の内容・世界観</span> <small data-i18n>(任意。空なら曲のテーマ・キャプション・ジャンル、無ければ曲を聞いて作ります)</small></label>
+        <span class="mk"><button id="mv-concept-go" type="button" class="mini" disabled title="曲の一部(30 秒を最大 2 か所)を LLM(Gemma 4)が聞き、言語・ジャンル・雰囲気・楽器などを読み取って、曲の内容・世界観の案を書きます(歌詞は聞き取りません)。CPU では 20〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)。音楽タブで作った曲は、聞かずに、テーマ・キャプションから書きます" data-i18n-title data-i18n>🎧 曲から作る</button></span></div>
+        <textarea id="mv-concept" class="sm" rows="3" maxlength="1000" placeholder="例: 夜明けの駅で、旅立つ人を見送る歌" data-i18n-placeholder></textarea>
         <div class="uploading" id="mv-concept-busy" hidden><span class="spin"></span><span id="mv-concept-busy-text"></span></div>
         <span class="note" id="mv-concept-note" hidden></span>
-        <span class="note" id="mv-concept-hint" hidden>空のまま作ると、自動で入れます</span>
+        <span class="note" id="mv-concept-hint" hidden data-i18n>空のまま作ると、自動で入れます</span>
         <details class="adv" id="mv-listen-info" hidden>
-          <summary>曲の聞き取り(参考)</summary>
+          <summary data-i18n>曲の聞き取り(参考)</summary>
           <div class="adv-body">
             <div id="mv-listen-body"></div>
-            <div class="li-note">曲の一部を聞いて読み取った、おおまかな内容です(聞き間違えることがあります)。歌詞は聞き取っていません</div>
+            <div class="li-note" data-i18n>曲の一部を聞いて読み取った、おおまかな内容です(聞き間違えることがあります)。歌詞は聞き取っていません</div>
           </div>
         </details></div>
-      <label class="fld"><span class="fl">歌わせ方</span>
-        <select id="mv-lipsync" title="歌わせる: シーンのボーカルを H3 に渡して口を合わせます。歌わせない: 音声を渡さず、歌わないイメージ映像(いわゆるイメージ PV)にします。曲は結合で付きます">
-          <option value="true">歌わせる(リップシンク MV)</option><option value="false">歌わせない(イメージ MV)</option></select>
-        <span class="note" id="mv-lipsync-note" hidden>口は動きませんが、演出はマイクやステージなど「歌う場面」を選ぶことがあります。景色や日常だけの映像にしたいときは、「曲の内容」に
-          <b>「マイクやステージは出さない。歌う場面は無い」</b>のように、出したくないものを書いてください(演出を書く LLM に、そのまま渡ります)</span></label>
+      <label class="fld"><span class="fl" data-i18n>歌わせ方</span>
+        <select id="mv-lipsync" title="歌わせる: シーンのボーカルを H3 に渡して口を合わせます。歌わせない: 音声を渡さず、歌わないイメージ映像(いわゆるイメージ PV)にします。曲は結合で付きます" data-i18n-title>
+          <option value="true" data-i18n>歌わせる(リップシンク MV)</option><option value="false" data-i18n>歌わせない(イメージ MV)</option></select>
+        <span class="note" id="mv-lipsync-note" hidden><span data-i18n>口は動きませんが、演出はマイクやステージなど「歌う場面」を選ぶことがあります。景色や日常だけの映像にしたいときは、「曲の内容」に</span>
+          <b data-i18n>「マイクやステージは出さない。歌う場面は無い」</b><span data-i18n>のように、出したくないものを書いてください(演出を書く LLM に、そのまま渡ります)</span></span></label>
       <div class="fld two">
-        <label><span class="fl">画角</span>
-          <select id="mv-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
-            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option><option value="5:4">横 4:5</option><option value="custom">手動入力</option></select></label>
-        <label><span class="fl">画質 <b id="mv-size"></b></span>
-          <select id="mv-quality"><option value="low">低 VRAM</option><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+        <label><span class="fl" data-i18n>画角</span>
+          <select id="mv-aspect"><option value="16:9" data-i18n>横長 16:9</option><option value="9:16" data-i18n>縦長 9:16</option>
+            <option value="1:1" data-i18n>正方形 1:1</option><option value="4:5" data-i18n>縦 4:5</option><option value="5:4" data-i18n>横 4:5</option><option value="custom" data-i18n>手動入力</option></select></label>
+        <label><span class="fl"><span data-i18n>画質</span> <b id="mv-size"></b></span>
+          <select id="mv-quality"><option value="low" data-i18n>低 VRAM</option><option value="fast" data-i18n>高速</option><option value="standard" data-i18n>標準</option><option value="high" data-i18n>高画質</option></select></label>
       </div>
       <div class="fld two" id="mv-custom" hidden>
-        <label><span class="fl">幅(px)</span><input id="mv-cw" type="number" min="256" max="1344" step="32" value="768"></label>
-        <label><span class="fl">高さ(px)</span><input id="mv-ch" type="number" min="256" max="1344" step="32" value="448"></label>
+        <label><span class="fl" data-i18n>幅(px)</span><input id="mv-cw" type="number" min="256" max="1344" step="32" value="768"></label>
+        <label><span class="fl" data-i18n>高さ(px)</span><input id="mv-ch" type="number" min="256" max="1344" step="32" value="448"></label>
       </div>
       <span class="note mv-qnote" id="mv-qnote"></span>
-      <label class="fld"><span class="fl">背景の文字 <small>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
-        <select id="mv-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです"><option value="auto">おまかせ</option>
-          <option value="large">大きな文字だけ</option><option value="none">文字を出さない</option></select></label>
+      <label class="fld"><span class="fl"><span data-i18n>背景の文字</span> <small data-i18n>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
+        <select id="mv-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです" data-i18n-title><option value="auto" data-i18n>おまかせ</option>
+          <option value="large" data-i18n>大きな文字だけ</option><option value="none" data-i18n>文字を出さない</option></select></label>
       <div class="fld two">
-        <label><span class="fl">シーンの最短(秒)</span><input id="mv-min" type="number" min="5" max="10" step="0.5" value="5"></label>
-        <label><span class="fl">シーンの最長(秒)</span><input id="mv-max" type="number" min="5" max="10" step="0.5" value="10"></label>
+        <label><span class="fl" data-i18n>シーンの最短(秒)</span><input id="mv-min" type="number" min="5" max="10" step="0.5" value="5"></label>
+        <label><span class="fl" data-i18n>シーンの最長(秒)</span><input id="mv-max" type="number" min="5" max="10" step="0.5" value="10"></label>
       </div>
-      <div class="fld"><span class="fl">シード</span>
-        <div class="inline"><input id="mv-seed" type="number" min="0" placeholder="例: 12345" disabled>
-          <label class="chk"><input id="mv-random" type="checkbox" checked>ランダム</label></div></div>
+      <div class="fld"><span class="fl" data-i18n>シード</span>
+        <div class="inline"><input id="mv-seed" type="number" min="0" placeholder="例: 12345" data-i18n-placeholder disabled>
+          <label class="chk"><input id="mv-random" type="checkbox" checked><span data-i18n>ランダム</span></label></div></div>
       <div class="msg" id="mv-msg" hidden></div>
-      <div class="actions"><button id="mv-go" class="primary">MV を作る</button></div>
+      <div class="actions"><button id="mv-go" class="primary" data-i18n>MV を作る</button></div>
     </div>
     <div class="tabpanel" id="tab-short" role="tabpanel" hidden>
       <div class="presetbar" id="sh-presets"><div class="samplebox" id="sh-samples" hidden></div></div>
       <div class="msg" id="sh-tools" hidden></div>
-      <div class="fld"><label class="fl" for="sh-story">物語・映像のイメージ <small id="sh-story-req">(曲もセリフも無いときは必須)</small></label>
-        <textarea id="sh-story" rows="5" maxlength="4000" placeholder="例: 雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る"></textarea></div>
-      <div class="fld" id="sh-song-fld"><span class="fl">曲 <small>(任意)</small> <span class="note inl" id="sh-song-note">音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
-        <div class="refs frame" id="sh-song" aria-label="曲のドロップ欄"><div class="frame-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div>
-        <span class="note" id="sh-bgm-note" hidden>セリフがあるので、曲は BGM として下に敷きます(長さは読み上げの長さに合わせます)</span></div>
-      <div class="fld"><div class="lhead"><label class="fl" for="sh-narr">セリフ・ナレーション <small>(任意。あれば読み上げて、人物が口を合わせます)</small></label>
-        <span class="mk"><button id="sh-narr-go" type="button" class="mini" disabled title="物語の文章から、管理役の LLM がナレーションの案を書きます(曲があれば、その内容も使います)。確かめて、直してから作れます。CPU では 20〜60 秒ほど">📝 物語から作る</button></span></div>
-        <textarea id="sh-narr" class="sm" rows="4" maxlength="4000" placeholder="例: 雨の音だけが、駅に残っていた。……"></textarea>
+      <div class="fld"><label class="fl" for="sh-story"><span data-i18n>物語・映像のイメージ</span> <small id="sh-story-req" data-i18n>(曲もセリフも無いときは必須)</small></label>
+        <textarea id="sh-story" rows="5" maxlength="4000" placeholder="例: 雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る" data-i18n-placeholder></textarea></div>
+      <div class="fld" id="sh-song-fld"><span class="fl"><span data-i18n>曲</span> <small data-i18n>(任意)</small> <span class="note inl" id="sh-song-note" data-i18n>音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
+        <div class="refs frame" id="sh-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div>
+        <span class="note" id="sh-bgm-note" hidden data-i18n>セリフがあるので、曲は BGM として下に敷きます(長さは読み上げの長さに合わせます)</span></div>
+      <div class="fld"><div class="lhead"><label class="fl" for="sh-narr"><span data-i18n>セリフ・ナレーション</span> <small data-i18n>(任意。あれば読み上げて、人物が口を合わせます)</small></label>
+        <span class="mk"><button id="sh-narr-go" type="button" class="mini" disabled title="物語の文章から、管理役の LLM がナレーションの案を書きます(曲があれば、その内容も使います)。確かめて、直してから作れます。CPU では 20〜60 秒ほど" data-i18n-title data-i18n>📝 物語から作る</button></span></div>
+        <textarea id="sh-narr" class="sm" rows="4" maxlength="4000" placeholder="例: 雨の音だけが、駅に残っていた。……" data-i18n-placeholder></textarea>
         <div class="uploading" id="sh-narr-busy" hidden><span class="spin"></span><span id="sh-narr-busy-text"></span></div>
         <span class="note" id="sh-narr-note" hidden></span>
-        <span class="note">空のままなら、セリフなしの動画になります</span></div>
-      <label class="fld" id="sh-speaker-fld"><span class="fl">話者 <small>(セリフがあるときは必須。AivisSpeech)</small></span>
-        <select id="sh-speaker" aria-label="話者"><option value="">話者を選ぶ(セリフを入れると読み込みます)</option></select>
+        <span class="note" data-i18n>空のままなら、セリフなしの動画になります</span></div>
+      <label class="fld" id="sh-speaker-fld"><span class="fl"><span data-i18n>話者</span> <small data-i18n>(セリフがあるときは必須。AivisSpeech)</small></span>
+        <select id="sh-speaker" aria-label="話者" data-i18n-aria><option value="" data-i18n>話者を選ぶ(セリフを入れると読み込みます)</option></select>
         <span class="note" id="sh-speaker-note" hidden></span></label>
-      <label class="chk fld" id="sh-subs-fld" title="読み上げの文の時刻どおりに、画面の下(縦長は少し上)に白い字のテロップを焼き込みます。SRT も一緒に保存します(投稿サイトの字幕用)"><input id="sh-subs" type="checkbox">セリフのテロップ(字幕)を焼き込む</label>
-      <div class="fld"><span class="fl">参照画像 <small>(0〜4 枚。役割ごとに選びます)</small></span>
-        <div class="refs" id="sh-images" aria-label="参照画像のドロップ欄">
+      <label class="chk fld" id="sh-subs-fld" title="読み上げの文の時刻どおりに、画面の下(縦長は少し上)に白い字のテロップを焼き込みます。SRT も一緒に保存します(投稿サイトの字幕用)" data-i18n-title><input id="sh-subs" type="checkbox"><span data-i18n>セリフのテロップ(字幕)を焼き込む</span></label>
+      <div class="fld"><span class="fl"><span data-i18n>参照画像</span> <small data-i18n>(0〜4 枚。役割ごとに選びます)</small></span>
+        <div class="refs" id="sh-images" aria-label="参照画像のドロップ欄" data-i18n-aria>
           <div class="refs-list shimgs" id="sh-images-list"></div>
-          <div class="refs-empty" id="sh-images-empty">ここに画像をドロップ<br><small>画像タブの画像・ギャラリー・PC の画像ファイル</small></div>
-          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+          <div class="refs-empty" id="sh-images-empty"><span data-i18n>ここに画像をドロップ</span><br><small data-i18n>画像タブの画像・ギャラリー・PC の画像ファイル</small></div>
+          <div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div>
         </div>
-        <span class="note" id="sh-images-note">人物は 1 枚まで(全シーンに同じ人物)。セリフがあるときは、人物の画像が必須です(口を合わせる相手)。景色・物は、その場所・物を出すシーンの参照になります</span></div>
-      <div class="fld" id="sh-char-fld" hidden><div class="lhead"><label class="fl" for="sh-char">人物の説明 <small>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
-        <span class="mk"><button id="sh-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)">🔍 画像から作る</button></span></div>
-        <textarea id="sh-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調"></textarea>
+        <span class="note" id="sh-images-note" data-i18n>人物は 1 枚まで(全シーンに同じ人物)。セリフがあるときは、人物の画像が必須です(口を合わせる相手)。景色・物は、その場所・物を出すシーンの参照になります</span></div>
+      <div class="fld" id="sh-char-fld" hidden><div class="lhead"><label class="fl" for="sh-char"><span data-i18n>人物の説明</span> <small data-i18n>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
+        <span class="mk"><button id="sh-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)" data-i18n-title data-i18n>🔍 画像から作る</button></span></div>
+        <textarea id="sh-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調" data-i18n-placeholder></textarea>
         <div class="uploading" id="sh-char-busy" hidden><span class="spin"></span><span id="sh-char-busy-text"></span></div>
         <span class="note" id="sh-char-note" hidden></span>
-        <span class="note" id="sh-char-hint" hidden>空のまま作ると、自動で入れます</span></div>
-      <div class="fld" id="sh-length-fld"><label class="fl" for="sh-length">長さ(秒) <small>(曲もセリフも無いときだけ。30 秒以上)</small></label>
+        <span class="note" id="sh-char-hint" hidden data-i18n>空のまま作ると、自動で入れます</span></div>
+      <div class="fld" id="sh-length-fld"><label class="fl" for="sh-length"><span data-i18n>長さ(秒)</span> <small data-i18n>(曲もセリフも無いときだけ。30 秒以上)</small></label>
         <input id="sh-length" type="number" min="30" step="5" value="60"></div>
       <span class="note sh-len-note" id="sh-len-note" hidden></span>
       <div class="msg sh-warn" id="sh-len-warn" hidden></div>
       <div class="fld two">
-        <label><span class="fl">画角</span>
-          <select id="sh-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
-            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option><option value="5:4">横 4:5</option><option value="custom">手動入力</option></select></label>
-        <label><span class="fl">画質 <b id="sh-size"></b></span>
-          <select id="sh-quality"><option value="low">低 VRAM</option><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+        <label><span class="fl" data-i18n>画角</span>
+          <select id="sh-aspect"><option value="16:9" data-i18n>横長 16:9</option><option value="9:16" data-i18n>縦長 9:16</option>
+            <option value="1:1" data-i18n>正方形 1:1</option><option value="4:5" data-i18n>縦 4:5</option><option value="5:4" data-i18n>横 4:5</option><option value="custom" data-i18n>手動入力</option></select></label>
+        <label><span class="fl"><span data-i18n>画質</span> <b id="sh-size"></b></span>
+          <select id="sh-quality"><option value="low" data-i18n>低 VRAM</option><option value="fast" data-i18n>高速</option><option value="standard" data-i18n>標準</option><option value="high" data-i18n>高画質</option></select></label>
       </div>
       <div class="fld two" id="sh-custom" hidden>
-        <label><span class="fl">幅(px)</span><input id="sh-cw" type="number" min="256" max="1344" step="32" value="768"></label>
-        <label><span class="fl">高さ(px)</span><input id="sh-ch" type="number" min="256" max="1344" step="32" value="448"></label>
+        <label><span class="fl" data-i18n>幅(px)</span><input id="sh-cw" type="number" min="256" max="1344" step="32" value="768"></label>
+        <label><span class="fl" data-i18n>高さ(px)</span><input id="sh-ch" type="number" min="256" max="1344" step="32" value="448"></label>
       </div>
       <span class="note mv-qnote" id="sh-qnote"></span>
-      <label class="fld"><span class="fl">背景の文字 <small>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
-        <select id="sh-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです"><option value="auto">おまかせ</option>
-          <option value="large">大きな文字だけ</option><option value="none">文字を出さない</option></select></label>
+      <label class="fld"><span class="fl"><span data-i18n>背景の文字</span> <small data-i18n>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
+        <select id="sh-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです" data-i18n-title><option value="auto" data-i18n>おまかせ</option>
+          <option value="large" data-i18n>大きな文字だけ</option><option value="none" data-i18n>文字を出さない</option></select></label>
       <div class="fld two">
-        <label><span class="fl">シーンの最短(秒)</span><input id="sh-min" type="number" min="5" max="10" step="0.5" value="5"></label>
-        <label><span class="fl">シーンの最長(秒)</span><input id="sh-max" type="number" min="5" max="10" step="0.5" value="10"></label>
+        <label><span class="fl" data-i18n>シーンの最短(秒)</span><input id="sh-min" type="number" min="5" max="10" step="0.5" value="5"></label>
+        <label><span class="fl" data-i18n>シーンの最長(秒)</span><input id="sh-max" type="number" min="5" max="10" step="0.5" value="10"></label>
       </div>
-      <label class="fld"><span class="fl">最終の音声 <small>(結合し直すときに変えられます)</small></span>
-        <select id="sh-final" title="自動: セリフがあれば読み上げ(曲は BGM)、曲だけなら曲、どちらも無ければ H3 が作った音。音声なし: 映像だけの MP4(他のツールで音を付ける人向け)">
-          <option value="auto">自動</option><option value="none">音声なし(映像だけ)</option></select></label>
-      <div class="fld"><span class="fl">シード</span>
-        <div class="inline"><input id="sh-seed" type="number" min="0" placeholder="例: 12345" disabled>
-          <label class="chk"><input id="sh-random" type="checkbox" checked>ランダム</label></div></div>
+      <label class="fld"><span class="fl"><span data-i18n>最終の音声</span> <small data-i18n>(結合し直すときに変えられます)</small></span>
+        <select id="sh-final" title="自動: セリフがあれば読み上げ(曲は BGM)、曲だけなら曲、どちらも無ければ H3 が作った音。音声なし: 映像だけの MP4(他のツールで音を付ける人向け)" data-i18n-title>
+          <option value="auto" data-i18n>自動</option><option value="none" data-i18n>音声なし(映像だけ)</option></select></label>
+      <div class="fld"><span class="fl" data-i18n>シード</span>
+        <div class="inline"><input id="sh-seed" type="number" min="0" placeholder="例: 12345" data-i18n-placeholder disabled>
+          <label class="chk"><input id="sh-random" type="checkbox" checked><span data-i18n>ランダム</span></label></div></div>
       <div class="msg" id="sh-msg" hidden></div>
-      <div class="actions"><button id="sh-go" class="primary">ショート動画を作る</button></div>
+      <div class="actions"><button id="sh-go" class="primary" data-i18n>ショート動画を作る</button></div>
     </div>
     <div class="tabpanel" id="tab-edit" role="tabpanel" hidden>
       <div class="edproj">
-        <select id="ed-proj" aria-label="編集プロジェクト"></select>
+        <select id="ed-proj" aria-label="編集プロジェクト" data-i18n-aria></select>
         <div class="preset-btns">
-          <button id="ed-new" type="button" class="mini">新規</button>
-          <button id="ed-rename" type="button" class="mini" disabled>名前の変更</button>
-          <button id="ed-del" type="button" class="mini" disabled>削除</button>
+          <button id="ed-new" type="button" class="mini" data-i18n>新規</button>
+          <button id="ed-rename" type="button" class="mini" disabled data-i18n>名前の変更</button>
+          <button id="ed-del" type="button" class="mini" disabled data-i18n>削除</button>
         </div>
       </div>
-      <div class="note edintro" id="ed-intro">動画・画像をつないで、切る・色を変える・曲を付ける、簡単な編集です(GPU は使いません。元の動画は変わりません)。まず「新規」で編集プロジェクトを作ってください。</div>
+      <div class="note edintro" id="ed-intro" data-i18n>動画・画像をつないで、切る・色を変える・曲を付ける、簡単な編集です(GPU は使いません。元の動画は変わりません)。まず「新規」で編集プロジェクトを作ってください。</div>
       <fieldset class="edbody" id="ed-body" disabled>
-        <h3 class="edh">クリップ</h3>
-        <div class="refs edclips-box" id="ed-clips-drop" aria-label="クリップのドロップ欄">
+        <h3 class="edh" data-i18n>クリップ</h3>
+        <div class="refs edclips-box" id="ed-clips-drop" aria-label="クリップのドロップ欄" data-i18n-aria>
           <div class="edclips" id="ed-clips"></div>
-          <div class="refs-empty" id="ed-clips-empty">ここに動画・画像をドロップ<br><small>動画タブ・MV・ショート動画の動画、ギャラリー、PC のファイル(末尾に足されます)</small></div>
-          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+          <div class="refs-empty" id="ed-clips-empty"><span data-i18n>ここに動画・画像をドロップ</span><br><small data-i18n>動画タブ・MV・ショート動画の動画、ギャラリー、PC のファイル(末尾に足されます)</small></div>
+          <div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div>
         </div>
 
-        <h3 class="edh">区間 <small>(秒。つないだだけの時間で数えます)</small></h3>
+        <h3 class="edh"><span data-i18n>区間</span> <small data-i18n>(秒。つないだだけの時間で数えます)</small></h3>
         <div class="fld two edrange">
-          <label><span class="fl">開始</span><input id="ed-start" type="number" min="0" step="0.1" value="0"></label>
-          <label><span class="fl">終了</span><input id="ed-end" type="number" min="0" step="0.1" value="0"></label>
+          <label><span class="fl" data-i18n>開始</span><input id="ed-start" type="number" min="0" step="0.1" value="0"></label>
+          <label><span class="fl" data-i18n>終了</span><input id="ed-end" type="number" min="0" step="0.1" value="0"></label>
         </div>
         <div class="edrow">
-          <button id="ed-from" type="button" class="mini" title="プレビューの再生位置を、開始にします">ここから</button>
-          <button id="ed-to" type="button" class="mini" title="プレビューの再生位置を、終了にします">ここまで</button>
-          <button id="ed-all" type="button" class="mini" title="開始 0 から、最後までにします">全体</button>
-          <button id="ed-clear" type="button" class="mini" title="開始と終了を消します(区間なし)">クリア</button>
+          <button id="ed-from" type="button" class="mini" title="プレビューの再生位置を、開始にします" data-i18n-title data-i18n>ここから</button>
+          <button id="ed-to" type="button" class="mini" title="プレビューの再生位置を、終了にします" data-i18n-title data-i18n>ここまで</button>
+          <button id="ed-all" type="button" class="mini" title="開始 0 から、最後までにします" data-i18n-title data-i18n>全体</button>
+          <button id="ed-clear" type="button" class="mini" title="開始と終了を消します(区間なし)" data-i18n-title data-i18n>クリア</button>
           <span class="note edgrow" id="ed-range-note"></span>
         </div>
 
-        <h3 class="edh">操作</h3>
+        <h3 class="edh" data-i18n>操作</h3>
         <div class="edop">
-          <button id="ed-delrange" type="button">区間を削除</button>
-          <span class="note">開始〜終了を切り取って、前後をつなぎます</span>
+          <button id="ed-delrange" type="button" data-i18n>区間を削除</button>
+          <span class="note" data-i18n>開始〜終了を切り取って、前後をつなぎます</span>
         </div>
         <div class="edop col">
-          <div class="refs frame edmini" id="ed-ins-drop" aria-label="挿入する動画・画像のドロップ欄"><div class="frame-body" id="ed-ins-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div>
+          <div class="refs frame edmini" id="ed-ins-drop" aria-label="挿入する動画・画像のドロップ欄" data-i18n-aria><div class="frame-body" id="ed-ins-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div>
           <div class="edrow">
-            <button id="ed-ins-go" type="button" disabled>位置に挿入</button>
-            <label class="chk">画像の秒数<input id="ed-ins-sec" type="number" min="0.5" max="60" step="0.5" value="3" class="edsmall"></label>
-            <span class="note">開始の位置に入ります</span>
+            <button id="ed-ins-go" type="button" disabled data-i18n>位置に挿入</button>
+            <label class="chk"><span data-i18n>画像の秒数</span><input id="ed-ins-sec" type="number" min="0.5" max="60" step="0.5" value="3" class="edsmall"></label>
+            <span class="note" data-i18n>開始の位置に入ります</span>
           </div>
         </div>
 
-        <h3 class="edh">色調 <small>(見た目を選ぶ)</small></h3>
+        <h3 class="edh"><span data-i18n>色調</span> <small data-i18n>(見た目を選ぶ)</small></h3>
         <div class="edop col">
           <div class="edrow">
-            <select id="ed-fx-type" aria-label="色調の種類">
-              <option value="mono">モノクロ</option><option value="sepia">セピア</option><option value="warm">暖色</option><option value="cool">寒色</option>
-              <option value="vintage">フィルム風(退色)</option><option value="vignette">周辺を暗く</option><option value="negate">色を反転</option>
-              <option value="blur">ぼかし</option>
+            <select id="ed-fx-type" aria-label="色調の種類" data-i18n-aria>
+              <option value="mono" data-i18n>モノクロ</option><option value="sepia" data-i18n>セピア</option><option value="warm" data-i18n>暖色</option><option value="cool" data-i18n>寒色</option>
+              <option value="vintage" data-i18n>フィルム風(退色)</option><option value="vignette" data-i18n>周辺を暗く</option><option value="negate" data-i18n>色を反転</option>
+              <option value="blur" data-i18n>ぼかし</option>
             </select>
           </div>
           <div class="edrow">
-            <button id="ed-fx-apply" type="button">区間に適用</button>
-            <button id="ed-fx-all" type="button">全体に適用</button>
+            <button id="ed-fx-apply" type="button" data-i18n>区間に適用</button>
+            <button id="ed-fx-all" type="button" data-i18n>全体に適用</button>
           </div>
         </div>
 
-        <h3 class="edh">調整 <small>(値を決める)</small></h3>
+        <h3 class="edh"><span data-i18n>調整</span> <small data-i18n>(値を決める)</small></h3>
         <div class="edop col">
           <div class="edrow">
-            <select id="ed-adj-type" aria-label="調整の種類">
-              <option value="saturation">彩度</option><option value="contrast">コントラスト</option>
-              <option value="brightness">明るさ</option>
+            <select id="ed-adj-type" aria-label="調整の種類" data-i18n-aria>
+              <option value="saturation" data-i18n>彩度</option><option value="contrast" data-i18n>コントラスト</option>
+              <option value="brightness" data-i18n>明るさ</option>
             </select>
           </div>
-          <div class="edrow" id="ed-adj-valwrap"><input id="ed-adj-val" type="range" min="0" max="3" step="0.1" value="1.5" aria-label="値"><span class="edval" id="ed-adj-valtext"></span></div>
+          <div class="edrow" id="ed-adj-valwrap"><input id="ed-adj-val" type="range" min="0" max="3" step="0.1" value="1.5" aria-label="値" data-i18n-aria><span class="edval" id="ed-adj-valtext"></span></div>
           <div class="edrow">
-            <button id="ed-adj-apply" type="button">区間に適用</button>
-            <button id="ed-adj-all" type="button">全体に適用</button>
+            <button id="ed-adj-apply" type="button" data-i18n>区間に適用</button>
+            <button id="ed-adj-all" type="button" data-i18n>全体に適用</button>
           </div>
         </div>
 
-        <h3 class="edh">選択区間の効果 <small>(区間に効く。ズームは挿入した静止画に向く)</small></h3>
+        <h3 class="edh"><span data-i18n>選択区間の効果</span> <small data-i18n>(区間に効く。ズームは挿入した静止画に向く)</small></h3>
         <div class="edop col">
           <div class="edrow">
-            <select id="ed-rng-type" aria-label="選択区間の効果の種類">
-              <option value="fade_to_black">黒へフェード</option><option value="fade_from_black">黒からフェード</option><option value="black">黒にする</option>
-              <option value="fade_to_white">白へフェード</option><option value="fade_from_white">白からフェード</option>
-              <option value="zoom_in">ズームイン</option><option value="zoom_out">ズームアウト</option>
-              <option value="pan_right">右へパン</option><option value="pan_left">左へパン</option><option value="pan_down">下へパン</option><option value="pan_up">上へパン</option>
-              <option value="zoom_in_right">ズームインしながら右へ</option><option value="zoom_in_left">ズームインしながら左へ</option>
+            <select id="ed-rng-type" aria-label="選択区間の効果の種類" data-i18n-aria>
+              <option value="fade_to_black" data-i18n>黒へフェード</option><option value="fade_from_black" data-i18n>黒からフェード</option><option value="black" data-i18n>黒にする</option>
+              <option value="fade_to_white" data-i18n>白へフェード</option><option value="fade_from_white" data-i18n>白からフェード</option>
+              <option value="zoom_in" data-i18n>ズームイン</option><option value="zoom_out" data-i18n>ズームアウト</option>
+              <option value="pan_right" data-i18n>右へパン</option><option value="pan_left" data-i18n>左へパン</option><option value="pan_down" data-i18n>下へパン</option><option value="pan_up" data-i18n>上へパン</option>
+              <option value="zoom_in_right" data-i18n>ズームインしながら右へ</option><option value="zoom_in_left" data-i18n>ズームインしながら左へ</option>
             </select>
           </div>
-          <div class="edrow" id="ed-rng-valwrap" hidden><input id="ed-rng-val" type="range" min="1.05" max="2" step="0.05" value="1.3" aria-label="倍率"><span class="edval" id="ed-rng-valtext"></span></div>
+          <div class="edrow" id="ed-rng-valwrap" hidden><input id="ed-rng-val" type="range" min="1.05" max="2" step="0.05" value="1.3" aria-label="倍率" data-i18n-aria><span class="edval" id="ed-rng-valtext"></span></div>
           <div class="edrow">
-            <button id="ed-rng-apply" type="button">区間に適用</button>
-            <span class="note">区間の始めから終わりにかけて効きます。区間の外は元のまま</span>
+            <button id="ed-rng-apply" type="button" data-i18n>区間に適用</button>
+            <span class="note" data-i18n>区間の始めから終わりにかけて効きます。区間の外は元のまま</span>
           </div>
         </div>
 
-        <h3 class="edh">付けた色調・調整・区間の効果</h3>
+        <h3 class="edh" data-i18n>付けた色調・調整・区間の効果</h3>
         <div class="edop col"><div class="edlist" id="ed-fx-list"></div></div>
 
-        <h3 class="edh">境目の効果</h3>
+        <h3 class="edh" data-i18n>境目の効果</h3>
         <div class="edlist" id="ed-trans"></div>
         <div class="edrow">
-          <select id="ed-tr-type" aria-label="区間の境目に付ける効果"><option value="crossfade">クロスフェード</option><option value="fadeblack">黒を挟む</option><option value="cut">カット</option></select>
-          <button id="ed-tr-range" type="button" class="mini" title="選択区間の中にある境目すべてに、区間の長さ(0.5〜2 秒に丸め、前後のクリップの短いほうの半分まで)でこの効果を付けます">区間の境目に適用</button>
+          <select id="ed-tr-type" aria-label="区間の境目に付ける効果" data-i18n-aria><option value="crossfade" data-i18n>クロスフェード</option><option value="fadeblack" data-i18n>黒を挟む</option><option value="cut" data-i18n>カット</option></select>
+          <button id="ed-tr-range" type="button" class="mini" title="選択区間の中にある境目すべてに、区間の長さ(0.5〜2 秒に丸め、前後のクリップの短いほうの半分まで)でこの効果を付けます" data-i18n-title data-i18n>区間の境目に適用</button>
         </div>
 
-        <h3 class="edh">先頭・末尾のフェード</h3>
+        <h3 class="edh" data-i18n>先頭・末尾のフェード</h3>
         <div class="fld two">
-          <label><span class="fl">先頭フェードイン(秒)</span><input id="ed-fadein" type="number" min="0" step="0.1" value="0"></label>
-          <label><span class="fl">末尾フェードアウト(秒)</span><input id="ed-fadeout" type="number" min="0" step="0.1" value="0"></label>
+          <label><span class="fl" data-i18n>先頭フェードイン(秒)</span><input id="ed-fadein" type="number" min="0" step="0.1" value="0"></label>
+          <label><span class="fl" data-i18n>末尾フェードアウト(秒)</span><input id="ed-fadeout" type="number" min="0" step="0.1" value="0"></label>
         </div>
 
-        <h3 class="edh">音声</h3>
-        <label class="fld"><select id="ed-audio" aria-label="音声">
-          <option value="original">元の音</option><option value="music">曲に差し替え</option><option value="mix">元の音 + 曲</option><option value="none">音なし</option></select></label>
-        <div class="refs frame edmini" id="ed-song" aria-label="曲のドロップ欄"><div class="frame-body" id="ed-song-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div>
+        <h3 class="edh" data-i18n>音声</h3>
+        <label class="fld"><select id="ed-audio" aria-label="音声" data-i18n-aria>
+          <option value="original" data-i18n>元の音</option><option value="music" data-i18n>曲に差し替え</option><option value="mix" data-i18n>元の音 + 曲</option><option value="none" data-i18n>音なし</option></select></label>
+        <div class="refs frame edmini" id="ed-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body" id="ed-song-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div>
       </fieldset>
       <div class="edfoot">
         <div class="msg" id="ed-msg" hidden></div>
         <div class="actions">
-          <button id="ed-undo" type="button" disabled>元に戻す</button>
-          <button id="ed-redo" type="button" disabled>やり直す</button>
-          <button id="ed-export" type="button" class="primary" disabled>書き出し</button>
+          <button id="ed-undo" type="button" disabled data-i18n>元に戻す</button>
+          <button id="ed-redo" type="button" disabled data-i18n>やり直す</button>
+          <button id="ed-export" type="button" class="primary" disabled data-i18n>書き出し</button>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="panel output" id="output" aria-label="生成物">
-    <h2>生成物</h2>
+  <section class="panel output" id="output" aria-label="生成物" data-i18n-aria>
+    <h2 data-i18n>生成物</h2>
     <div class="progress" id="progress" hidden>
       <div class="pbar"><i></i></div>
       <div class="pmsg" id="pmsg"></div>
       <ul class="psteps" id="psteps"></ul>
       <pre class="plog" id="plog" hidden></pre>
     </div>
-    <div class="viewer" id="viewer"><div class="placeholder">まだ生成物がありません</div></div>
+    <div class="viewer" id="viewer"><div class="placeholder" data-i18n>まだ生成物がありません</div></div>
     <div class="vmeta" id="vmeta" hidden>
       <span class="vname" id="vname"></span><span class="vinfo" id="vinfo"></span>
-      <span class="vbtns"><a id="vsave" class="btn" download>保存</a><button id="vdel" type="button" title="この生成物を削除します(ファイルも消え、元に戻せません)">削除</button><span id="vacts"></span></span>
+      <span class="vbtns"><a id="vsave" class="btn" download data-i18n>保存</a><button id="vdel" type="button" title="この生成物を削除します(ファイルも消え、元に戻せません)" data-i18n-title data-i18n>削除</button><span id="vacts"></span></span>
     </div>
     <div class="mvproj" id="mv-project"></div>
     <div class="mvproj" id="short-project"></div>
     <div class="mvproj" id="edit-project">
       <div class="edstage" id="ed-stage">
         <video id="ed-video" controls preload="metadata" hidden></video>
-        <div class="edempty" id="ed-empty"><span id="ed-empty-text">編集プロジェクトを選ぶか、新規に作ってください</span></div>
+        <div class="edempty" id="ed-empty"><span id="ed-empty-text" data-i18n>編集プロジェクトを選ぶか、新規に作ってください</span></div>
         <div class="edwait" id="ed-wait" hidden><span class="spin"></span><span id="ed-wait-text"></span><div class="pbar" id="ed-wait-bar"><i></i></div></div>
-        <div class="edstale" id="ed-stale" hidden>プレビューは古い版です <button id="ed-regen" type="button" class="mini">作り直す</button></div>
+        <div class="edstale" id="ed-stale" hidden><span data-i18n>プレビューは古い版です</span> <button id="ed-regen" type="button" class="mini" data-i18n>作り直す</button></div>
       </div>
-      <div class="edruler" id="ed-ruler" title="クリックで、その位置を再生します">
+      <div class="edruler" id="ed-ruler" title="クリックで、その位置を再生します" data-i18n-title>
         <div class="edticks" id="ed-ticks"></div>
         <div class="edsegs" id="ed-segs"></div>
         <div class="edfxs" id="ed-fxs"></div>
@@ -517,57 +518,57 @@
         <div class="edplay" id="ed-play"></div>
       </div>
       <div class="edtime edposrow"><span id="ed-time"></span>
-        <button id="ed-prev" type="button" class="mini" title="1 コマ戻す(止めてから動かします)">◀ 1 コマ</button>
-        <button id="ed-next" type="button" class="mini" title="1 コマ進める(止めてから動かします)">1 コマ ▶</button>
-        <button id="ed-from2" type="button" class="mini" title="いまの再生位置を、区間の開始にします">ここから</button>
-        <button id="ed-to2" type="button" class="mini" title="いまの再生位置を、区間の終了にします">ここまで</button>
-        <button id="ed-grab" type="button" class="mini" title="いまの再生位置のコマを、元の動画から元の解像度の画像にしてギャラリー(画像)に入れます。色調などの効果は掛かりません">このコマを画像に</button>
-        <button id="ed-clear2" type="button" class="mini" title="開始と終了を消します(区間なし)">クリア</button>
+        <button id="ed-prev" type="button" class="mini" title="1 コマ戻す(止めてから動かします)" data-i18n-title data-i18n>◀ 1 コマ</button>
+        <button id="ed-next" type="button" class="mini" title="1 コマ進める(止めてから動かします)" data-i18n-title data-i18n>1 コマ ▶</button>
+        <button id="ed-from2" type="button" class="mini" title="いまの再生位置を、区間の開始にします" data-i18n-title data-i18n>ここから</button>
+        <button id="ed-to2" type="button" class="mini" title="いまの再生位置を、区間の終了にします" data-i18n-title data-i18n>ここまで</button>
+        <button id="ed-grab" type="button" class="mini" title="いまの再生位置のコマを、元の動画から元の解像度の画像にしてギャラリー(画像)に入れます。色調などの効果は掛かりません" data-i18n-title data-i18n>このコマを画像に</button>
+        <button id="ed-clear2" type="button" class="mini" title="開始と終了を消します(区間なし)" data-i18n-title data-i18n>クリア</button>
         <span id="ed-sel-text" class="edseltext"></span></div>
       <div class="mvfinal" id="ed-out" hidden>
-        <div class="fbar edouthead"><b>最後に書き出した動画</b><span id="ed-out-name"></span><span id="ed-out-info"></span><a id="ed-out-save" class="btn" download>保存</a></div>
+        <div class="fbar edouthead"><b data-i18n>最後に書き出した動画</b><span id="ed-out-name"></span><span id="ed-out-info"></span><a id="ed-out-save" class="btn" download data-i18n>保存</a></div>
         <video id="ed-out-video" controls preload="metadata"></video>
       </div>
     </div>
   </section>
 
-  <section class="panel history" id="history" aria-label="履歴">
-    <div class="phead"><h2>履歴</h2>
-      <span class="selbar" hidden><span class="selcount"></span><button class="selall" type="button">すべて選択</button><button class="seldel" type="button">削除</button><button class="selend" type="button">やめる</button></span>
-      <span class="pbtns"><button class="seltoggle" type="button" title="サムネイルを選んで、まとめて削除します">選択</button><button id="to-gallery">ギャラリー</button></span></div>
+  <section class="panel history" id="history" aria-label="履歴" data-i18n-aria>
+    <div class="phead"><h2 data-i18n>履歴</h2>
+      <span class="selbar" hidden><span class="selcount"></span><button class="selall" type="button" data-i18n>すべて選択</button><button class="seldel" type="button" data-i18n>削除</button><button class="selend" type="button" data-i18n>やめる</button></span>
+      <span class="pbtns"><button class="seltoggle" type="button" title="サムネイルを選んで、まとめて削除します" data-i18n-title data-i18n>選択</button><button id="to-gallery" data-i18n>ギャラリー</button></span></div>
     <div class="thumbs" id="hist-grid"></div>
   </section>
 
-  <section class="panel gallery" id="gallery" aria-label="ギャラリー" hidden>
-    <div class="phead"><h2>ギャラリー</h2>
+  <section class="panel gallery" id="gallery" aria-label="ギャラリー" data-i18n-aria hidden>
+    <div class="phead"><h2 data-i18n>ギャラリー</h2>
       <div class="chips" id="g-chips">
-        <button class="chip active" data-kind="all">全て</button><button class="chip" data-kind="image">画像</button>
-        <button class="chip" data-kind="video">動画</button><button class="chip" data-kind="audio">音楽</button>
+        <button class="chip active" data-kind="all" data-i18n>全て</button><button class="chip" data-kind="image" data-i18n>画像</button>
+        <button class="chip" data-kind="video" data-i18n>動画</button><button class="chip" data-kind="audio" data-i18n>音楽</button>
       </div>
-      <span class="selbar" hidden><span class="selcount"></span><button class="selall" type="button">すべて選択</button><button class="seldel" type="button">削除</button><button class="selend" type="button">やめる</button></span>
-      <span class="pbtns"><button class="seltoggle" type="button" title="サムネイルを選んで、まとめて削除します">選択</button><button id="from-gallery">戻る</button></span>
+      <span class="selbar" hidden><span class="selcount"></span><button class="selall" type="button" data-i18n>すべて選択</button><button class="seldel" type="button" data-i18n>削除</button><button class="selend" type="button" data-i18n>やめる</button></span>
+      <span class="pbtns"><button class="seltoggle" type="button" title="サムネイルを選んで、まとめて削除します" data-i18n-title data-i18n>選択</button><button id="from-gallery" data-i18n>戻る</button></span>
     </div>
     <div class="thumbs big" id="gal-grid"></div>
   </section>
 </main>
 <footer class="credits">
-  <span class="cr">© 2026 ゆずき(YUZUKI)</span>
+  <span class="cr" data-i18n>© 2026 ゆずき(YUZUKI)</span>
   <span class="pw">Powered by
-    <a href="https://huggingface.co/MiniMaxAI" target="_blank" rel="noopener">MiniMax-H3 / H3-Image</a>(MiniMax)、
-    <a href="https://github.com/ace-step/ACE-Step" target="_blank" rel="noopener">ACE-Step</a>(ACE Studio)、
+    <a href="https://huggingface.co/MiniMaxAI" target="_blank" rel="noopener">MiniMax-H3 / H3-Image</a><span data-i18n>(MiniMax)、</span>
+    <a href="https://github.com/ace-step/ACE-Step" target="_blank" rel="noopener">ACE-Step</a><span data-i18n>(ACE Studio)、</span>
     <a href="https://github.com/Aivis-Project/AivisSpeech-Engine" target="_blank" rel="noopener">AivisSpeech</a>(Aivis Project)</span>
-  <span class="lic">モデルとエンジンは、それぞれのライセンスに従います(README のクレジット)</span>
+  <span class="lic" data-i18n>モデルとエンジンは、それぞれのライセンスに従います(README のクレジット)</span>
 </footer>
-<div id="help-win" role="dialog" aria-label="使い方" hidden>
+<div id="help-win" role="dialog" aria-label="使い方" data-i18n-aria hidden>
   <div class="help-head" id="help-head">
-    <b class="help-title">使い方</b>
-    <a id="help-gh" class="help-gh" href="https://github.com/animede/h3-creator-studio/blob/main/docs/USAGE.md" target="_blank" rel="noopener noreferrer" title="GitHub 上の説明を別のタブで開きます">GitHub で開く</a>
-    <button id="help-close" class="mini x" type="button" aria-label="閉じる">×</button>
+    <b class="help-title" data-i18n>使い方</b>
+    <a id="help-gh" class="help-gh" href="https://github.com/animede/h3-creator-studio/blob/main/docs/USAGE.md" target="_blank" rel="noopener noreferrer" title="GitHub 上の説明を別のタブで開きます" data-i18n-title data-i18n>GitHub で開く</a>
+    <button id="help-close" class="mini x" type="button" aria-label="閉じる" data-i18n-aria>×</button>
   </div>
   <div class="help-body">
-    <nav class="help-toc" id="help-toc" aria-label="目次"></nav>
+    <nav class="help-toc" id="help-toc" aria-label="目次" data-i18n-aria></nav>
     <div class="help-main">
-      <select id="help-toc-sel" class="help-toc-sel" aria-label="目次"></select>
+      <select id="help-toc-sel" class="help-toc-sel" aria-label="目次" data-i18n-aria></select>
       <article class="help-content" id="help-content"></article>
     </div>
   </div>
@@ -578,9 +579,10 @@
     <div class="dtext" id="proj-del-text"></div>
     <div class="fld" id="proj-del-out-fld"><label class="chk"><input id="proj-del-out" type="checkbox"><span id="proj-del-out-text"></span></label>
       <span class="note" id="proj-del-note"></span></div>
-    <div class="actions"><button value="ok" class="primary">削除</button><button value="cancel" autofocus>やめる</button></div>
+    <div class="actions"><button value="ok" class="primary" data-i18n>削除</button><button value="cancel" autofocus data-i18n>やめる</button></div>
   </form>
 </dialog>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 <script src="viz.js"></script>
 <script src="gallery.js"></script>

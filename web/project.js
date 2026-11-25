@@ -11,7 +11,7 @@ const VIDEO_SIZES = {
   "4:5": { low: [416, 512], fast: [512, 640], standard: [640, 800], high: [768, 960] },
   "5:4": { low: [512, 416], fast: [640, 512], standard: [800, 640], high: [960, 768] },
 };
-const VIDEO_QUALITY_NOTE = { low: "低 VRAM(6GB 以下)向け。長辺 512 の小さな画", fast: "6〜12GB の GPU 向け。いちばん速い", standard: "16GB 以上の GPU 向け", high: "24GB 以上の GPU 向け。時間がかかります" };
+const VIDEO_QUALITY_NOTE = { low: t("低 VRAM(6GB 以下)向け。長辺 512 の小さな画"), fast: t("6〜12GB の GPU 向け。いちばん速い"), standard: t("16GB 以上の GPU 向け"), high: t("24GB 以上の GPU 向け。時間がかかります") };
 const VIDEO_CUSTOM = { min: 256, max: 1344, step: 32 };
 // 画角と画質の欄から寸法を出す(手動入力なら幅・高さの欄。32 の倍数に丸める)
 function videoSize(aspect, quality, cw, ch) {
@@ -23,10 +23,10 @@ function videoSize(aspect, quality, cw, ch) {
 // JSON の API を呼ぶ(失敗は、サーバの日本語の理由を載せた Error。HTTP の状態は .status に入れる)。
 // 理由が無い失敗(入力の形の誤り 422 以外。サーバの落ち・中継の HTML など)は、通信の失敗として状態の番号を出す
 async function apiJson(url, method = "GET", body) {
-  const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(url, { method, headers: langHeaders(body ? { "Content-Type": "application/json" } : undefined), body: body ? JSON.stringify(body) : undefined });
   const js = await r.json().catch(() => ({}));
   if (!r.ok) {
-    const err = new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? "入力を確認してください" : `通信に失敗しました(${r.status})`);
+    const err = new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? t("入力を確認してください") : t("通信に失敗しました({status})", { status: r.status }));
     err.status = r.status;
     throw err;
   }
@@ -45,13 +45,13 @@ async function apiJson(url, method = "GET", body) {
 //   onOpen()             : タブを開いたとき(制作の一覧を読む前)
 // 戻り値: { select(id) } — 作った制作を開く
 function makeProjectPanel(cfg) {
-  const STATE_LABEL = { analyzing: "分析中", scripting: "演出を作成中", generating: "シーンを生成中", assembling: "結合中", paused: "一時停止",
-    completed: "完成", failed: "失敗", cancelled: "中止" };
-  const SCENE_LABEL = { pending: "待機", running: "生成中", done: "完了", failed: "失敗" };
-  const JOB_LABEL = { queued: "順番待ち", preparing: "準備中", running: "生成中" };
+  const STATE_LABEL = { analyzing: t("分析中"), scripting: t("演出を作成中"), generating: t("シーンを生成中"), assembling: t("結合中"), paused: t("一時停止"),
+    completed: t("完成"), failed: t("失敗"), cancelled: t("中止") };
+  const SCENE_LABEL = { pending: t("待機"), running: t("生成中"), done: t("完了"), failed: t("失敗") };
+  const JOB_LABEL = { queued: t("順番待ち"), preparing: t("準備中"), running: t("生成中") };
   const ACTIVE = ["analyzing", "scripting", "generating", "assembling"];
   const POLL_MS = 2000;
-  const FINAL_AUDIO = [["auto", "自動"], ["none", "音声なし"]];
+  const FINAL_AUDIO = [["auto", t("自動")], ["none", t("音声なし")]];
   const dlg = (id) => $(`${cfg.dialog}-${id}`);
 
   let projects = [];                       // 制作の一覧(新しい順)
@@ -78,7 +78,7 @@ function makeProjectPanel(cfg) {
     const id = current, my = ++loadSeq;
     if (!id) { view = null; return; }
     try {
-      const r = await fetch(`${cfg.base}/${id}`);
+      const r = await fetch(`${cfg.base}/${id}`, { headers: langHeaders() });
       const fresh = () => my === loadSeq && id === current;
       if (!fresh()) return;
       if (r.status === 404) { current = null; view = null; }
@@ -120,7 +120,7 @@ function makeProjectPanel(cfg) {
       if (v && v.id === current) { view = v; renderProject(); }
     } catch (e) {
       ui.actionErr.hidden = false;
-      ui.actionErr.textContent = `できませんでした: ${e.message || e}`;
+      ui.actionErr.textContent = t("できませんでした: {error}", { error: e.message || e });
     }
     await refresh();
     schedule();
@@ -132,8 +132,8 @@ function makeProjectPanel(cfg) {
     dlg("del-text").textContent = text;
     dlg("del-out").checked = false;
     dlg("del-out-fld").hidden = !outs;
-    dlg("del-out-text").textContent = `完成した ${cfg.noun} も削除する(${outs} 本)`;
-    dlg("del-note").textContent = `チェックしないと、完成した ${cfg.noun} はギャラリーに残ります`;
+    dlg("del-out-text").textContent = t("完成した {noun} も削除する({n} 本)", { noun: cfg.noun, n: outs });
+    dlg("del-note").textContent = t("チェックしないと、完成した {noun} はギャラリーに残ります", { noun: cfg.noun });
     d.returnValue = "";
     return new Promise((resolve) => {
       d.addEventListener("close", () => resolve(d.returnValue === "ok" ? { out: dlg("del-out").checked } : null), { once: true });      // Esc で閉じても close になる
@@ -147,8 +147,8 @@ function makeProjectPanel(cfg) {
   // 制作を消す(1 件でも、まとめてでも)。完成した動画は、選べばいっしょに消す。消したら true、やめたら false
   async function removeProjects(ids) {
     const list = ids.map((id) => projects.find((p) => p.id === id) || { id, title: cfg.noun });
-    const what = list.length === 1 ? `「${list[0].title}」の制作` : `${list.length} 件の制作`;
-    const ask = await askDelete(`${what}を削除しますか?\nシーンのクリップも消えます。`, new Set(list.flatMap(outputsOf)).size);
+    const what = list.length === 1 ? t("「{title}」の制作を削除しますか?\nシーンのクリップも消えます。", { title: list[0].title }) : t("{n} 件の制作を削除しますか?\nシーンのクリップも消えます。", { n: list.length });
+    const ask = await askDelete(what, new Set(list.flatMap(outputsOf)).size);
     if (!ask) return false;
     const gone = [], refused = [], failed = [];
     for (const p of list) {
@@ -163,8 +163,8 @@ function makeProjectPanel(cfg) {
     if (gone.length) await forget(gone);
     schedule();
     const notes = [];
-    if (failed.length) notes.push(`${failed.length} 件の制作は削除できませんでした。\n${failed.join("\n")}`);
-    if (refused.length) notes.push(refusedText(refused, `使っているものがあるので、完成した ${cfg.noun} の一部は残しました。`));
+    if (failed.length) notes.push(t("{n} 件の制作は削除できませんでした。", { n: failed.length }) + "\n" + failed.join("\n"));
+    if (refused.length) notes.push(refusedText(refused, t("使っているものがあるので、完成した {noun} の一部は残しました。", { noun: cfg.noun })));
     if (notes.length) alert(notes.join("\n\n"));
     return true;
   }
@@ -206,13 +206,13 @@ function makeProjectPanel(cfg) {
     ui.autoSig = "";
     const base = `${cfg.base}/${v.id}`;
     ui.btns = {
-      pause: button("一時停止", () => act(`${base}/pause`), "走っている仕事は終わるまで続け、順番待ちの仕事は取り下げて止めます"),
-      resume: button("再開", () => act(`${base}/resume`), "できているところから続けます"),
-      cancel: button("中止", () => act(`${base}/cancel`), "走っている仕事を止めます(あとで再開できます)"),
-      reassemble: button("結合し直す", () => act(`${base}/reassemble`, "POST", cfg.finalAudio || cfg.subtitles
+      pause: button(t("一時停止"), () => act(`${base}/pause`), t("走っている仕事は終わるまで続け、順番待ちの仕事は取り下げて止めます")),
+      resume: button(t("再開"), () => act(`${base}/resume`), t("できているところから続けます")),
+      cancel: button(t("中止"), () => act(`${base}/cancel`), t("走っている仕事を止めます(あとで再開できます)")),
+      reassemble: button(t("結合し直す"), () => act(`${base}/reassemble`, "POST", cfg.finalAudio || cfg.subtitles
         ? { ...(cfg.finalAudio ? { final_audio: ui.audio.value } : {}), ...(cfg.subtitles && !ui.subs.hidden ? { subtitles: ui.subs.firstChild.checked } : {}) } : undefined),
-        `いまのクリップをつなぎ直して、新しい ${cfg.noun} を作ります`),
-      remove: button("削除", () => removeProjects([v.id]), `この制作とクリップを消します(完成した ${cfg.noun} も消すかは、確認で選べます)`),
+        t("いまのクリップをつなぎ直して、新しい {noun} を作ります", { noun: cfg.noun })),
+      remove: button(t("削除"), () => removeProjects([v.id]), t("この制作とクリップを消します(完成した {noun} も消すかは、確認で選べます)", { noun: cfg.noun })),
     };
     const head = el("div", "mvhead");
     const title = el("div", "mvtitle");
@@ -220,9 +220,9 @@ function makeProjectPanel(cfg) {
     const btns = el("div", "mvbtns");
     if (cfg.finalAudio) {      // 結合し直すときの最終の音声(制作の設定。結合し直すと書き換わる)
       ui.audio = el("select");
-      ui.audio.setAttribute("aria-label", "最終の音声");
-      ui.audio.title = "最終の音声: 自動 = 読み上げ・曲・H3 の音から決めます / 音声なし = 映像だけの MP4";
-      for (const [value, label] of FINAL_AUDIO) { const o = el("option", "", `音声: ${label}`); o.value = value; ui.audio.append(o); }
+      ui.audio.setAttribute("aria-label", t("最終の音声"));
+      ui.audio.title = t("最終の音声: 自動 = 読み上げ・曲・H3 の音から決めます / 音声なし = 映像だけの MP4");
+      for (const [value, label] of FINAL_AUDIO) { const o = el("option", "", t("音声: {label}", { label })); o.value = value; ui.audio.append(o); }
       ui.audioTouched = false;
       ui.audio.onchange = () => { ui.audioTouched = true; };
     }
@@ -230,8 +230,8 @@ function makeProjectPanel(cfg) {
       const box = el("input");
       box.type = "checkbox";
       ui.subs = el("label", "chk");
-      ui.subs.append(box, "テロップ");
-      ui.subs.title = "セリフのテロップ(字幕)を焼き込む";
+      ui.subs.append(box, t("テロップ"));
+      ui.subs.title = t("セリフのテロップ(字幕)を焼き込む");
       ui.subsTouched = false;
       box.onchange = () => { ui.subsTouched = true; };
     }
@@ -244,13 +244,13 @@ function makeProjectPanel(cfg) {
     ui.video = el("video");
     ui.video.controls = true;
     ui.video.preload = "metadata";
-    ui.fnote = el("span", "mvnote", "古い版です。結合し直すと更新されます");
+    ui.fnote = el("span", "mvnote", t("古い版です。結合し直すと更新されます"));
     ui.fnote.hidden = true;
     ui.finfo = el("span");
-    ui.save = el("a", "btn", "保存");
+    ui.save = el("a", "btn", t("保存"));
     ui.save.download = "";
     ui.srt = el("a", "btn", "SRT");
-    ui.srt.title = "テロップの SRT(投稿サイトの字幕用)";
+    ui.srt.title = t("テロップの SRT(投稿サイトの字幕用)");
     ui.srt.hidden = true;
     const fbar = el("div", "fbar");
     fbar.append(ui.save, ui.srt, ui.finfo, ui.fnote);
@@ -268,7 +268,7 @@ function makeProjectPanel(cfg) {
     row.kind = el("span", "badge");
     row.time = el("span", "mvs-time");
     row.meta = el("span", "mvs-meta");
-    head.append(el("b", "", `シーン ${s.index}`), row.time, row.kind, row.status, row.meta);
+    head.append(el("b", "", t("シーン {n}", { n: s.index })), row.time, row.kind, row.status, row.meta);
     const body = el("div", "mvs-body");
     row.video = el("video", "mvs-video");
     row.video.controls = true;
@@ -276,8 +276,8 @@ function makeProjectPanel(cfg) {
     row.video.hidden = true;
     row.none = el("div", "mvs-none");
     const actions = el("div", "mvs-actions");
-    row.retry = button("やり直す", () => retry(row, false), "別の seed で作り直します(全シーンができると、自動で結合し直します)");
-    row.editBtn = button("プロンプトを編集", () => toggleEdit(row), "演出(H3 に渡すプロンプト)と seed を直して、そのシーンだけ作り直します");
+    row.retry = button(LANG === "en" ? t("やり直す(シーン)") : "やり直す", () => retry(row, false), t("別の seed で作り直します(全シーンができると、自動で結合し直します)"));      // i18n-skip: 編集の「やり直す」(Redo)と英語を分ける(シーンは Retry)
+    row.editBtn = button(t("プロンプトを編集"), () => toggleEdit(row), t("演出(H3 に渡すプロンプト)と seed を直して、そのシーンだけ作り直します"));
     actions.append(row.retry, row.editBtn);
     body.append(row.video, row.none, actions);
     row.editor = el("div", "mvs-edit");
@@ -290,7 +290,7 @@ function makeProjectPanel(cfg) {
     row.seed.placeholder = "seed";
     row.seed.setAttribute("aria-label", "seed");
     const inline = el("div", "inline");
-    inline.append(row.seed, button("この内容でやり直す", () => retry(row, true)), button("閉じる", () => toggleEdit(row)));
+    inline.append(row.seed, button(t("この内容でやり直す"), () => retry(row, true)), button(t("閉じる"), () => toggleEdit(row)));
     row.editor.append(row.ta, inline);
     row.err = el("div", "mvs-err");
     row.err.hidden = true;
@@ -325,11 +325,11 @@ function makeProjectPanel(cfg) {
     act(`${cfg.base}/${view.id}/scenes/${row.index}/retry`, "POST", body);
   }
 
-  const defaultKind = (v, s) => ({ text: s.kind === "vocal" ? "歌唱" : "器楽", title: `歌っている割合 ${Math.round((s.vocal_ratio || 0) * 100)}%` });
+  const defaultKind = (v, s) => ({ text: s.kind === "vocal" ? t("歌唱") : t("器楽"), title: t("歌っている割合 {pct}%", { pct: Math.round((s.vocal_ratio || 0) * 100) }) });
 
   function updateRow(row, v, s) {
     row.el.className = "mvscene " + s.status + (v.params.height > v.params.width ? " tall" : "");      // 縦長の動画は、小さい動画も少し高く
-    row.time.textContent = `${fmtDur(s.start)}–${fmtDur(s.end)}(${s.duration.toFixed(1)} 秒)`;
+    row.time.textContent = t("{start}–{end}({sec} 秒)", { start: fmtDur(s.start), end: fmtDur(s.end), sec: s.duration.toFixed(1) });
     const kind = (cfg.kindBadge || defaultKind)(v, s);
     row.kind.hidden = !kind;
     if (kind) {
@@ -352,7 +352,7 @@ function makeProjectPanel(cfg) {
     }
     row.status.className = "badge " + s.status;
     row.status.textContent = s.status === "running" && s.job_status ? JOB_LABEL[s.job_status] || SCENE_LABEL.running : SCENE_LABEL[s.status] || s.status;
-    row.meta.textContent = [s.seed != null ? `seed ${s.seed}` : "", s.elapsed_s ? `生成 ${fmtSec(s.elapsed_s)}` : "", s.peak_vram_gb ? `VRAM ${(+s.peak_vram_gb).toFixed(1)}GB` : ""]
+    row.meta.textContent = [s.seed != null ? `seed ${s.seed}` : "", s.elapsed_s ? t("生成 {time}", { time: fmtSec(s.elapsed_s) }) : "", s.peak_vram_gb ? `VRAM ${(+s.peak_vram_gb).toFixed(1)}GB` : ""]
       .filter(Boolean).join(" · ");
     row.err.hidden = !s.error;
     row.err.textContent = s.error || "";
@@ -364,7 +364,7 @@ function makeProjectPanel(cfg) {
     } else {
       row.video.hidden = true;
       row.none.hidden = false;
-      row.none.textContent = s.status === "running" ? "生成中…" : s.status === "failed" ? "失敗" : s.prompt ? "未生成" : "演出待ち";
+      row.none.textContent = s.status === "running" ? t("生成中…") : s.status === "failed" ? t("失敗") : s.prompt ? t("未生成") : t("演出待ち");
       if (row.video.dataset.src) { row.video.removeAttribute("src"); row.video.load(); delete row.video.dataset.src; }
     }
     const idle = !!s.prompt && s.status !== "running" && v.state !== "assembling";
@@ -405,11 +405,11 @@ function makeProjectPanel(cfg) {
     ui.bar.title = `${p}%`;
     const pr = v.params;
     const parts = { pct: `${p}%`, size: `${pr.width}×${pr.height}(${pr.aspect})`,
-      scenes: v.scenes.length ? `${v.scenes.filter((s) => s.status === "done").length} / ${v.scenes.length} シーン` : "", elapsed: live ? `経過 ${fmtElapsed(v.created_at)}` : "" };
+      scenes: v.scenes.length ? t("{done} / {total} シーン", { done: v.scenes.filter((s) => s.status === "done").length, total: v.scenes.length }) : "", elapsed: live ? t("経過 {time}", { time: fmtElapsed(v.created_at) }) : "" };
     ui.meta.textContent = (cfg.meta ? cfg.meta(v, parts) : [parts.pct, parts.size, parts.scenes, parts.elapsed]).filter(Boolean).join("  ");
     renderAuto(v);
-    if (v.error) { ui.err.hidden = false; ui.err.textContent = `失敗: ${v.error}`; }
-    else if (ui.err.textContent.startsWith("失敗:")) { ui.err.hidden = true; ui.err.textContent = ""; }
+    if (v.error) { ui.err.hidden = false; ui.err.textContent = t("失敗: {error}", { error: v.error }); }
+    else if (ui.err.textContent.startsWith(t("失敗: {error}", { error: "" }))) { ui.err.hidden = true; ui.err.textContent = ""; }
     const done = v.scenes.length > 0 && v.scenes.every((s) => s.status === "done");
     const b = ui.btns;
     b.pause.hidden = !live;
@@ -452,29 +452,29 @@ function makeProjectPanel(cfg) {
   // ---- 右下: 制作の履歴 ----
 
   function projectNode(p) {
-    const t = el("div", "thumb mvcard");
-    t.title = `${p.title}\n${p.message || ""}`;
+    const card = el("div", "thumb mvcard");
+    card.title = `${p.title}\n${p.message || ""}`;
     if (p.thumb_url) {
       const img = el("img");
       img.src = p.thumb_url;
       img.alt = p.title;
       img.loading = "lazy";
       img.draggable = false;
-      t.append(img);
+      card.append(img);
     } else {
-      t.append(el("div", "nothumb video", cfg.cardLabel));
+      card.append(el("div", "nothumb video", cfg.cardLabel));
     }
-    t.append(el("span", "tbadge top", p.title));
-    t.append(el("span", "tbadge state", `${STATE_LABEL[p.state] || p.state}${ACTIVE.includes(p.state) ? ` ${pct(p.progress)}%` : ""}`));
-    t.classList.toggle("sel", !studio.select.on && p.id === current);
-    if (studio.select.on) { pickable(t, p.id); return t; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
-    t.onclick = () => select(p.id);
+    card.append(el("span", "tbadge top", p.title));
+    card.append(el("span", "tbadge state", `${STATE_LABEL[p.state] || p.state}${ACTIVE.includes(p.state) ? ` ${pct(p.progress)}%` : ""}`));
+    card.classList.toggle("sel", !studio.select.on && p.id === current);
+    if (studio.select.on) { pickable(card, p.id); return card; }      // 選択モード: クリックは選び直し(×もドラッグも無し)
+    card.onclick = () => select(p.id);
     const x = el("button", "tdel", "×");
-    x.title = "削除";
+    x.title = t("削除");
     x.onclick = (e) => { e.stopPropagation(); removeProjects([p.id]); };
-    t.append(x);
-    if (p.output) makeDraggable(t, p.output.id);      // 完成した動画は、ふつうの動画として他のタブへ落とせる
-    return t;
+    card.append(x);
+    if (p.output) makeDraggable(card, p.output.id);      // 完成した動画は、ふつうの動画として他のタブへ落とせる
+    return card;
   }
 
   // 一覧が変わっていなければ描き直さない(2 秒おきの更新で、ドラッグ中のカードを作り直さないように)。タブの切り替えなどでは force で描く

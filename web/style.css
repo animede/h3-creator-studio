@@ -523,6 +523,7 @@ fieldset.edbody:disabled { opacity: .55; }
 /* 「使い方」の窓(web/help.js): 画面の上に浮かぶ、動かせて大きさを変えられる窓。中の目次と本文は別々にスクロールする */
 .help-btn { margin-left: 4px; padding: 2px 14px; align-self: center; }
 .help-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lang-select { margin-left: 4px; width: auto; padding: 2px 6px; align-self: center; font-size: 12px; }
 #help-win { position: fixed; z-index: 50; display: flex; flex-direction: column; min-width: 360px; min-height: 300px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px);
   resize: both; overflow: hidden; background: var(--panel); border: 1px solid #3b4250; border-radius: 8px; box-shadow: 0 10px 34px rgba(0, 0, 0, .6); }
 #help-win[hidden] { display: none; }

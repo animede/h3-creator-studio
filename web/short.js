@@ -8,11 +8,11 @@
   const LENGTH_MIN = 30, LENGTH_MAX = 3600, WARN_S = 300;      // 曲もセリフも無いときの長さの範囲(秒。サーバと同じ)と、警告を出す長さ(5 分)
   const SCENE_S = 7.5, SCENE_MIN_A4000 = 3.5;           // 警告の見積り: シーンの平均の長さ(秒)と、A4000 の高速で 1 シーンにかかる時間(分)
   const SPEECH_CHARS_PER_S = 5.5;                       // 読み上げの長さの目安(1 秒あたりの文字数。実際の長さは、作り始めて読み上げを作ってから決まる)
-  const ROLE_LABEL = { person: "人物", scenery: "景色・物" };
-  const TIMELINE_LABEL = { speech: "セリフ", music: "曲", free: "指定の長さ" };
+  const ROLE_LABEL = { person: t("人物"), scenery: t("景色・物") };
+  const TIMELINE_LABEL = { speech: t("セリフ"), music: t("曲"), free: t("指定の長さ") };
   // 制作に出す「自動で入れた人物の説明」の出どころ(サーバの character_source。書いた説明 typed は出さない)
-  const AUTO_HOW = { vision: "画像を見て自動で作りました", image: "画像のプロンプトから入れました",
-    none: "画像を読めなかったので、空のままです(演出は、画像の人物としか書きません)" };
+  const AUTO_HOW = { vision: t("画像を見て自動で作りました"), image: t("画像のプロンプトから入れました"),
+    none: t("画像を読めなかったので、空のままです(演出は、画像の人物としか書きません)") };
 
   const sh = (id) => $("sh-" + id);
   let song = null;                         // 曲(生成物のレコード)
@@ -38,7 +38,7 @@
 
   // 自動で作った文を欄に入れる(自動で入れた文の印を付ける)。書いた文があれば、置き換えてよいか確かめる。入れたら true
   function putAuto(ta, text) {
-    if (ta.value.trim() && ta.value !== ta.dataset.auto && !confirm("書いた内容を、自動で作った文に置き換えますか?")) return false;
+    if (ta.value.trim() && ta.value !== ta.dataset.auto && !confirm(t("書いた内容を、自動で作った文に置き換えますか?"))) return false;
     ta.value = ta.dataset.auto = text;
     changed();
     return true;
@@ -57,7 +57,7 @@
     const t0 = Date.now();
     const draw = () => {
       const sec = Math.round((Date.now() - t0) / 1000);
-      sh(which + "-busy-text").textContent = `${label()}(経過 ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")})`;
+      sh(which + "-busy-text").textContent = t("{label}(経過 {time})", { label: label(), time: `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` });
     };
     busy[which] = true;
     sh(which + "-busy").hidden = false;
@@ -80,18 +80,18 @@
   function renderSong() {
     const body = sh("song").querySelector(".frame-body");
     body.replaceChildren();
-    if (!song) { body.append(el("div", "refs-empty", "ここに曲をドロップ")); return; }
+    if (!song) { body.append(el("div", "refs-empty", t("ここに曲をドロップ"))); return; }
     const c = el("div", "songitem");
     const text = el("div", "stext");
     const info = el("div", "sinfo", [song.duration_s ? fmtDur(song.duration_s) : "", song.params && song.params.genre, song.filename].filter(Boolean).join("  "));
     info.title = info.textContent;      // ジャンルが自由に書いた長い文のことがある(1 行に収め、全文は吹き出しに)
-    text.append(el("div", "stitle", (song.params && song.params.theme) || song.filename || "曲"), info);
+    text.append(el("div", "stitle", (song.params && song.params.theme) || song.filename || t("曲")), info);
     const a = el("audio");
     a.controls = true;
     a.src = song.url;
     text.append(a);
     const x = el("button", "rdel", "×");
-    x.title = "外す";
+    x.title = t("外す");
     x.onclick = clearSong;
     c.append(el("div", "aicon", "🎵"), text, x);
     makeDraggable(c, song.id);
@@ -99,7 +99,7 @@
   }
 
   function setSong(item) {
-    if (item.kind !== "audio") { showMsg("曲には音声を落としてください(音楽タブの曲、または音声ファイル)"); return false; }
+    if (item.kind !== "audio") { showMsg(t("曲には音声を落としてください(音楽タブの曲、または音声ファイル)")); return false; }
     song = item;
     showMsg("");
     renderSong();
@@ -125,10 +125,10 @@
       img.src = r.item.thumb_url || r.item.url;
       img.title = r.item.filename || "";
       img.draggable = false;
-      const name = el("div", "shname", r.item.filename || "画像");
+      const name = el("div", "shname", r.item.filename || t("画像"));
       name.title = String((r.item.params && r.item.params.prompt) || r.item.filename || "");
       const role = el("select");
-      role.setAttribute("aria-label", "役割");
+      role.setAttribute("aria-label", t("役割"));
       for (const [value, label] of Object.entries(ROLE_LABEL)) {
         const o = el("option", "", label);
         o.value = value;
@@ -139,7 +139,7 @@
       role.onchange = () => { r.role = role.value; renderImages(); changed(); };
       const x = el("button", "rdel", "×");
       x.type = "button";
-      x.title = "外す";
+      x.title = t("外す");
       x.onclick = () => { images = images.filter((v) => v !== r); renderImages(); changed(); };      // 画像を見ている最中なら、その答えは使わない(describeImage が見分ける)
       row.append(img, name, role, x);
       list.append(row);
@@ -159,9 +159,9 @@
 
   // role は、サンプルなど役割が決まっているときだけ渡す(人物は 1 枚までなので、2 枚目の人物は景色・物にする)
   function addImage(item, role) {
-    if (item.kind !== "image") { showMsg("参照画像には画像を落としてください"); return false; }
-    if (images.some((r) => r.item.id === item.id)) { showMsg("その画像はもう入っています"); return false; }
-    if (images.length >= IMAGES_MAX) { showMsg(`参照画像は ${IMAGES_MAX} 枚までです`); return false; }
+    if (item.kind !== "image") { showMsg(t("参照画像には画像を落としてください")); return false; }
+    if (images.some((r) => r.item.id === item.id)) { showMsg(t("その画像はもう入っています")); return false; }
+    if (images.length >= IMAGES_MAX) { showMsg(t("参照画像は {n} 枚までです", { n: IMAGES_MAX })); return false; }
     images.push({ item, role: (role || "person") === "person" && !person() ? "person" : "scenery" });      // 最初の 1 枚は人物、2 枚目からは景色・物(役割は選び直せる)
     showMsg("");
     renderImages();
@@ -173,9 +173,9 @@
   async function upload(files, box, kind, set) {
     try {
       const recs = (await uploadFiles(files, box)).filter((r) => r.kind === kind);
-      if (!recs.length) showMsg(`${kind === "audio" ? "音声" : "画像"}のファイルではありません(ギャラリーには保存しました)`);
+      if (!recs.length) showMsg(kind === "audio" ? t("音声のファイルではありません(ギャラリーには保存しました)") : t("画像のファイルではありません(ギャラリーには保存しました)"));
       for (const rec of recs) if (!set(rec)) break;
-    } catch (e) { showMsg(`取り込めませんでした: ${e.message || e}`); }
+    } catch (e) { showMsg(t("取り込めませんでした: {error}", { error: e.message || e })); }
   }
 
   const active = () => studio.tab === "short";
@@ -198,15 +198,15 @@
     const target = p.item;
     showMsg("");
     setNote("char", "");
-    const stop = startBusy("char", () => "画像を見ています…");
+    const stop = startBusy("char", () => t("画像を見ています…"));
     try {
       const js = await api("/api/mv/describe/image", "POST", { image_id: target.id });
       const now = person();
       if (!now || now.item !== target) return;       // 待っている間に、人物の画像が入れ替わった
       if (js.text && !putAuto(sh("char"), js.text)) return;
-      setNote("char", js.source === "vision" ? "画像を見て作りました。確かめて、直してから作れます" : js.note);
+      setNote("char", js.source === "vision" ? t("画像を見て作りました。確かめて、直してから作れます") : js.note);
     } catch (e) {
-      showMsg(`人物の説明を作れませんでした: ${e.message || e}`);
+      showMsg(t("人物の説明を作れませんでした: {error}", { error: e.message || e }));
     } finally {
       stop();
     }
@@ -218,13 +218,13 @@
     if (!story || busy.narr) return;
     showMsg("");
     setNote("narr", "");
-    const stop = startBusy("narr", () => "ナレーションを考えています…");
+    const stop = startBusy("narr", () => t("ナレーションを考えています…"));
     try {
       const js = await api("/api/short/describe/narration", "POST", { story, song_id: song ? song.id : "" });
       if (!putAuto(sh("narr"), js.text)) return;
-      setNote("narr", "物語から作りました。確かめて、直してから作れます");
+      setNote("narr", t("物語から作りました。確かめて、直してから作れます"));
     } catch (e) {
-      showMsg(`ナレーションを作れませんでした: ${e.message || e}`);
+      showMsg(t("ナレーションを作れませんでした: {error}", { error: e.message || e }));
     } finally {
       stop();
     }
@@ -244,12 +244,12 @@
     if (speakers || speakersLoading) return;
     speakersLoading = true;
     speakersFailed = false;
-    setSpeakerNote("話者を読み込んでいます(AivisSpeech が止まっていれば起動します)…");
+    setSpeakerNote(t("話者を読み込んでいます(AivisSpeech が止まっていれば起動します)…"));
     try {
-      const r = await fetch("/api/tts/speakers");
+      const r = await fetch("/api/tts/speakers", { headers: langHeaders() });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
       const list = await r.json();
-      if (!list.length) throw new Error("話者が見つかりません");
+      if (!list.length) throw new Error(t("話者が見つかりません"));
       const sel = sh("speaker");
       const keep = sel.value;
       sel.replaceChildren(...list.map((s) => { const o = el("option", "", s.label); o.value = s.style_id; return o; }));
@@ -258,11 +258,11 @@
       try { saved = localStorage.getItem("tts-style"); } catch (e) { /* 保存できなくても動く */ }      // 動画タブの TTS と同じ選びを引き継ぐ
       const want = [pendingSpeaker, keep, saved].find((v) => v != null && v !== "" && list.some((s) => String(s.style_id) === String(v)));
       if (want != null) sel.value = String(want);
-      setSpeakerNote(pendingSpeaker != null && String(sel.value) !== String(pendingSpeaker) ? "プリセットの話者は、この環境にありません" : "");
+      setSpeakerNote(pendingSpeaker != null && String(sel.value) !== String(pendingSpeaker) ? t("プリセットの話者は、この環境にありません") : "");
       pendingSpeaker = null;
     } catch (e) {
       speakersFailed = true;
-      setSpeakerNote(`話者を取得できません: ${e.message || e}(話者の欄を押すと読み直します)`);
+      setSpeakerNote(t("話者を取得できません: {error}(話者の欄を押すと読み直します)", { error: e.message || e }));
     } finally {
       speakersLoading = false;
     }
@@ -275,29 +275,29 @@
 
   // 長さの見込み(秒): セリフ → 読み上げ(文字数からの目安)/ 曲 → 曲の長さ / どちらも無し → 指定の長さ
   function expectedSeconds() {
-    const t = timeline();
-    if (t === "free") { const n = +sh("length").value; return n > 0 ? n : null; }
-    if (t === "music") return song.duration_s || null;
+    const tl = timeline();
+    if (tl === "free") { const n = +sh("length").value; return n > 0 ? n : null; }
+    if (tl === "music") return song.duration_s || null;
     return Math.round(sh("narr").value.replace(/\s/g, "").length / SPEECH_CHARS_PER_S);
   }
 
   // 入力が変わったときに追従するエンジン: 物語の必須の案内・曲の BGM の案内・長さの欄と案内・5 分超の警告・ボタン
   function changed() {
-    const t = timeline();
+    const tl = timeline();
     syncPerson();
-    sh("story-req").textContent = t === "free" ? "(必須: 曲もセリフも無いので、これが元になります)" : "(任意)";
-    sh("bgm-note").hidden = !(t === "speech" && song);
-    sh("length-fld").hidden = t !== "free";
+    sh("story-req").textContent = tl === "free" ? t("(必須: 曲もセリフも無いので、これが元になります)") : t("(任意)");
+    sh("bgm-note").hidden = !(tl === "speech" && song);
+    sh("length-fld").hidden = tl !== "free";
     const sec = expectedSeconds();
     const note = sh("len-note");
-    note.hidden = t === "free";
-    if (t === "music") note.textContent = `長さ: 曲の長さ${sec ? `(${fmtDur(sec)})` : ""}`;
-    else if (t === "speech") note.textContent = `長さ: 読み上げの長さ(目安 約 ${fmtDur(sec || 0)}。作り始めて読み上げを作ると決まります)${song ? "。曲は BGM になります" : ""}`;
+    note.hidden = tl === "free";
+    if (tl === "music") note.textContent = sec ? t("長さ: 曲の長さ({dur})", { dur: fmtDur(sec) }) : t("長さ: 曲の長さ");
+    else if (tl === "speech") note.textContent = t("長さ: 読み上げの長さ(目安 約 {dur}。作り始めて読み上げを作ると決まります)", { dur: fmtDur(sec || 0) }) + (song ? t("。曲は BGM になります") : "");
     const warn = sh("len-warn");
     warn.hidden = !(sec && sec > WARN_S);
     if (!warn.hidden) {
       const hours = Math.round((sec / SCENE_S) * SCENE_MIN_A4000 / 6) / 10;      // シーン数 × 3.5 分 を時間に(小数 1 位)
-      warn.textContent = `${t === "speech" ? `読み上げは目安で約 ${Math.round(sec / 60)} 分です。` : ""}5 分を超えます。A4000 の高速で 1 シーン約 3.5 分 → 約 ${hours} 時間`;
+      warn.textContent = (tl === "speech" ? t("読み上げは目安で約 {min} 分です。", { min: Math.round(sec / 60) }) : "") + t("5 分を超えます。A4000 の高速で 1 シーン約 3.5 分 → 約 {hours} 時間", { hours });
     }
     updateAuto();
     updateGo();
@@ -315,7 +315,7 @@
     sh("custom").hidden = !customSize();
     const [w, h] = videoSize(sh("aspect").value, sh("quality").value, sh("cw").value, sh("ch").value);
     sh("size").textContent = `(${w}×${h})`;
-    sh("qnote").textContent = customSize() ? "幅・高さを直接指定(256〜1344、32 の倍数に丸めます)。画質の欄は使いません" : QUALITY_NOTE[sh("quality").value];
+    sh("qnote").textContent = customSize() ? t("幅・高さを直接指定(256〜1344、32 の倍数に丸めます)。画質の欄は使いません") : QUALITY_NOTE[sh("quality").value];
   }
   sh("aspect").onchange = renderSize;
   sh("cw").oninput = sh("ch").oninput = renderSize;
@@ -325,7 +325,7 @@
   // 既定の画質: VRAM が 16GiB 未満なら高速、それ以上なら標準(利用者が選んだ後は触らない)
   async function pickQuality() {
     try {
-      const s = await fetch("/api/status").then((r) => r.json());
+      const s = await fetch("/api/status", { headers: langHeaders() }).then((r) => r.json());
       if (!qualityTouched) sh("quality").value = s.gpu && s.gpu.total_mib >= 16 * 1024 ? "standard" : "fast";
     } catch (e) { /* GPU の様子が分からなければ高速のまま */ }
     renderSize();
@@ -336,7 +336,7 @@
     const need = timeline() === "music" && !tools.available;
     sh("go").disabled = creating || need;
     $("sh-tools").hidden = !need;
-    $("sh-tools").textContent = need ? (tools.hint || "曲の分析に必要な道具が見つかりません") : "";
+    $("sh-tools").textContent = need ? (tools.hint || t("曲の分析に必要な道具が見つかりません")) : "";
   }
 
   async function loadTools() {
@@ -347,30 +347,30 @@
   // ---- 作る ----
 
   async function generate() {
-    const t = timeline();
+    const tl = timeline();
     const story = sh("story").value.trim(), narration = sh("narr").value.trim();
-    if (!story && !song && !narration) { showMsg("物語・映像のイメージを書いてください(曲もセリフも無いときは必須です)"); return; }
-    if (narration && !person()) { showMsg("セリフがあるときは、口を合わせる人物の画像を入れて、役割を「人物」にしてください"); return; }
-    if (narration && !speakers) { speakersFailed = false; loadSpeakers(); showMsg("話者の一覧を読めていません。読み込んでから、話者を選んでください"); return; }      // 読めていなければ読み直す
-    if (narration && !sh("speaker").value) { showMsg("セリフを読み上げる話者を選んでください"); return; }
+    if (!story && !song && !narration) { showMsg(t("物語・映像のイメージを書いてください(曲もセリフも無いときは必須です)")); return; }
+    if (narration && !person()) { showMsg(t("セリフがあるときは、口を合わせる人物の画像を入れて、役割を「人物」にしてください")); return; }
+    if (narration && !speakers) { speakersFailed = false; loadSpeakers(); showMsg(t("話者の一覧を読めていません。読み込んでから、話者を選んでください")); return; }      // 読めていなければ読み直す
+    if (narration && !sh("speaker").value) { showMsg(t("セリフを読み上げる話者を選んでください")); return; }
     const min = +sh("min").value, max = +sh("max").value;
-    if (!(min >= 5 && max <= 10 && min <= max)) { showMsg("シーンの長さは 5〜10 秒で、最短は最長以下にしてください"); return; }
+    if (!(min >= 5 && max <= 10 && min <= max)) { showMsg(t("シーンの長さは 5〜10 秒で、最短は最長以下にしてください")); return; }
     const length = +sh("length").value;
-    if (t === "free" && !(length >= LENGTH_MIN && length <= LENGTH_MAX)) { showMsg(`長さは ${LENGTH_MIN}〜${LENGTH_MAX} 秒で指定してください`); return; }
-    if (t === "music" && !tools.available) { showMsg(tools.hint || "曲の分析に必要な道具が見つかりません"); return; }
+    if (tl === "free" && !(length >= LENGTH_MIN && length <= LENGTH_MAX)) { showMsg(t("長さは {min}〜{max} 秒で指定してください", { min: LENGTH_MIN, max: LENGTH_MAX })); return; }
+    if (tl === "music" && !tools.available) { showMsg(tools.hint || t("曲の分析に必要な道具が見つかりません")); return; }
     const seed = sh("random").checked || sh("seed").value === "" ? null : parseInt(sh("seed").value, 10);
     showMsg("");
     creating = true;
     updateGo();
     try {
       const js = await api("/api/short", "POST", { story, song_id: song ? song.id : "", narration, speaker_id: narration ? +sh("speaker").value : null,
-        images: images.map((r) => ({ id: r.item.id, role: r.role, description: "" })), length_s: t === "free" ? length : null,
+        images: images.map((r) => ({ id: r.item.id, role: r.role, description: "" })), length_s: tl === "free" ? length : null,
         character: person() ? sh("char").value.trim() : "", aspect: sh("aspect").value, quality: sh("quality").value,
         width: customSize() ? +sh("cw").value : null, height: customSize() ? +sh("ch").value : null, min_s: min, max_s: max, seed,
         background_text: sh("bgtext").value, final_audio: sh("final").value, subtitles: sh("subs").checked });
       await select(js.id);
     } catch (e) {
-      showMsg(`ショート動画を始められませんでした: ${e.message || e}`);
+      showMsg(t("ショート動画を始められませんでした: {error}", { error: e.message || e }));
     } finally {
       creating = false;
       updateGo();
@@ -391,17 +391,17 @@
   // 書かれている項目だけ反映する(知らない項目は無視)。選べない値は入れず、そのままにした項目として知らせる
   function applyPresetValues(v) {
     const skipped = [];
-    for (const [key, id, label] of [["aspect", "aspect", "画角"], ["quality", "quality", "画質"], ["final_audio", "final", "最終の音声"]]) {
+    for (const [key, id, label] of [["aspect", "aspect", t("画角")], ["quality", "quality", t("画質")], ["final_audio", "final", t("最終の音声")]]) {
       if (key in v && !presetSet(sh(id), v[key])) skipped.push(label);      // change で寸法の表示が合う
     }
     for (const [key, id] of [["width", "cw"], ["height", "ch"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
-    if ("background_text" in v && !presetSet(sh("bgtext"), v.background_text)) skipped.push("背景の文字");
+    if ("background_text" in v && !presetSet(sh("bgtext"), v.background_text)) skipped.push(t("背景の文字"));
     if (typeof v.subtitles === "boolean") presetSet(sh("subs"), v.subtitles);
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
     if (Number.isFinite(v.length_s) && v.length_s >= LENGTH_MIN && v.length_s <= LENGTH_MAX) presetSet(sh("length"), v.length_s);      // input で警告が合う
     if ("seed" in v) presetSetSeed(sh("seed"), sh("random"), v.seed);
     if (Number.isInteger(v.speaker_id)) {
-      if (speakers) { if (!presetSet(sh("speaker"), v.speaker_id)) skipped.push("話者"); }
+      if (speakers) { if (!presetSet(sh("speaker"), v.speaker_id)) skipped.push(t("話者")); }
       else { pendingSpeaker = v.speaker_id; speakersFailed = false; loadSpeakers(); }      // 一覧を読んだら、その話者を選ぶ
     }
     return skipped;
@@ -428,7 +428,7 @@
     renderSong();
     renderImages();
     changed();
-    showMsg("サンプルを読み込みました。「ショート動画を作る」で同じ条件で作れます" + (skipped.length ? `(選べない値だったので、そのままにした項目: ${skipped.join("、")})` : ""));
+    showMsg(t("サンプルを読み込みました。「ショート動画を作る」で同じ条件で作れます") + (skipped.length ? t("(選べない値だったので、そのままにした項目: {items})", { items: skipped.join(t("、")) }) : ""));
   }
   wireSamples({ tab: "short", box: sh("samples"), apply: applySample });
 
@@ -436,28 +436,28 @@
 
   function autoRows(v) {
     const src = (v.sources || {}).character, note = (v.source_notes || {}).character, how = AUTO_HOW[src] || "";
-    return how || note ? [{ label: "人物の説明", how, text: how && src !== "none" ? v.params.character || "" : "", note: note || "" }] : [];
+    return how || note ? [{ label: t("人物の説明"), how, text: how && src !== "none" ? v.params.character || "" : "", note: note || "" }] : [];
   }
 
   const panel = makeProjectPanel({
-    tab: "short", base: "/api/short", noun: "ショート動画", root: $("short-project"), dialog: "proj", cardLabel: "ショート", outName: "short.mp4", finalAudio: true,
+    tab: "short", base: "/api/short", noun: t("ショート動画"), root: $("short-project"), dialog: "proj", cardLabel: t("ショート"), outName: "short.mp4", finalAudio: true,
     subtitles: true,
-    placeholder: "ショート動画を作ると、ここに進み具合とシーンが並びます", scenesPlaceholder: "音声の準備(シーン割り)が終わると、シーンがここに並びます",
-    historyPlaceholder: "作ったショート動画(制作)がここに並びます",
+    placeholder: t("ショート動画を作ると、ここに進み具合とシーンが並びます"), scenesPlaceholder: t("音声の準備(シーン割り)が終わると、シーンがここに並びます"),
+    historyPlaceholder: t("作ったショート動画(制作)がここに並びます"),
     meta: (v, m) => {
       const a = v.analysis, pr = v.params;
       const dur = a && a.duration ? ` ${fmtDur(a.duration)}` : pr.timeline === "free" && pr.length_s ? ` ${fmtDur(pr.length_s)}` : "";
-      return [m.pct, m.size, pr.timeline ? `時間軸: ${TIMELINE_LABEL[pr.timeline] || pr.timeline}${dur}${pr.timeline === "speech" && pr.song_id ? " + 曲(BGM)" : ""}` : "", m.scenes,
-        `最終の音声: ${pr.final_audio === "none" ? "音声なし" : "自動"}`, pr.timeline === "speech" && pr.subtitles ? "テロップあり" : "", m.elapsed];
+      return [m.pct, m.size, pr.timeline ? t("時間軸: {timeline}", { timeline: (TIMELINE_LABEL[pr.timeline] || pr.timeline) + dur }) + (pr.timeline === "speech" && pr.song_id ? t(" + 曲(BGM)") : "") : "", m.scenes,
+        t("最終の音声: {mode}", { mode: pr.final_audio === "none" ? t("音声なし") : t("自動") }), pr.timeline === "speech" && pr.subtitles ? t("テロップあり") : "", m.elapsed];
     },
     autoRows,
-    kindBadge: (v, s) => (v.params.timeline === "free" ? null : v.params.timeline === "speech" ? { text: "セリフ", title: "読み上げに口を合わせます" }
-      : { text: s.kind === "vocal" ? "歌唱" : "器楽", title: `歌っている割合 ${Math.round((s.vocal_ratio || 0) * 100)}%` }),
+    kindBadge: (v, s) => (v.params.timeline === "free" ? null : v.params.timeline === "speech" ? { text: t("セリフ"), title: t("読み上げに口を合わせます") }
+      : { text: s.kind === "vocal" ? t("歌唱") : t("器楽"), title: t("歌っている割合 {pct}%", { pct: Math.round((s.vocal_ratio || 0) * 100) }) }),
     rowInfo: (v, s) => {
       const imgs = v.params.images || [];
       const refs = (s.refs || []).filter((i) => imgs[i]).map((i) => `${i + 1}: ${ROLE_LABEL[imgs[i].role] || imgs[i].role}`);
-      return [s.place ? { label: "場所", text: s.place } : null, s.speech && s.text ? { label: "セリフ", text: s.text } : !s.speech && s.summary ? { label: "場面", text: s.summary } : null,
-        refs.length ? { label: "参照", text: refs.join("、") } : null].filter(Boolean);
+      return [s.place ? { label: t("場所"), text: s.place } : null, s.speech && s.text ? { label: t("セリフ"), text: s.text } : !s.speech && s.summary ? { label: t("場面"), text: s.summary } : null,
+        refs.length ? { label: t("参照"), text: refs.join(t("、")) } : null].filter(Boolean);
     },
     onOpen: loadTools,
   });

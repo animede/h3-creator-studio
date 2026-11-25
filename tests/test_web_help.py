@@ -12,7 +12,9 @@ WEB = REPO_ROOT / "web"
 # 偽の DOM で help.js を読み込み、HELP_LOGIC を取り出す(R = renderMarkdown)
 NODE_HARNESS = r"""
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
-const src = fs.readFileSync(process.argv[process.argv.length - 1], "utf8");
+const path = require("path"), file = process.argv[process.argv.length - 1];
+// i18n.js(LANG・t・langHeaders)を先に読む
+const src = fs.readFileSync(path.join(path.dirname(file), "i18n.js"), "utf8") + "\n" + fs.readFileSync(file, "utf8");
 const fake = () => {
   const base = { value: "", dataset: {}, style: {}, hidden: true, textContent: "", classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } } };
   const p = new Proxy(base, { get: (t, k) => (k in t ? t[k] : k === "then" ? undefined : () => p), set: (t, k, v) => { t[k] = v; return true; } });
