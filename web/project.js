@@ -3,14 +3,22 @@
 // 違い(API の入口・タブ名・メタ行・シーンの行の補足・結合し直しの設定)だけを makeProjectPanel の設定で渡す。
 // 入力欄(左側)は各タブの js(mv.js / short.js)が持つ。ここは「作った後」だけ。
 
-// 投稿先 × 画質の寸法(サーバの SIZES、docs/SPEC.md の表と同じ。実際の寸法はサーバが決める)と、画質の説明
+// 画角 × 画質の寸法(サーバの SIZES、docs/SPEC.md の表と同じ。実際の寸法はサーバが決める)と、画質の説明。画角 custom は幅・高さの手動入力
 const VIDEO_SIZES = {
-  "16:9": { fast: [768, 448], standard: [1024, 576], high: [1344, 768] },
-  "9:16": { fast: [448, 768], standard: [576, 1024], high: [768, 1344] },
-  "1:1": { fast: [512, 512], standard: [768, 768], high: [960, 960] },
-  "4:5": { fast: [512, 640], standard: [640, 800], high: [768, 960] },
+  "16:9": { low: [512, 288], fast: [768, 448], standard: [1024, 576], high: [1344, 768] },
+  "9:16": { low: [288, 512], fast: [448, 768], standard: [576, 1024], high: [768, 1344] },
+  "1:1": { low: [384, 384], fast: [512, 512], standard: [768, 768], high: [960, 960] },
+  "4:5": { low: [416, 512], fast: [512, 640], standard: [640, 800], high: [768, 960] },
+  "5:4": { low: [512, 416], fast: [640, 512], standard: [800, 640], high: [960, 768] },
 };
-const VIDEO_QUALITY_NOTE = { fast: "6〜12GB の GPU 向け。いちばん速い", standard: "16GB 以上の GPU 向け", high: "24GB 以上の GPU 向け。時間がかかります" };
+const VIDEO_QUALITY_NOTE = { low: "低 VRAM(6GB 以下)向け。長辺 512 の小さな画", fast: "6〜12GB の GPU 向け。いちばん速い", standard: "16GB 以上の GPU 向け", high: "24GB 以上の GPU 向け。時間がかかります" };
+const VIDEO_CUSTOM = { min: 256, max: 1344, step: 32 };
+// 画角と画質の欄から寸法を出す(手動入力なら幅・高さの欄。32 の倍数に丸める)
+function videoSize(aspect, quality, cw, ch) {
+  if (aspect !== "custom") return VIDEO_SIZES[aspect][quality];
+  const r = (v) => Math.min(VIDEO_CUSTOM.max, Math.max(VIDEO_CUSTOM.min, Math.round((+v || 0) / VIDEO_CUSTOM.step) * VIDEO_CUSTOM.step));
+  return [r(cw), r(ch)];
+}
 
 // JSON の API を呼ぶ(失敗は、サーバの日本語の理由を載せた Error。HTTP の状態は .status に入れる)。
 // 理由が無い失敗(入力の形の誤り 422 以外。サーバの落ち・中継の HTML など)は、通信の失敗として状態の番号を出す

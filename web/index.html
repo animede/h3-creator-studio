@@ -274,11 +274,15 @@
         <span class="note" id="mv-lipsync-note" hidden>口は動きませんが、演出はマイクやステージなど「歌う場面」を選ぶことがあります。景色や日常だけの映像にしたいときは、「曲の内容」に
           <b>「マイクやステージは出さない。歌う場面は無い」</b>のように、出したくないものを書いてください(演出を書く LLM に、そのまま渡ります)</span></label>
       <div class="fld two">
-        <label><span class="fl">投稿先</span>
+        <label><span class="fl">画角</span>
           <select id="mv-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
-            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option></select></label>
+            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option><option value="5:4">横 4:5</option><option value="custom">手動入力</option></select></label>
         <label><span class="fl">画質 <b id="mv-size"></b></span>
-          <select id="mv-quality"><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+          <select id="mv-quality"><option value="low">低 VRAM</option><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+      </div>
+      <div class="fld two" id="mv-custom" hidden>
+        <label><span class="fl">幅(px)</span><input id="mv-cw" type="number" min="256" max="1344" step="32" value="768"></label>
+        <label><span class="fl">高さ(px)</span><input id="mv-ch" type="number" min="256" max="1344" step="32" value="448"></label>
       </div>
       <span class="note mv-qnote" id="mv-qnote"></span>
       <label class="fld"><span class="fl">背景の文字 <small>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
@@ -330,11 +334,15 @@
       <span class="note sh-len-note" id="sh-len-note" hidden></span>
       <div class="msg sh-warn" id="sh-len-warn" hidden></div>
       <div class="fld two">
-        <label><span class="fl">投稿先</span>
+        <label><span class="fl">画角</span>
           <select id="sh-aspect"><option value="16:9">横長 16:9</option><option value="9:16">縦長 9:16</option>
-            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option></select></label>
+            <option value="1:1">正方形 1:1</option><option value="4:5">縦 4:5</option><option value="5:4">横 4:5</option><option value="custom">手動入力</option></select></label>
         <label><span class="fl">画質 <b id="sh-size"></b></span>
-          <select id="sh-quality"><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+          <select id="sh-quality"><option value="low">低 VRAM</option><option value="fast">高速</option><option value="standard">標準</option><option value="high">高画質</option></select></label>
+      </div>
+      <div class="fld two" id="sh-custom" hidden>
+        <label><span class="fl">幅(px)</span><input id="sh-cw" type="number" min="256" max="1344" step="32" value="768"></label>
+        <label><span class="fl">高さ(px)</span><input id="sh-ch" type="number" min="256" max="1344" step="32" value="448"></label>
       </div>
       <span class="note mv-qnote" id="sh-qnote"></span>
       <label class="fld"><span class="fl">背景の文字 <small>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>

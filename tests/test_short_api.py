@@ -153,7 +153,7 @@ class ShortApiTest(unittest.TestCase):
                             ({"images": [self.person(), {"id": self.garden["id"], "role": "person"}]}, "人物の画像は 1 枚まで"),
                             ({"images": [self.scenery()] * 5}, "参照画像は 4 枚まで"), ({"images": [{"id": self.girl["id"], "role": "boss"}]}, "参照画像 1 の役割"),
                             ({"images": [{"id": "nope", "role": "scenery"}]}, "参照画像 1が見つかりません"), ({"song_id": "nope"}, "曲が見つかりません"),
-                            ({"aspect": "2:1"}, "投稿先は"), ({"quality": "ultra"}, "画質は"), ({"min_s": 3}, "シーンの長さは 5〜10 秒"),
+                            ({"aspect": "2:1"}, "画角は"), ({"quality": "ultra"}, "画質は"), ({"min_s": 3}, "シーンの長さは 5〜10 秒"),
                             ({"final_audio": "mix"}, "最終の音声は auto / none のいずれかです")):
             r = self.client.post("/api/short", json=self.body(**extra))
             self.assertEqual(r.status_code, 400, extra)

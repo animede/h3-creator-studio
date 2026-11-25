@@ -167,7 +167,7 @@ class ResolveParamsTest(LedgerBase):
                          ("16:9", "fast", 768, 448, 5.0, 10.0, None, "auto", "auto"))
         p = self.resolve(story="x", aspect="9:16", quality="high", min_s=6, max_s=9, seed="42", background_text="none", final_audio="none")
         self.assertEqual((p["width"], p["height"], p["min_s"], p["max_s"], p["seed"], p["background_text"], p["final_audio"]), (768, 1344, 6.0, 9.0, 42, "none", "none"))
-        self.assertRejects("投稿先は", story="x", aspect="3:2")
+        self.assertRejects("画角は", story="x", aspect="3:2")
         self.assertRejects("画質は", story="x", quality="ultra")
         self.assertRejects("シーンの長さは 5〜10 秒", story="x", min_s=3)
         self.assertRejects("シーンの最短は最長より長くできません", story="x", min_s=9, max_s=6)

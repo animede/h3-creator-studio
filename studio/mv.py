@@ -33,14 +33,17 @@ from .jobs import TERMINAL
 
 log = logging.getLogger("studio.mv")
 
-# 投稿先 → 画質(高速 / 標準 / 高画質)→ (幅, 高さ)。docs/SPEC.md の表。どれも 32 の倍数(H3 が 32 に丸めるので、そのまま通る)
+# 画角 → 画質(低 VRAM / 高速 / 標準 / 高画質)→ (幅, 高さ)。docs/SPEC.md の表。どれも 32 の倍数(H3 が 32 に丸めるので、そのまま通る)
 SIZES = {
-    "16:9": {"fast": (768, 448), "standard": (1024, 576), "high": (1344, 768)},
-    "9:16": {"fast": (448, 768), "standard": (576, 1024), "high": (768, 1344)},
-    "1:1": {"fast": (512, 512), "standard": (768, 768), "high": (960, 960)},
-    "4:5": {"fast": (512, 640), "standard": (640, 800), "high": (768, 960)},
+    "16:9": {"low": (512, 288), "fast": (768, 448), "standard": (1024, 576), "high": (1344, 768)},
+    "9:16": {"low": (288, 512), "fast": (448, 768), "standard": (576, 1024), "high": (768, 1344)},
+    "1:1": {"low": (384, 384), "fast": (512, 512), "standard": (768, 768), "high": (960, 960)},
+    "4:5": {"low": (416, 512), "fast": (512, 640), "standard": (640, 800), "high": (768, 960)},
+    "5:4": {"low": (512, 416), "fast": (640, 512), "standard": (800, 640), "high": (960, 768)},
 }
-ASPECTS, QUALITIES = tuple(SIZES), ("fast", "standard", "high")
+CUSTOM = "custom"                              # 画角「手動入力」: 幅と高さを直接指定(32 の倍数に丸める)
+CUSTOM_MIN, CUSTOM_MAX, CUSTOM_STEP = 256, 1344, 32
+ASPECTS, QUALITIES = (*SIZES, CUSTOM), ("low", "fast", "standard", "high")
 SCENE_MIN_S, SCENE_MAX_S = 5.0, 10.0           # シーンの長さの範囲(H3 の最短が 5 秒、MV の 1 カットとして 10 秒まで)
 CHARACTER_MAX, CONCEPT_MAX, PROMPT_MAX = 600, 1000, 8000
 SEED_MOD = 2_147_483_647
@@ -135,11 +138,23 @@ def pick_image(ledger, oid) -> dict:
     return _output(ledger, oid, "image", "キャラクター画像", "画像")
 
 
+def _custom_side(value, label: str) -> int:
+    """手動入力の幅・高さ: 整数、256〜1344、32 の倍数に丸める。"""
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"画角が手動入力のときは、{label}を数字で指定してください(256〜{CUSTOM_MAX}、32 の倍数)") from None
+    if not CUSTOM_MIN <= n <= CUSTOM_MAX:
+        raise ValueError(f"{label}は {CUSTOM_MIN}〜{CUSTOM_MAX} の範囲で指定してください(32 の倍数に丸めます)")
+    return max(CUSTOM_MIN, round(n / CUSTOM_STEP) * CUSTOM_STEP)
+
+
 def resolve_format(params: dict) -> dict:
-    """投稿先・画質・シーンの長さ・seed・背景の文字を検証して、サイズまで解決する(MV もショート動画も同じ規則)。不正なら ValueError(日本語)。"""
+    """画角・画質・シーンの長さ・seed・背景の文字を検証して、サイズまで解決する(MV もショート動画も同じ規則)。不正なら ValueError(日本語)。
+    画角が custom(手動入力)なら width / height をそのまま使う(32 の倍数に丸め、256〜1344)。"""
     aspect = str(params.get("aspect") or "16:9")
-    if aspect not in SIZES:
-        raise ValueError("投稿先は " + " / ".join(ASPECTS) + " のいずれかです")
+    if aspect not in ASPECTS:
+        raise ValueError("画角は " + " / ".join(ASPECTS) + " のいずれかです")
     quality = str(params.get("quality") or "fast")
     if quality not in QUALITIES:
         raise ValueError("画質は " + " / ".join(QUALITIES) + " のいずれかです")
@@ -159,7 +174,10 @@ def resolve_format(params: dict) -> dict:
     background_text = str(params.get("background_text") or "auto")
     if background_text not in ("auto", "large", "none"):
         raise ValueError("background_text は auto / large / none のいずれかです")
-    width, height = SIZES[aspect][quality]
+    if aspect == CUSTOM:
+        width, height = (_custom_side(params.get(k), label) for k, label in (("width", "幅"), ("height", "高さ")))
+    else:
+        width, height = SIZES[aspect][quality]
     return {"aspect": aspect, "quality": quality, "width": width, "height": height, "min_s": min_s, "max_s": max_s, "seed": seed,
             "background_text": background_text}
 

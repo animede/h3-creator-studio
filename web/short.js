@@ -3,7 +3,7 @@
 // 右側の画面(制作の進み・シーンの行・最終の動画・やり直し・結合し直し・履歴・削除)は MV タブと共通の仕組み(web/project.js の makeProjectPanel)。
 // 時間軸は入力で決まる: セリフあり → 読み上げ(人物が口を合わせる。曲は BGM)/ 曲だけ → 曲 / どちらも無し → 指定の長さ。
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
-  const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 投稿先 × 画質の寸法と、画質の説明(web/project.js。MV タブと共通)
+  const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 画角 × 画質の寸法と、画質の説明(web/project.js。MV タブと共通)
   const CHAR_MAX = 600, IMAGES_MAX = 4;
   const LENGTH_MIN = 30, LENGTH_MAX = 3600, WARN_S = 300;      // 曲もセリフも無いときの長さの範囲(秒。サーバと同じ)と、警告を出す長さ(5 分)
   const SCENE_S = 7.5, SCENE_MIN_A4000 = 3.5;           // 警告の見積り: シーンの平均の長さ(秒)と、A4000 の高速で 1 シーンにかかる時間(分)
@@ -308,14 +308,17 @@
   sh("length").addEventListener("input", changed);
   sh("char").addEventListener("input", updateAuto);
 
-  // ---- 入力: 投稿先・画質・シード ----
+  // ---- 入力: 画角・画質・シード ----
 
+  const customSize = () => sh("aspect").value === "custom";
   function renderSize() {
-    const [w, h] = SIZES[sh("aspect").value][sh("quality").value];
+    sh("custom").hidden = !customSize();
+    const [w, h] = videoSize(sh("aspect").value, sh("quality").value, sh("cw").value, sh("ch").value);
     sh("size").textContent = `(${w}×${h})`;
-    sh("qnote").textContent = QUALITY_NOTE[sh("quality").value];
+    sh("qnote").textContent = customSize() ? "幅・高さを直接指定(256〜1344、32 の倍数に丸めます)。画質の欄は使いません" : QUALITY_NOTE[sh("quality").value];
   }
   sh("aspect").onchange = renderSize;
+  sh("cw").oninput = sh("ch").oninput = renderSize;
   sh("quality").onchange = () => { qualityTouched = true; renderSize(); };
   sh("random").onchange = () => { sh("seed").disabled = sh("random").checked; };
 
@@ -362,7 +365,8 @@
     try {
       const js = await api("/api/short", "POST", { story, song_id: song ? song.id : "", narration, speaker_id: narration ? +sh("speaker").value : null,
         images: images.map((r) => ({ id: r.item.id, role: r.role, description: "" })), length_s: t === "free" ? length : null,
-        character: person() ? sh("char").value.trim() : "", aspect: sh("aspect").value, quality: sh("quality").value, min_s: min, max_s: max, seed,
+        character: person() ? sh("char").value.trim() : "", aspect: sh("aspect").value, quality: sh("quality").value,
+        width: customSize() ? +sh("cw").value : null, height: customSize() ? +sh("ch").value : null, min_s: min, max_s: max, seed,
         background_text: sh("bgtext").value, final_audio: sh("final").value, subtitles: sh("subs").checked });
       await select(js.id);
     } catch (e) {
@@ -377,7 +381,8 @@
   // ---- プリセット(入力欄の値だけ。曲・参照画像・物語・セリフ・人物の説明は含めない。話者は AivisSpeech のスタイル ID) ----
 
   function getPresetValues() {
-    return { aspect: sh("aspect").value, quality: sh("quality").value, min_s: +sh("min").value, max_s: +sh("max").value,
+    return { aspect: sh("aspect").value, quality: sh("quality").value, ...(customSize() ? { width: +sh("cw").value, height: +sh("ch").value } : {}),
+      min_s: +sh("min").value, max_s: +sh("max").value,
       seed: presetGetSeed(sh("seed"), sh("random")), background_text: sh("bgtext").value, final_audio: sh("final").value,
       length_s: +sh("length").value >= LENGTH_MIN && +sh("length").value <= LENGTH_MAX ? +sh("length").value : 60, speaker_id: sh("speaker").value === "" ? null : +sh("speaker").value,
       subtitles: sh("subs").checked };
@@ -386,9 +391,10 @@
   // 書かれている項目だけ反映する(知らない項目は無視)。選べない値は入れず、そのままにした項目として知らせる
   function applyPresetValues(v) {
     const skipped = [];
-    for (const [key, id, label] of [["aspect", "aspect", "投稿先"], ["quality", "quality", "画質"], ["final_audio", "final", "最終の音声"]]) {
+    for (const [key, id, label] of [["aspect", "aspect", "画角"], ["quality", "quality", "画質"], ["final_audio", "final", "最終の音声"]]) {
       if (key in v && !presetSet(sh(id), v[key])) skipped.push(label);      // change で寸法の表示が合う
     }
+    for (const [key, id] of [["width", "cw"], ["height", "ch"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
     if ("background_text" in v && !presetSet(sh("bgtext"), v.background_text)) skipped.push("背景の文字");
     if (typeof v.subtitles === "boolean") presetSet(sh("subs"), v.subtitles);
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);

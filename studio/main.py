@@ -402,8 +402,10 @@ class MvIn(BaseModel):
     image_id: str = ""
     character: str = ""            # 人物の説明(空なら、画像のプロンプト。それも無ければ中立の文)
     concept: str = ""              # 曲の内容・世界観(空なら、曲のテーマ・キャプション・ジャンル)
-    aspect: str = "16:9"           # 16:9 / 9:16 / 1:1 / 4:5
-    quality: str = "fast"          # fast / standard / high
+    aspect: str = "16:9"           # 16:9 / 9:16 / 1:1 / 4:5 / 5:4 / custom(手動入力: width / height)
+    quality: str = "fast"          # low / fast / standard / high
+    width: Optional[int] = None    # 画角が custom のときの幅・高さ(32 の倍数に丸める)
+    height: Optional[int] = None
     min_s: float = 5.0             # シーンの長さ(5〜10 秒)
     max_s: float = 10.0
     seed: Optional[int] = None
@@ -560,8 +562,10 @@ class ShortIn(BaseModel):
     speaker_id: Optional[int] = None
     images: list[ShortImageIn] = Field(default_factory=list)       # 参照画像 0〜4 枚
     length_s: Optional[float] = None     # 曲もセリフも無いときの長さ(30 秒以上。空なら 60)
-    aspect: str = "16:9"
-    quality: str = "fast"
+    aspect: str = "16:9"           # 16:9 / 9:16 / 1:1 / 4:5 / 5:4 / custom
+    quality: str = "fast"          # low / fast / standard / high
+    width: Optional[int] = None    # 画角が custom のときの幅・高さ
+    height: Optional[int] = None
     min_s: float = 5.0
     max_s: float = 10.0
     seed: Optional[int] = None

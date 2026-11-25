@@ -172,7 +172,7 @@ class MvApiTest(unittest.TestCase):
         for extra, word in (({"song_id": ""}, "曲を選んでください"), ({"song_id": "nope"}, "曲が見つかりません"),
                             ({"song_id": self.image["id"]}, "曲には音声を使ってください"), ({"image_id": ""}, "キャラクター画像を選んでください"),
                             ({"image_id": self.song["id"]}, "キャラクター画像には画像を使ってください"),
-                            ({"aspect": "2:1"}, "投稿先は 16:9 / 9:16 / 1:1 / 4:5 のいずれかです"), ({"quality": "ultra"}, "画質は fast / standard / high"),
+                            ({"aspect": "2:1"}, "画角は 16:9 / 9:16 / 1:1 / 4:5 / 5:4 / custom のいずれかです"), ({"quality": "ultra"}, "画質は low / fast / standard / high"),
                             ({"min_s": 3}, "シーンの長さは 5〜10 秒"), ({"max_s": 12}, "シーンの長さは 5〜10 秒"),
                             ({"min_s": 9, "max_s": 6}, "シーンの最短は最長より長くできません")):
             r = self.client.post("/api/mv", json=self.body(**extra))

@@ -782,6 +782,15 @@ class ViewTest(MvBase):
         self.ledger.update_mv_project(pid, params_patch={"assembled": True}, state="completed")
         self.assertEqual(self.director._progress(proj(), None), 1.0)
 
+    def test_sizes_low_quality_landscape_5_4_and_custom(self):
+        low = mv.resolve_format({"aspect": "16:9", "quality": "low"})
+        self.assertEqual((low["width"], low["height"]), (512, 288))
+        l54 = mv.resolve_format({"aspect": "5:4", "quality": "fast"})
+        self.assertEqual((l54["width"], l54["height"]), (640, 512))
+        f = mv.resolve_format({"aspect": "custom", "quality": "fast", "width": 700, "height": 300.4})      # 32 の倍数に丸める
+        self.assertEqual((f["aspect"], f["width"], f["height"]), ("custom", 704, 288))
+        self.assertEqual(mv.resolve_format({"aspect": "custom", "width": 1344, "height": 256})["width"], 1344)
+
     async def test_view_has_everything_the_screen_needs(self):
         self.start()
         self.hold["scene2"] = asyncio.Event()
@@ -895,7 +904,8 @@ class ResolveParamsTest(MvBase):
             ({"song_id": gone["id"]}, "曲のファイルが見つかりません"),
             ({"image_id": ""}, "キャラクター画像を選んでください"), ({"image_id": "nope"}, "キャラクター画像が見つかりません"),
             ({"image_id": self.song["id"]}, "キャラクター画像には画像を使ってください"),
-            ({"aspect": "3:2"}, "投稿先は 16:9 / 9:16 / 1:1 / 4:5 のいずれかです"), ({"quality": "ultra"}, "画質は fast / standard / high のいずれかです"),
+            ({"aspect": "3:2"}, "画角は 16:9 / 9:16 / 1:1 / 4:5 / 5:4 / custom のいずれかです"), ({"quality": "ultra"}, "画質は low / fast / standard / high のいずれかです"),
+            ({"aspect": "custom"}, "幅を数字で"), ({"aspect": "custom", "width": 100, "height": 448}, "幅は 256〜1344"),
             ({"min_s": 4}, "シーンの長さは 5〜10 秒"), ({"max_s": 11}, "シーンの長さは 5〜10 秒"), ({"min_s": "abc"}, "シーンの最短 は数字"),
             ({"min_s": 9, "max_s": 6}, "シーンの最短は最長より長くできません"), ({"seed": "abc"}, "seed は整数"),
             ({"background_text": "huge"}, "background_text は auto / large / none"), ({"lipsync": "yes"}, "lipsync は true / false"),

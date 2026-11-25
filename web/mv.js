@@ -2,7 +2,7 @@
 // 左 = 入力、右上 = いまの制作(進み・最終の動画・シーン)、右下 = 制作の履歴(ギャラリーに切り替え可)。ジョブは管理役の Director がつなぐので、ここは /api/mv を見て操作するだけ。
 // 人物の説明・曲の内容は、「画像から作る」「曲から作る」で入力欄に自動で入れて、確かめてから作れる(空のまま作っても、制作の中で自動で入る)。
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
-  const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 投稿先 × 画質の寸法と、画質の説明(web/project.js。ショート動画タブと共通)
+  const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 画角 × 画質の寸法と、画質の説明(web/project.js。ショート動画タブと共通)
   const CHAR_MAX = 600, CONCEPT_MAX = 1000;
   const LISTEN_LABEL = [["language", "言語"], ["genre", "ジャンル"], ["mood", "雰囲気"], ["instruments", "楽器"], ["vocal", "ボーカル"], ["tempo", "テンポ"]];
   // 制作に出す「自動で入れた説明」の出どころ(サーバの character_source / concept_source。書いた説明 typed は出さない)
@@ -220,14 +220,17 @@
   }
   mvp("concept-go").onclick = describeSong;
 
-  // ---- 入力: 投稿先・画質・シード ----
+  // ---- 入力: 画角・画質・シード ----
 
+  const customSize = () => mvp("aspect").value === "custom";
   function renderSize() {
-    const [w, h] = SIZES[mvp("aspect").value][mvp("quality").value];
+    mvp("custom").hidden = !customSize();
+    const [w, h] = videoSize(mvp("aspect").value, mvp("quality").value, mvp("cw").value, mvp("ch").value);
     mvp("size").textContent = `(${w}×${h})`;
-    mvp("qnote").textContent = QUALITY_NOTE[mvp("quality").value];
+    mvp("qnote").textContent = customSize() ? "幅・高さを直接指定(256〜1344、32 の倍数に丸めます)。画質の欄は使いません" : QUALITY_NOTE[mvp("quality").value];
   }
   mvp("aspect").onchange = renderSize;
+  mvp("cw").oninput = mvp("ch").oninput = renderSize;
   mvp("quality").onchange = () => { qualityTouched = true; renderSize(); };
   mvp("random").onchange = () => { mvp("seed").disabled = mvp("random").checked; };
   // 歌わせないときだけ、「曲の内容」に出したくないものを書く案内を出す(プリセットの反映も presetSet が change を流すので、ここで追従する)
@@ -268,7 +271,8 @@
     updateGo();
     try {
       const js = await api("/api/mv", "POST", { song_id: song.id, image_id: image.id, character: mvp("char").value.trim(), concept: mvp("concept").value.trim(),
-        aspect: mvp("aspect").value, quality: mvp("quality").value, min_s: min, max_s: max, seed, background_text: mvp("bgtext").value,
+        aspect: mvp("aspect").value, quality: mvp("quality").value, width: customSize() ? +mvp("cw").value : null, height: customSize() ? +mvp("ch").value : null,
+        min_s: min, max_s: max, seed, background_text: mvp("bgtext").value,
         lipsync: mvp("lipsync").value !== "false" });
       await select(js.id);
     } catch (e) {
@@ -287,6 +291,7 @@
 
   function getPresetValues() {
     return { character: typed(mvp("char")), concept: typed(mvp("concept")), aspect: mvp("aspect").value, quality: mvp("quality").value,
+      ...(customSize() ? { width: +mvp("cw").value, height: +mvp("ch").value } : {}),
       min_s: +mvp("min").value, max_s: +mvp("max").value, seed: presetGetSeed(mvp("seed"), mvp("random")), background_text: mvp("bgtext").value,
       lipsync: mvp("lipsync").value !== "false" };
   }
@@ -295,7 +300,8 @@
   function applyPresetValues(v) {
     const skipped = [];
     for (const [key, id] of [["character", "char"], ["concept", "concept"]]) if (typeof v[key] === "string" && v[key].trim()) presetSet(mvp(id), v[key]);
-    for (const [key, label] of [["aspect", "投稿先"], ["quality", "画質"]]) if (key in v && !presetSet(mvp(key), v[key])) skipped.push(label);      // change で寸法の表示が合う
+    for (const [key, label] of [["aspect", "画角"], ["quality", "画質"]]) if (key in v && !presetSet(mvp(key), v[key])) skipped.push(label);      // change で寸法の表示が合う
+    for (const [key, id] of [["width", "cw"], ["height", "ch"]]) if (Number.isFinite(v[key])) presetSet(mvp(id), v[key]);
     if ("background_text" in v && !presetSet(mvp("bgtext"), v.background_text)) skipped.push("背景の文字");
     presetSet(mvp("lipsync"), String(v.lipsync !== false));      // 無ければ歌わせる(歌わせ方はプリセットが必ず決める。イメージ MV の後に別のを選んだら戻る)
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(mvp(id), v[key]);
