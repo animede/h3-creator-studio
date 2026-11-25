@@ -286,7 +286,7 @@ Every scene is instructed to show no subtitles, captions, lyric text, titles or 
 
 You can pause / resume / cancel, and per scene **Redo** (changes the seed) and **Edit prompt**. After a redo it re-assembles automatically. An unfinished MV survives a supervisor restart as paused.
 
-Time estimate: on an RTX A4000 (16GB), landscape Fast, a 30-second song is 5 scenes and about 17 minutes (about 3 minutes per scene). Longer songs take proportionally longer.
+Time estimate: on an RTX A4000 (16GB), landscape Fast, a 30-second song is 5 scenes and about 17 minutes (about 3 minutes per scene). On an RTX 4060 Laptop (8GB) with 16GB RAM and a SATA-class SSD (~400MB/s), the same settings take about 6.5–7 minutes per scene (VRAM 7–7.7GB, shared GPU memory steady at 0.8GB, with `H3_REF_IMAGE_SHORT_EDGE=768`). Longer songs take proportionally longer.
 
 ### Short Video tab
 
