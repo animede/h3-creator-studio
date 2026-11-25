@@ -1,5 +1,7 @@
 # YUZU Creator Studio
 
+**日本語** | [English](README.en.md)
+
 (リポジトリ名は `h3-creator-studio` のまま)
 
 **最新版: 2026-11-25 20:10 JST** — 詳しい使い方の説明(docs/USAGE.md)と、画面右上の「使い方」ボタン(フローティングの窓で、いまのタブの節から開く)。MV・ショート動画の「投稿先」を「画角」に(横 4:5 と手動入力を追加)、画質に「低 VRAM」(長辺 512)。各タブに「サンプル」(同梱の作例を読み込むと、入力欄と素材がそろい、結果の動画も見られる。ショート動画 1 本と MV 1 本)。README に作例の GIF と画面の図。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
