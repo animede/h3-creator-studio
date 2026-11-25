@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import editclip, genres, mv_audio, presets, procman, samples
+from . import editclip, genres, i18n, mv_audio, presets, procman, samples
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
@@ -1029,6 +1029,33 @@ def _save_upload(f: UploadFile) -> dict:
 async def api_uploads(files: list[UploadFile]):
     """OS からドロップされたファイルを outputs/uploads/ に保存し、ギャラリーに登録する。"""
     return [_public(await asyncio.to_thread(_save_upload, f)) for f in files]
+
+
+# 応答を英語にしない口(書き出したプリセットは利用者のデータそのもの)
+I18N_SKIP = ("/api/presets/export",)
+
+
+@app.middleware("http")
+async def _server_i18n(request, call_next):
+    """Accept-Language: en の画面には、/api/ の JSON 応答の文言(detail・message・error など)を英語にして返す(2026-11-25)。
+    文言はコードの中では日本語のまま。訳すのは i18n.MESSAGE_KEYS の項目だけで、題・プロンプトなどのデータは触らない。"""
+    lang = i18n.parse_accept_language(request.headers.get("accept-language"))
+    token = i18n.LANG.set(lang)
+    try:
+        response = await call_next(request)
+    finally:
+        i18n.LANG.reset(token)
+    path = request.url.path
+    if (lang != "en" or not path.startswith("/api/") or path.startswith(I18N_SKIP)
+            or "application/json" not in response.headers.get("content-type", "")):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+    try:
+        body = json.dumps(i18n.translate_payload(json.loads(body), lang), ensure_ascii=False).encode("utf-8")
+    except ValueError:
+        pass        # JSON でなければそのまま返す
+    return Response(body, status_code=response.status_code, headers=headers)
 
 
 @app.middleware("http")
