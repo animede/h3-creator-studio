@@ -16,7 +16,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS outputs (
     id TEXT PRIMARY KEY, kind TEXT NOT NULL, tab TEXT NOT NULL, job_id TEXT,
     path TEXT NOT NULL, filename TEXT, width INTEGER, height INTEGER, duration_s REAL,
-    created_at REAL NOT NULL, params_json TEXT, thumb_path TEXT
+    created_at REAL NOT NULL, params_json TEXT, thumb_path TEXT, fps REAL
 );
 CREATE INDEX IF NOT EXISTS outputs_created ON outputs(created_at DESC);
 CREATE TABLE IF NOT EXISTS jobs (
@@ -81,6 +81,9 @@ class Ledger:
             # 第 3 版で足した kind 列(mv / short)。古い DB の mv_projects には無いので足す(既存の制作は mv)
             if "kind" not in {r["name"] for r in self._db.execute("PRAGMA table_info(mv_projects)")}:
                 self._db.execute("ALTER TABLE mv_projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'mv'")
+            # 動画のコマ率(編集の書き出しが先頭の動画に合わせる)。古い DB の outputs には無いので足す(既存の行は空 = 分からない。編集は 24 として扱う)
+            if "fps" not in {r["name"] for r in self._db.execute("PRAGMA table_info(outputs)")}:
+                self._db.execute("ALTER TABLE outputs ADD COLUMN fps REAL")
 
     def close(self) -> None:
         with self._lock:
@@ -110,9 +113,9 @@ class Ledger:
         return d
 
     def add_output(self, kind: str, path, tab: str, job_id: str = None, filename: str = None, params: dict = None,
-                   width: int = None, height: int = None, duration_s: float = None) -> dict:
+                   width: int = None, height: int = None, duration_s: float = None, fps: float = None) -> dict:
         """生成物を登録する。画像なら幅・高さを読み、サムネイル(outputs/thumbs/<id>.jpg)も作る。
-        動画・音声は ffprobe で長さ(動画は寸法も)を読み、動画は 0.5 秒のコマをサムネイルにする(ffmpeg が無ければ空のまま)。"""
+        動画・音声は ffprobe で長さ(動画は寸法とコマ率も。渡されていない分だけ)を読み、動画は 0.5 秒のコマをサムネイルにする(ffmpeg が無ければ空のまま)。"""
         if kind not in KINDS:
             raise ValueError(f"kind は {KINDS} のいずれかです: {kind}")
         rel = self.rel_path(path)
@@ -122,24 +125,25 @@ class Ledger:
             thumb_rel = f"thumbs/{oid}.jpg"
             width, height = make_thumb(self.abs_path(rel), self.abs_path(thumb_rel))
         elif kind in ("video", "audio"):
-            if duration_s is None or (kind == "video" and width is None):
+            if duration_s is None or (kind == "video" and (width is None or fps is None)):
                 info = media.probe(self.abs_path(rel))
                 duration_s = duration_s if duration_s is not None else info["duration_s"]
                 if kind == "video":
-                    width, height = width or info["width"], height or info["height"]
+                    width, height, fps = width or info["width"], height or info["height"], fps or info.get("fps")
             if kind == "video":
                 thumb_rel = f"thumbs/{oid}.jpg"
                 if not media.video_thumb(self.abs_path(rel), self.abs_path(thumb_rel), THUMB_WIDTH):
                     thumb_rel = None
+        fps = fps if kind == "video" else None
         rec = {"id": oid, "kind": kind, "tab": tab, "job_id": job_id, "path": rel, "filename": filename or Path(rel).name,
                "width": width, "height": height, "duration_s": duration_s, "created_at": time.time(),
-               "params": params or {}, "thumb_path": thumb_rel}
+               "params": params or {}, "thumb_path": thumb_rel, "fps": fps}
         with self._lock, self._db:
             self._db.execute(
-                "INSERT INTO outputs (id, kind, tab, job_id, path, filename, width, height, duration_s, created_at, params_json, thumb_path)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO outputs (id, kind, tab, job_id, path, filename, width, height, duration_s, created_at, params_json, thumb_path, fps)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (oid, kind, tab, job_id, rel, rec["filename"], width, height, duration_s, rec["created_at"],
-                 json.dumps(rec["params"], ensure_ascii=False), thumb_rel))
+                 json.dumps(rec["params"], ensure_ascii=False), thumb_rel, fps))
         return rec
 
     def list_outputs(self, kind: str = None, tab: str = None, job_id: str = None, limit: int = 200) -> list:
@@ -159,11 +163,14 @@ class Ledger:
         return self._out(row) if row else None
 
     def delete_output(self, oid: str) -> bool:
-        """台帳の行とファイル(本体・サムネイル)を消す。無ければ False。"""
+        """台帳の行とファイル(本体・サムネイル・隣に置いた字幕)を消す。無ければ False。
+        字幕は、ショート動画の結合が最終の動画の隣に置く SRT(params.srt にその名前。同じフォルダのものだけ)。"""
         rec = self.get_output(oid)
         if rec is None:
             return False
-        for rel in (rec["path"], rec["thumb_path"]):
+        srt = str((rec["params"] or {}).get("srt") or "").strip()
+        sidecar = (Path(rec["path"]).parent / Path(srt).name).as_posix() if srt else None
+        for rel in (rec["path"], rec["thumb_path"], sidecar):
             if rel:
                 try:
                     self.abs_path(rel).unlink(missing_ok=True)
@@ -173,13 +180,27 @@ class Ledger:
             self._db.execute("DELETE FROM outputs WHERE id = ?", (oid,))
         return True
 
+    def remove_stale_parts(self) -> int:
+        """outputs/ の中の作りかけのファイル(*.part)を消し、消した数を返す。管理役の起動時に呼ぶ(まだ何も書いていない時。
+        強制終了で残った書き出し・プレビュー・ダウンロード・分離の途中のファイルで、名前が .part なので、どこからも使われない)。"""
+        n = 0
+        for p in self.root.rglob("*.part"):
+            try:
+                if p.is_file():
+                    p.unlink()
+                    n += 1
+            except OSError:
+                pass
+        return n
+
     # ---- ジョブ ----
 
-    def save_job(self, job) -> None:
+    def save_job(self, job, params: dict = None) -> None:
+        """終わったジョブを残す。params を渡せば、job.params の代わりにそれを残す(大きな params を、要る分だけにするとき)。"""
         with self._lock, self._db:
             self._db.execute(
                 "INSERT OR REPLACE INTO jobs (id, tab, kind, status, params_json, error, created_at, finished_at) VALUES (?,?,?,?,?,?,?,?)",
-                (job.id, job.tab, job.kind, job.status, json.dumps(job.params, ensure_ascii=False), job.error,
+                (job.id, job.tab, job.kind, job.status, json.dumps(job.params if params is None else params, ensure_ascii=False), job.error,
                  job.created, job.finished))
 
     def _job_dict(self, r: sqlite3.Row) -> dict:

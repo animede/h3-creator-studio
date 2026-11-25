@@ -602,7 +602,8 @@ class AceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((n("ace.simple", {})["thinking"], n("ace.simple", {})["caption_auto"], n("ace.simple", {})["negative_prompt"]),
                          (True, None, ace.DEFAULT_NEGATIVE_PROMPT))
         for params in ({"language": "Klingon"}, {"duration": 5}, {"duration": 999}, {"duration": "x"}, {"lyrics": "あ" * 6001},
-                       {"model": "a b;c"}, {"steps": 0}, {"batch_size": 5}, {"seed": -1}, {"shift": 9}, {"infer_method": "RK4"}):
+                       {"model": "a b;c"}, {"steps": 0}, {"batch_size": 5}, {"seed": -1}, {"shift": 9}, {"infer_method": "RK4"},
+                       {"duration": float("inf")}, {"seed": float("inf")}, {"steps": float("nan")}, {"shift": float("nan")}):
             with self.assertRaises(ValueError, msg=str(params)):
                 n("ace.simple", params)
 

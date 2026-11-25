@@ -40,6 +40,21 @@ class GpuTest(unittest.TestCase):
             m._update_shared(None, t0 + gpu.SHARED_CACHE_S + 1)
             self.assertEqual(rd.call_count, 2)
 
+    def test_shared_total_is_half_of_ram_on_windows_only(self):
+        self.assertEqual(gpu.shared_total_mib(32 * 1024 ** 3, "win32"), 16 * 1024)
+        self.assertIsNone(gpu.shared_total_mib(32 * 1024 ** 3, "linux"))
+        self.assertIsNone(gpu.shared_total_mib(0, "win32"))
+        m = gpu.GpuMonitor()
+        with mock.patch.object(gpu.sys, "platform", "win32"), mock.patch.object(gpu, "read_shared_mib", return_value=512), \
+                mock.patch.object(m, "_read_gpu", return_value=None):
+            m.poll()
+        snap = m.snapshot()
+        self.assertEqual((snap["shared_gpu_mib"], snap["shared_gpu_total_mib"]), (512, int(gpu.psutil.virtual_memory().total / 2 / 1048576)))
+        with mock.patch.object(m, "_read_gpu", return_value=None):
+            m.poll()                                                           # Linux(このテストの外の platform)では null
+        if gpu.sys.platform != "win32":
+            self.assertIsNone(m.snapshot()["shared_gpu_total_mib"])
+
     def test_shared_gives_up_after_failures(self):
         m, t0 = gpu.GpuMonitor(), time.time()
         with mock.patch.object(gpu.sys, "platform", "win32"), mock.patch.object(gpu, "read_shared_mib", return_value=None) as rd:

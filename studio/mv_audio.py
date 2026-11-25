@@ -40,6 +40,7 @@ MISSING_HINT = "setup --mv を実行してください(または studio.local.to
 SAMPLE_RATE = 44100                 # 道具に渡す音声の標準(44.1kHz ステレオ)
 LOG_TAIL_LINES = 40                 # 失敗したときに付ける stderr の末尾の行数
 FFMPEG_TIMEOUT_S = 600
+FFMPEG_TIMEOUT_PER_MEDIA_S = 20     # 長い動画を作り直す(テロップの焼き込みなど、再エンコードする)ffmpeg は、尺 1 秒あたりこれだけ待つ(10 分より短くはしない)
 SEPARATE_TIMEOUT_S = 3600           # CPU の分離は、20 コアの PC で曲の長さの 0.5〜0.6 倍(実測)。4 コアの入門機は 3 倍前後と見込む
 ANALYZE_TIMEOUT_S = 1800
 
@@ -165,49 +166,95 @@ def _part(dst: Path) -> Path:
     return dst.with_name(dst.name + ".part")
 
 
-def _run_ffmpeg(argv: list, dst: Path, what: str) -> Path:
-    """ffmpeg(argv の出力先は _part(dst))を動かし、成功したら dst に置き換える(失敗しても壊れたファイルを残さない)。"""
+def ffmpeg_timeout(media_s=None) -> float:
+    """ffmpeg を待つ最長の秒数: 10 分か、作る動画・音声の尺(media_s 秒)の FFMPEG_TIMEOUT_PER_MEDIA_S 倍の長いほう。尺が分からなければ 10 分。"""
+    try:
+        return max(float(FFMPEG_TIMEOUT_S), FFMPEG_TIMEOUT_PER_MEDIA_S * float(media_s or 0))
+    except (TypeError, ValueError):
+        return float(FFMPEG_TIMEOUT_S)
+
+
+def _run_ffmpeg(argv: list, dst: Path, what: str, timeout: float = None, run: "_Run" = None) -> Path:
+    """ffmpeg(argv の出力先は _part(dst))を動かし、成功したら dst に置き換える(失敗しても壊れたファイルを残さない)。止まる処理なので別スレッドから呼ぶ。
+    timeout は待つ最長の秒数(既定 10 分。長い動画の作り直しは ffmpeg_timeout で延ばす)。run(_Run)を渡せば、ほかのスレッドから run.stop() で
+    止められる(ジョブの中止・管理役の停止。止めたら「…を中止しました」の MvAudioError)。"""
     tmp = _part(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    limit = float(FFMPEG_TIMEOUT_S if timeout is None else timeout)
+    run = run if run is not None else _Run()
+    with run.lock:
+        if run.cancelled:
+            raise MvAudioError(f"{what}を中止しました")
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=_no_window())
+        except OSError as e:
+            raise MvAudioError(f"{what}に失敗しました: ffmpeg を起動できません({e})") from e
+        run.proc = proc
     try:
-        r = subprocess.run(argv, capture_output=True, timeout=FFMPEG_TIMEOUT_S, creationflags=_no_window())
-    except subprocess.TimeoutExpired as e:
+        _, err = proc.communicate(timeout=limit)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        proc.communicate()
         tmp.unlink(missing_ok=True)
-        raise MvAudioError(f"{what}が {FFMPEG_TIMEOUT_S // 60} 分を超えたので止めました(ffmpeg)") from e
-    except OSError as e:
-        raise MvAudioError(f"{what}に失敗しました: ffmpeg を起動できません({e})") from e
-    err = (r.stderr or b"").decode("utf-8", errors="replace").strip()
-    if r.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
+        raise MvAudioError(f"{what}が {limit / 60:.0f} 分を超えたので止めました(ffmpeg)") from None
+    if run.cancelled:
         tmp.unlink(missing_ok=True)
-        last = err.splitlines()[-1] if err else f"終了コード {r.returncode}"
+        raise MvAudioError(f"{what}を中止しました")
+    err = (err or b"").decode("utf-8", errors="replace").strip()
+    if proc.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
+        tmp.unlink(missing_ok=True)
+        last = err.splitlines()[-1] if err else f"終了コード {proc.returncode}"
         raise MvAudioError(f"{what}に失敗しました(ffmpeg): {last}", "\n".join(err.splitlines()[-LOG_TAIL_LINES:]))
     os.replace(tmp, dst)
     return dst
 
 
-def normalize_sync(src, dst) -> Path:
+async def _stoppable(fn, run: "_Run"):
+    """止まる処理 fn() を別スレッドで走らせて待つ。待っている側が取り消されたら(ジョブの中止・管理役の停止)、run.stop() で子プロセスを止め、
+    スレッドが終わるのを(最長 10 秒)待ってから取り消しを通す(止めた ffmpeg が掴んでいる作りかけのファイルを、呼び出し側の後片づけが消せるように。
+    Windows は開いているファイルを消せない)。以前は取り消しても ffmpeg は最後まで(最長 10 分)走り続け、管理役の停止もそれを待っていた。"""
+    fut = asyncio.ensure_future(asyncio.to_thread(fn))
+    try:
+        return await asyncio.shield(fut)
+    except asyncio.CancelledError:
+        run.stop()
+        await asyncio.wait({fut}, timeout=10)
+        if fut.done() and not fut.cancelled():
+            fut.exception()                 # 止めたことによる失敗は、取り消しの側で扱う(「取り出されなかった例外」の警告を出さない)
+        raise
+
+
+async def run_ffmpeg(argv: list, dst, what: str, media_s: float = None) -> Path:
+    """_run_ffmpeg を別スレッドで走らせ、取り消されたら ffmpeg も止める。media_s は作る動画・音声の尺(秒。分かれば、待つ最長を延ばす)。"""
+    run, dst = _Run(), Path(dst)
+    return await _stoppable(lambda: _run_ffmpeg(argv, dst, what, timeout=ffmpeg_timeout(media_s), run=run), run)
+
+
+def normalize_sync(src, dst, run: "_Run" = None) -> Path:
     dst = Path(dst)
-    return _run_ffmpeg(normalize_args(_ffmpeg(), src, _part(dst)), dst, "音声の変換")
+    return _run_ffmpeg(normalize_args(_ffmpeg(), src, _part(dst)), dst, "音声の変換", run=run)
 
 
-def cut_sync(src, start: float, end: float, dst, rate: int = 0, channels: int = 0, pad_to: float = 0.0) -> Path:
+def cut_sync(src, start: float, end: float, dst, rate: int = 0, channels: int = 0, pad_to: float = 0.0, run: "_Run" = None) -> Path:
     if not end > start >= 0:
         raise MvAudioError(f"切り出す範囲が正しくありません: {start} 〜 {end} 秒")
     dst = Path(dst)
-    return _run_ffmpeg(cut_args(_ffmpeg(), src, start, end, _part(dst), rate, channels, pad_to), dst, "音声の切り出し")
+    return _run_ffmpeg(cut_args(_ffmpeg(), src, start, end, _part(dst), rate, channels, pad_to), dst, "音声の切り出し", run=run)
 
 
 async def normalize(src, dst) -> Path:
-    """任意の音声(mp3 / wav / m4a / 動画の音声など)を 44.1kHz ステレオの PCM WAV にして dst に書く。"""
-    return await asyncio.to_thread(normalize_sync, src, dst)
+    """任意の音声(mp3 / wav / m4a / 動画の音声など)を 44.1kHz ステレオの PCM WAV にして dst に書く。取り消されたら ffmpeg も止める。"""
+    run = _Run()
+    return await _stoppable(lambda: normalize_sync(src, dst, run=run), run)
 
 
 async def cut(src_wav, start: float, end: float, dst, *, rate: int = 0, channels: int = 0, pad_to: float = 0.0) -> Path:
-    """src_wav の start〜end 秒を PCM の WAV にして dst に書く(シーンごとのボーカルの切り出し)。
+    """src_wav の start〜end 秒を PCM の WAV にして dst に書く(シーンごとのボーカルの切り出し)。取り消されたら ffmpeg も止める。
 
     rate / channels を 0 にすると元のまま。H3 に渡す音声を 16kHz モノラルにしたいときは rate=16000, channels=1。
     """
-    return await asyncio.to_thread(cut_sync, src_wav, start, end, dst, rate, channels, pad_to)
+    run = _Run()
+    return await _stoppable(lambda: cut_sync(src_wav, start, end, dst, rate, channels, pad_to, run=run), run)
 
 
 # ---- 道具のスクリプトを子プロセスで動かす ----

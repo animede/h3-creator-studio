@@ -49,13 +49,14 @@ def cached_preview(work: Path, state_hash: str) -> Optional[Path]:
 
 
 def sources_for(ledger, state: dict) -> dict:
-    """状態が使う生成物(クリップと曲)の、検証に要る情報を台帳から集める: {ID: {"kind", "length_s", "width", "height"}}。台帳に無い ID は含めない。"""
+    """状態が使う生成物(クリップと曲)の、検証に要る情報を台帳から集める: {ID: {"kind", "length_s", "width", "height", "fps"}}。台帳に無い ID は含めない。
+    fps は動画のコマ率(登録のときに ffprobe で読んだもの。それより前の行は空で、書き出しは 24 になる)。"""
     out = {}
     for oid in editclip.used_ids(state):
         rec = ledger.get_output(oid)
         if rec is not None:
             out[oid] = {"kind": rec["kind"], "length_s": None if rec["kind"] == "image" else rec.get("duration_s"),
-                        "width": rec.get("width"), "height": rec.get("height")}
+                        "width": rec.get("width"), "height": rec.get("height"), "fps": rec.get("fps")}
     return out
 
 
@@ -180,15 +181,19 @@ class EditManager:
             raise ValueError(f"クリップ {src['index'] + 1} のファイルが見つかりません(ギャラリーから削除されたかもしれません)")
         if rec["kind"] == "image":
             return rec
+        # クリップの最後の 1 コマの中(再生位置が動画の終わり・「1 コマ ▶」で端まで進めたとき)を -ss で指すと、そこから始まるコマが無く
+        # 何も抜けない(ffmpeg は終了コード 0 で、ファイルを書かない)。最後のコマの頭(out - 1 コマ。in より前には戻さない)までに収める
+        clip, fps = src["clip"], float(proj["state"].get("fps") or editclip.DEFAULT_FPS)
+        at = round(min(float(src["source_s"]), max(float(clip["in"]), float(clip["out"]) - 1.0 / fps)), 3)
         dst = Path(self.outputs_dir) / "image" / f"frame_{pid}_{uuid.uuid4().hex[:8]}.png"
         try:
             exe = mv_audio._ffmpeg()
-            mv_audio._run_ffmpeg([exe, "-y", "-v", "error", "-ss", f"{src['source_s']:.3f}", "-i", str(path), "-frames:v", "1", "-f", "image2",
+            mv_audio._run_ffmpeg([exe, "-y", "-v", "error", "-ss", f"{at:.3f}", "-i", str(path), "-frames:v", "1", "-f", "image2",
                                   str(mv_audio._part(dst))], dst, "コマの抜き出し")
         except mv_audio.MvAudioError as e:
             raise ValueError(e.message) from e
-        name = f"{Path(rec.get('filename') or 'clip').stem}_{src['source_s']:.2f}s.png"
-        return self.ledger.add_output("image", dst, "edit", None, name, {"source_id": rec["id"], "source_s": src["source_s"], "project_id": pid, "frame": True})
+        name = f"{Path(rec.get('filename') or 'clip').stem}_{at:.2f}s.png"
+        return self.ledger.add_output("image", dst, "edit", None, name, {"source_id": rec["id"], "source_s": at, "project_id": pid, "frame": True})
 
     def _get(self, pid: str) -> dict:
         proj = self.ledger.get_edit_project(pid)

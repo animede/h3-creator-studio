@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# h3-creator-studio のセットアップ(Linux)。uv を用意し、管理役の .venv を作って、scripts/setup.py に渡す。
+# YUZU Creator Studio のセットアップ(Linux)。uv を用意し、管理役の .venv を作って、scripts/setup.py に渡す。
 #
-#   ./setup.sh                  # 部品の取り込み + 環境 + モデル(合計 約 100GB、回線次第で数時間)
+#   ./setup.sh                  # 部品の取り込み + 環境 + モデル(合計 約 150GB、回線次第で数時間)
 #   ./setup.sh --no-models      # 環境だけ(モデルは後で)
 #   ./setup.sh --only h3,ace    # 指定した部品だけ
 #   ./setup.sh --llm            # 同梱 LLM(約 5GB)も先に取得する

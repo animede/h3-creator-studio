@@ -196,7 +196,7 @@ def _check_clip(i: int, raw: dict, sources: dict) -> dict:
     if src["kind"] == "image":
         seconds = _num(raw.get("duration"), f"{no}の秒数", None) if raw.get("duration") not in (None, "") else (
             _num(raw.get("out"), f"{no}の終了", IMAGE_DEFAULT_S) - _num(raw.get("in"), f"{no}の開始", 0.0) if raw.get("out") not in (None, "") else IMAGE_DEFAULT_S)
-        if not MIN_CLIP_S <= seconds <= IMAGE_MAX_S:
+        if not MIN_CLIP_S - EPS <= seconds <= IMAGE_MAX_S:          # 最短は動画と同じ許容(分割・削除が残す切れ端は MIN_CLIP_S - EPS まで)
             raise ValueError(f"{no}(画像)の秒数は {MIN_CLIP_S:g}〜{IMAGE_MAX_S:g} 秒で指定してください")
         return {"id": oid, "kind": "image", "in": 0.0, "out": _r3(seconds), "duration": _r3(seconds)}
     length = src.get("length_s")
@@ -543,36 +543,45 @@ def _join_stages(state: dict, with_audio: bool) -> tuple:
     return stages, acc_v, acc_a if with_audio else None
 
 
-def _effect_filters(state: dict) -> list:
-    """効果をフィルタの並びにする。区間(plain)は export の時刻に直して enable='between(t,開始,終了)' を付ける(全体なら付けない)。"""
+def _gated(text: str, enable: str) -> str:
+    """フィルタ text に enable(区間)を付ける。オプションの無いフィルタ(negate など)は「名前=enable=…」、あれば「…:enable=…」。"""
+    if not enable:
+        return text
+    return text + (":" if "=" in text else "=") + enable
+
+
+def _effect_filters(state: dict, size: Optional[tuple] = None) -> list:
+    """効果をフィルタの並びにする。区間(plain)は export の時刻に直して enable='between(t,開始,終了)' を付ける(全体なら付けない)。
+    size は書き出す寸法(幅, 高さ)。ズーム・パンの crop はこの寸法で切り出す(プレビューは短辺 480 に縮めてあるので、state の寸法では切れない)。"""
     out = []
     plain = plain_duration(state)
+    fw, fh = (int(size[0]), int(size[1])) if size else (int(state["width"]), int(state["height"]))
     for e in state.get("effects") or []:
         whole = e.get("start") is None and e.get("end") is None
         a = plain_to_export(state, 0.0 if e.get("start") is None else e["start"], "start")
         b = plain_to_export(state, plain if e.get("end") is None else e["end"], "end")
         if b - a < EPS:
             continue
-        gate = "" if whole else f":enable='between(t,{_n(a)},{_n(b)})'"
+        gate = "" if whole else f"enable='between(t,{_n(a)},{_n(b)})'"
         kind = e["type"]
         if kind in ("fade_to_black", "fade_from_black", "fade_to_white", "fade_from_white"):
             # 区間の中だけ(enable)で、黒 / 白へ・から。区間の外は元のまま(黒を続けたいときは「黒にする」を重ねる)
             direction = "out" if kind.endswith("_to_black") or kind.endswith("_to_white") else "in"
             color = ":c=white" if kind.endswith("white") else ""
-            out.append(f"fade=t={direction}:st={_n(a)}:d={_n(b - a)}{color}{gate}")
+            out.append(_gated(f"fade=t={direction}:st={_n(a)}:d={_n(b - a)}{color}", gate))
         elif kind == "black":
-            out.append(f"drawbox=c=black:t=fill{gate}")
+            out.append(_gated("drawbox=c=black:t=fill", gate))
         elif kind in ("zoom_in", "zoom_out"):
             # 中央へ寄るズーム(挿入した静止画に効く)。区間の進み p = 0→1 で倍率を 1→Z(ズームイン)/ Z→1(ズームアウト)にして、コマごとに拡大(scale の
             # eval=frame。crop の w/h は起動時に 1 回しか計算されず t を使えない)してから、中央を元の寸法で切り出す。区間の外は倍率 1(何もしない)
-            z, w, h = _n(e["value"]), int(state["width"]), int(state["height"])
+            z, w, h = _n(e["value"]), fw, fh
             p = f"clip((t-{_n(a)})/{_n(b - a)},0,1)"
             zexpr = f"if(between(t,{_n(a)},{_n(b)}),{f'1+({z}-1)*{p}' if kind == 'zoom_in' else f'{z}-({z}-1)*{p}'},1)"
             out.append(f"scale=w='trunc(iw*({zexpr})/2)*2':h='trunc(ih*({zexpr})/2)*2':eval=frame,crop={w}:{h}:(iw-{w})/2:(ih-{h})/2")
         elif kind in PANS:
             # パン: 区間の間だけ Z 倍に拡大し(ズームしながらのパンは 1→Z)、切り出す窓を区間の進み p = 0→1 で端から端へ動かす(crop の x / y はコマごとに計算される)。
             # 区間の外は拡大しない(iw = 幅なので窓は動かない)
-            z, w, h = _n(e["value"]), int(state["width"]), int(state["height"])
+            z, w, h = _n(e["value"]), fw, fh
             p = f"clip((t-{_n(a)})/{_n(b - a)},0,1)"
             zexpr = f"if(between(t,{_n(a)},{_n(b)}),{f'1+({z}-1)*{p}' if kind.startswith('zoom_in_') else z},1)"
             x = {"pan_right": f"(iw-{w})*{p}", "pan_left": f"(iw-{w})*(1-{p})", "pan_down": f"(iw-{w})/2", "pan_up": f"(iw-{w})/2",
@@ -580,11 +589,11 @@ def _effect_filters(state: dict) -> list:
             y = {"pan_down": f"(ih-{h})*{p}", "pan_up": f"(ih-{h})*(1-{p})"}.get(kind, f"(ih-{h})/2")
             out.append(f"scale=w='trunc(iw*({zexpr})/2)*2':h='trunc(ih*({zexpr})/2)*2':eval=frame,crop={w}:{h}:x='{x}':y='{y}'")
         elif kind == "mono":
-            out.append(f"hue=s=0{gate}")
+            out.append(_gated("hue=s=0", gate))
         elif e["type"] in LOOKS:
-            out.append(f"{LOOKS[e['type']]}{gate}")
+            out.append(_gated(LOOKS[e["type"]], gate))
         else:
-            out.append(f"eq={kind}={_n(e['value'])}{gate}")
+            out.append(_gated(f"eq={kind}={_n(e['value'])}", gate))
     return out
 
 
@@ -612,7 +621,7 @@ def build_graph(state: dict, paths: dict, *, preview: bool = False, song_len: Op
         stages += [_audio_chain(i, c, _source(paths, c["id"])[1]) for i, c in enumerate(clips)]
     joined, vall, aall = _join_stages(state, clip_audio)
     stages += joined
-    vfx = _effect_filters(state)
+    vfx = _effect_filters(state, (w, h))
     if state["fade_in"] > EPS:
         vfx.append(f"fade=t=in:st=0:d={_n(state['fade_in'])}")
     if state["fade_out"] > EPS:

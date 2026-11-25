@@ -31,7 +31,8 @@ _procs: dict = {}
 
 
 def normalize(kind: str, params: dict, ledger=None) -> dict:
-    """ジョブの params を検証する: プロジェクトの ID と、作る状態(渡されなければ、いまの状態)。不正なら ValueError(日本語)。"""
+    """ジョブの params を検証する: プロジェクトの ID と、作る状態(渡されなければ、いまの状態)。不正なら ValueError(日本語)。
+    状態は台帳の生成物で検証し直す(editclip.validate_state。ffmpeg のフィルタの文に入る値は、検証した数と ID だけにする)。"""
     pid = str(params.get("project_id") or "").strip()
     proj = ledger.get_edit_project(pid) if ledger is not None and pid else None
     if not pid or (ledger is not None and proj is None):
@@ -39,11 +40,13 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     state = params.get("state") if isinstance(params.get("state"), dict) else (proj["state"] if proj else None)
     if not state or not state.get("clips"):
         raise ValueError("クリップがありません。ギャラリーの動画・画像を入れてください")
+    if ledger is not None:
+        state = editclip.validate_state(state, edit_mod.sources_for(ledger, state))      # 検証済みの状態なら、同じものが返る
     out = {"project_id": pid, "state": state}
     if kind == "edit.preview":
         try:
             out["seq"] = max(1, int(params.get("seq") or 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError("プレビューの番号を整数で指定してください") from None
     return out
 
@@ -222,13 +225,22 @@ async def run_export(job: Job, ctx: Ctx) -> None:
     name = re.sub(r'[\\/:*?"<>|\s]+', "_", proj["name"])[:40] + "_edit.mp4"
     rec = await asyncio.to_thread(ctx.ledger.add_output, "video", dest, job.tab, job.id, name,
                                   {"project_id": pid, "state": state, "name": proj["name"]},
-                                  width=state["width"], height=state["height"], duration_s=duration)
+                                  width=state["width"], height=state["height"], duration_s=duration, fps=state["fps"])
     job.outputs.append(rec["id"])
     ctx.ledger.update_edit_project(pid, output_id=rec["id"])
     log.info("編集 %s: 書き出しました → %s(%.1f 秒)", pid, dest.name, duration)
 
 
+def record(params: dict) -> dict:
+    """台帳(jobs 表)に残す params: プロジェクトの ID・プレビューの番号と、state の指紋だけ。state の写し(クリップ・効果の全部)は残さない
+    (プレビューは操作のたびに走るので、写しを残すと台帳が増え続けた)。写しはメモリのジョブにあり、ギャラリーの削除の保護はそちらを見る。"""
+    out = {"project_id": params.get("project_id"), "state_hash": editclip.state_hash(params["state"]) if isinstance(params.get("state"), dict) else None}
+    if "seq" in params:
+        out["seq"] = params["seq"]
+    return out
+
+
 HANDLERS = {
-    "edit.preview": Handler(component=None, normalize=normalize, run=run_preview, cancel=cancel_ffmpeg, gpu=False),
-    "edit.export": Handler(component=None, normalize=normalize, run=run_export, cancel=cancel_ffmpeg, gpu=False),
+    "edit.preview": Handler(component=None, normalize=normalize, run=run_preview, cancel=cancel_ffmpeg, gpu=False, record=record),
+    "edit.export": Handler(component=None, normalize=normalize, run=run_export, cancel=cancel_ffmpeg, gpu=False, record=record),
 }

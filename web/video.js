@@ -159,7 +159,7 @@
     for (const w of ["first", "last"]) if (frames[w] && gone(frames[w].id)) { frames[w] = null; changed = true; }
     if (changed) render();
   }
-  studio.on.items.push(() => dropGone((id) => !byId(id)));
+  studio.on.items.push(() => dropGone(goneFromGallery));      // 一覧が全部のときだけ(web/gallery.js の goneFromGallery)
   document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
   // 生成物ビューアのボタン
@@ -174,9 +174,12 @@
 
   // ---- 音声を作る(TTS) ----
 
-  let speakersLoaded = false;
+  let speakersLoaded = false, speakersLoading = false;
 
+  // 話者の一覧を読む。読めなかったら、話者の欄を押す(フォーカスする)か「音声を作る」で読み直す
   async function loadSpeakers() {
+    if (speakersLoading) return;
+    speakersLoading = true;
     const sel = vd("tts-speaker");
     vd("tts-note").textContent = "話者を読み込んでいます(AivisSpeech が止まっていれば起動します)…";
     try {
@@ -188,13 +191,18 @@
       try { saved = localStorage.getItem("tts-style"); } catch (e) { /* 保存できなくても動く */ }
       if (saved && list.some((s) => String(s.style_id) === saved)) sel.value = saved;
       speakersLoaded = list.length > 0;
+      if (!speakersLoaded) sel.replaceChildren(new Option("話者が見つかりません(押すと読み直します)", ""));
       vd("tts-note").textContent = speakersLoaded ? "" : "話者が見つかりません";
     } catch (e) {
-      vd("tts-note").textContent = `話者を取得できません: ${e.message || e}`;
+      sel.replaceChildren(new Option("話者を読み込めません(押すと読み直します)", ""));
+      vd("tts-note").textContent = `話者を取得できません: ${e.message || e}(話者の欄を押すと読み直します)`;
+    } finally {
+      speakersLoading = false;
     }
   }
 
   vd("tts").addEventListener("toggle", () => { if (vd("tts").open && !speakersLoaded) loadSpeakers(); });
+  vd("tts-speaker").addEventListener("focus", () => { if (!speakersLoaded) loadSpeakers(); });
   vd("tts-speaker").onchange = () => { try { localStorage.setItem("tts-style", vd("tts-speaker").value); } catch (e) { /* 保存できなくても動く */ } };
   vd("tts-speed").oninput = () => { vd("tts-speed-val").textContent = (+vd("tts-speed").value).toFixed(1); };
 
@@ -202,6 +210,7 @@
     const text = vd("tts-text").value.trim();
     const note = vd("tts-note");
     if (!text) { note.textContent = "読み上げる文を入れてください"; return; }
+    if (!speakersLoaded) { loadSpeakers(); return; }      // 話者を読めていない: 読み直す(結果は下の案内に出る)
     if (!vd("tts-speaker").value) { note.textContent = "話者を選んでください"; return; }
     vd("tts-go").disabled = true;
     note.textContent = "音声を作っています…";

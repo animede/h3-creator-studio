@@ -9,8 +9,8 @@ from studio.config import REPO_ROOT
 
 WEB = REPO_ROOT / "web"
 
-# 偽の DOM(何を呼んでも落ちない要素)で edit.js を読み込み、EDIT_LOGIC を取り出して検査する(assert が外れたら exit 1)
-NODE_HARNESS = r"""
+# 偽の DOM(何を呼んでも落ちない要素)で edit.js を読み込み、EDIT_LOGIC を取り出す(L)。下の 2 つの検査の共通の頭
+NODE_PRELUDE = r"""
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
 const src = fs.readFileSync(process.argv[process.argv.length - 1], "utf8");
 const fake = () => {
@@ -28,6 +28,10 @@ vm.createContext(ctx);
 const L0 = vm.runInContext(src + "\n;EDIT_LOGIC", ctx);
 // 別の realm のオブジェクトは deepStrictEqual で比べられないので、答えを JSON で素の形にする
 const L = Object.fromEntries(Object.entries(L0).map(([k, fn]) => [k, (...a) => { const r = fn(...a); return r === undefined ? r : JSON.parse(JSON.stringify(r)); }]));
+"""
+
+# EDIT_LOGIC の検査(assert が外れたら exit 1)
+NODE_HARNESS = NODE_PRELUDE + r"""
 assert(ctx.studio.own.edit && typeof ctx.studio.own.edit.history === "function", "studio.own.edit が登録される");
 assert.strictEqual(ctx.studio.on.tab.length, 1);
 
@@ -103,7 +107,7 @@ assert.throws(() => L.setTransition({ ...base(), clips: [V("a", 0, 0.8), V("b", 
 let fixed = L.fixup({ ...base(), clips: [V("a", 0, 10), V("b", 0, 1.4)], effects: [fx(18, 30), fx(30, 40)], fade_in: 99 });
 assert.deepStrictEqual(fixed.transitions, [{ after: 0, type: "crossfade", duration: 0.7 }]);      // 短いほうの半分に縮む
 assert.deepStrictEqual(fixed.effects, []);          // 全体(11.4 秒)を超えた区間は、収まらない・空になるので外れる
-assert.strictEqual(fixed.fade_in, 11.4);
+assert.strictEqual(fixed.fade_in, 10.7);          // フェードは書き出しの長さ(11.4 − クロスフェード 0.7 = 10.7 秒)まで
 fixed = L.fixup({ ...base(), clips: [V("a", 0, 10), V("b", 0, 0.8)] });
 assert.deepStrictEqual(fixed.transitions, []);         // 半分(0.4 秒)が 0.5 秒に満たないので外れる
 
@@ -117,9 +121,62 @@ assert.strictEqual(L.tlToOut(base(), 10), 9);           // 区間の始まりが
 assert.strictEqual(L.outToTl(base(), 4), 4);
 assert.strictEqual(L.tlToOut({ ...base(), transitions: [] }, 12), 12);
 for (const t of [0, 3.3, 10.5, 19.9]) assert.strictEqual(L.outToTl(base(), L.tlToOut(base(), t)), t);
+
+// サーバ(studio/editclip.py)と同じ 0.1 秒の決まり: 切れ端を残さない・境目の近くの挿入は境目に寄せる(合わないと、サーバが「短すぎます」で断る)
+const plain = (...clips) => ({ ...base(), clips, transitions: [] });
+d = L.deleteRange(plain(V("a", 0, 10.042)), 5, 10.04);              // 10.042 秒のクリップの 5 秒〜末尾(欄の 2 桁の 10.04)
+assert.deepStrictEqual(ranges(d), [["a", 0, 5]]);
+d = L.deleteRange(plain(V("a", 0, 5.042), V("b", 0, 5)), 1, 5.04);  // 「ここまで」が境目 5.042 の 2 桁(5.04)
+assert.deepStrictEqual(ranges(d), [["a", 0, 1], ["b", 0, 5]]);
+d = L.deleteRange(plain(V("a", 0, 3), V("b", 0, 5)), 3.04, 6);      // 境目の 1 コマ後から
+assert.deepStrictEqual(ranges(d), [["a", 0, 3], ["b", 3, 5]]);
+ins = L.insertAt(plain(V("a", 0, 3), V("b", 0, 5)), 3.04, img);     // 境目の 1 コマ後への挿入は、境目に寄せる(分けない)
+assert.deepStrictEqual(ranges(ins), [["a", 0, 3], ["i", 0, 3], ["b", 0, 5]]);
+ins = L.insertAt(plain(V("a", 0, 3), V("b", 0, 5)), 7.95, img);     // 末尾の 0.1 秒以内は末尾へ
+assert.deepStrictEqual(ranges(ins), [["a", 0, 3], ["b", 0, 5], ["i", 0, 3]]);
+sp = L.splitAt(base(), 9.95);                                       // 境目の近くでは分けない(寄せた境目の添字を返す)
+assert.strictEqual(sp.state.clips.length, 2);
+assert.strictEqual(sp.at, 1);
+// 末尾の切れ端を捨てたクリップの後ろの境目の効果は、つながりが変わるので消える(サーバの delete_range と同じ)
+d = L.deleteRange({ ...three, transitions: [{ after: 1, type: "crossfade", duration: 1 }] }, 12, 19.96);
+assert.deepStrictEqual(ranges(d), [["a", 0, 10], ["b", 0, 2], ["c", 0, 10]]);
+assert.deepStrictEqual(d.transitions, []);
+// 1 ミリ秒以下になった効果は外す(サーバは「終了は開始より後に」で断る)
+d = L.deleteRange({ ...plain(V("a", 0, 10)), effects: [fx(4.999, 6)] }, 5, 6);
+assert.deepStrictEqual(d.effects, []);
+assert.throws(() => L.setClip(plain(V("a", 0, 10)), 0, { in: 1, out: 1.06 }, 10), /0\.1/);
+// 先頭・末尾のフェードは、合わせて書き出しの長さまで(削除で短くなったとき・クロスフェードで縮むとき)
+fixed = L.fixup(L.deleteRange({ ...plain(V("a", 0, 10)), fade_in: 3, fade_out: 3 }, 0, 5));
+assert.deepStrictEqual([fixed.fade_in, fixed.fade_out], [3, 2]);
+fixed = L.fixup({ ...base(), clips: [V("a", 0, 4), V("b", 0, 4)], transitions: [{ after: 0, type: "crossfade", duration: 2 }], fade_in: 8, fade_out: 1 });
+assert.strictEqual(L.exportLength(fixed), 6);
+assert.deepStrictEqual([fixed.fade_in, fixed.fade_out], [6, 0]);
 """
 
-TAB_BUTTON = '<button class="tab" data-tab="edit" role="tab">編集</button>'
+# 画面が組み立てた state(整えたあと)を JSON で出す。サーバの validate_state が受けるか、サーバの delete_range / insert_at と同じクリップになるかを Python 側で確かめる
+PARITY_HARNESS = NODE_PRELUDE + r"""
+const V = (id, i, o) => ({ id, kind: "video", in: i, out: o, duration: o - i });
+const st = (clips, extra = {}) => ({ clips, transitions: [], fade_in: 0, fade_out: 0, effects: [], audio: { mode: "original", song_id: null, song_db: -14 }, ...extra });
+const img = L.newClip({ id: "i", kind: "image" }, 3);
+const cases = [
+  ["delete_to_end_rounded", st([V("a", 0, 10.042)]), ["delete", 5, 10.04]],
+  ["delete_to_boundary_rounded", st([V("a", 0, 5.042), V("b", 0, 5)]), ["delete", 1, 5.04]],
+  ["delete_from_frame_after_boundary", st([V("a", 0, 3), V("b", 0, 5)]), ["delete", 3.04, 6]],
+  ["delete_keeps_crossfade", st([V("a", 0, 10), V("b", 0, 10)], { transitions: [{ after: 0, type: "crossfade", duration: 1 }] }), ["delete", 12, 15]],
+  ["delete_with_fades", st([V("a", 0, 10)], { fade_in: 3, fade_out: 3 }), ["delete", 0, 5]],
+  ["delete_tiny_effect", st([V("a", 0, 10)], { effects: [{ type: "mono", value: 1, start: 4.999, end: 6 }] }), ["delete", 5, 6]],
+  ["insert_near_boundary", st([V("a", 0, 3), V("b", 0, 5)]), ["insert", 3.04, img]],
+  ["insert_inside", st([V("a", 0, 3), V("b", 0, 5)], { effects: [{ type: "mono", value: 1, start: 4, end: 6 }] }), ["insert", 5, img]],
+  ["fades_over_crossfade", st([V("a", 0, 4), V("b", 0, 4)], { transitions: [{ after: 0, type: "crossfade", duration: 2 }], fade_in: 8, fade_out: 1 }), ["none"]],
+];
+const out = cases.map(([name, s, op]) => {
+  const built = op[0] === "delete" ? L.deleteRange(s, op[1], op[2]) : op[0] === "insert" ? L.insertAt(s, op[1], op[2]) : s;
+  return { name, input: s, op, state: L.fixup(built) };
+});
+console.log(JSON.stringify(out));
+"""
+
+TAB_BUTTON = '<button class="tab" data-tab="edit" role="tab" aria-selected="false" aria-controls="tab-edit">編集</button>'
 # 契約(編集タブの API)にある入り口。edit.js はこれ以外の /api/edit を使わない
 API_PATHS = {"/api/edit", "/api/edit/probe", "/api/edit/${id}", "/api/edit/${id}/state", "/api/edit/${id}/undo", "/api/edit/${id}/redo",
              "/api/edit/${id}/preview", "/api/edit/${id}/export", "/api/edit/${view.id}", "/api/edit/${view.id}/frame"}
@@ -169,6 +226,28 @@ class EditPageTest(unittest.TestCase):
     def test_edit_js_parses(self):
         r = subprocess.run(["node", "--check", str(WEB / "edit.js")], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "node が無い")
+    def test_states_built_by_the_page_are_accepted_by_the_server(self):
+        """画面の分ける・削除・挿入・整え(EDIT_LOGIC)が、サーバ(editclip)と同じ決まりで state を作る: validate_state が断らず、
+        削除・挿入のクリップの並びはサーバの delete_range / insert_at と同じ(2026-11-25: 2 桁に丸めた区間の端で 0.002 秒の切れ端が残り、断られていた)。"""
+        import json
+        from studio import editclip
+        r = subprocess.run(["node", "-e", PARITY_HARNESS, str(WEB / "edit.js")], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        sources = {"a": {"kind": "video", "length_s": 10.042, "width": 1024, "height": 576}, "b": {"kind": "video", "length_s": 10.0, "width": 1024, "height": 576},
+                   "i": {"kind": "image", "length_s": None, "width": 512, "height": 512}}
+        clips = lambda s: [(c["id"], round(float(c["in"]), 3), round(float(c["out"]), 3)) for c in s["clips"]]
+        for case in json.loads(r.stdout):
+            with self.subTest(case["name"]):
+                checked = editclip.validate_state(case["state"], sources)        # 断られれば ValueError
+                op = case["op"]
+                if op[0] == "delete":
+                    self.assertEqual(clips(checked), clips(editclip.delete_range(case["input"], op[1], op[2])))
+                elif op[0] == "insert":
+                    server = editclip.insert_at(case["input"], op[1], op[2])
+                    self.assertEqual(clips(checked), clips(server))
+                    self.assertEqual(checked["effects"], editclip.validate_state(server, sources)["effects"])
 
     @unittest.skipUnless(shutil.which("node"), "node が無い")
     def test_state_building_logic(self):

@@ -595,8 +595,8 @@ class RestoreDeleteTest(MvBase):
             self.assertEqual((proj["state"], proj["message"]), ("paused", "管理役の再起動で一時停止しました"), pid)
         self.assertEqual(self.scene_status("gen"), ["done", "pending"])        # 「生成中」だったシーンは、未生成に戻る
         for pid, state in (("done", "completed"), ("pau", "paused"), ("fai", "failed"), ("can", "cancelled")):
-            self.assertEqual(self.state(pid), state)
-        self.assertEqual(self.scene_status("done"), ["done", "running"])      # 走っていない制作には手を付けない
+            self.assertEqual(self.state(pid), state)                          # 走っていない制作の状態はそのまま
+            self.assertEqual(self.scene_status(pid), ["done", "pending"], pid)  # 一時停止・中止の後も走っていたシーンのジョブは消えたので、未生成に戻す
         self.assertEqual(self.director.restore(), 0)
         self.assertEqual(self.mv_jobs(), [])                                  # 勝手にジョブを入れない
 

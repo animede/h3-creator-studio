@@ -28,7 +28,7 @@ from .handlers import HANDLERS
 from .jobs import TERMINAL, Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
-from .mv import FINISHED, Director, concept_from_song, pick_image, pick_song, song_has_info
+from .mv import Director, concept_from_song, pick_image, pick_song, song_has_info
 from .mvdescribe import describe_character, listen_song, propose_concept
 from .presets import PresetError
 from .scheduler import Scheduler
@@ -62,6 +62,9 @@ UPLOAD_KINDS = {"image": "image", "video": "video", "audio": "audio"}   # MIME �
 async def lifespan(app: FastAPI):
     app.state.sched = sched = Scheduler()
     app.state.ledger = ledger = Ledger(OUTPUTS_DIR)
+    stale = await asyncio.to_thread(ledger.remove_stale_parts)        # 前回の強制終了で残った作りかけ(*.part)。起動時はまだ何も書いていない
+    if stale:
+        logging.getLogger("studio.main").info("作りかけのファイル(*.part)を %d 個消しました", stale)
     app.state.tts = Tts(sched, ledger, OUTPUTS_DIR)
     app.state.llm = llm = Llm(settings)
     app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm, tts=app.state.tts), HANDLERS)
@@ -98,6 +101,7 @@ def _comp(name: str):
 def api_status():
     sched, snap = app.state.sched, app.state.monitor.snapshot()
     return {"components": sched.status(), "gpu": snap["gpu"], "ram": snap["ram"], "shared_gpu_mib": snap["shared_gpu_mib"],
+            "shared_gpu_total_mib": snap.get("shared_gpu_total_mib"),          # 共有 GPU メモリの上限(Windows だけ。RAM の半分。他は null)
             "warning": snap["warning"], "operation": sched.current_operation(), "busy": sched.is_busy(), "ts": time.time(),
             "jobs_done_counter": app.state.jobs.done_counter,
             "gpu_mode": sched.mode, "residents": sched.resident_status(), "lanes": app.state.jobs.lane_status()}
@@ -155,8 +159,15 @@ class JobIn(BaseModel):
     params: dict = {}
 
 
+# /api/jobs から入れられるジョブの種類(画像・動画・音楽の部品のジョブだけ)。MV・ショート動画のジョブは Director、編集のジョブは EditManager だけが入れる
+# (tab を絞っても kind は自由に書けたので、制作の外から mv.assemble や、検証していない state の edit.export を入れられた)
+PUBLIC_JOB_PREFIXES = ("h3image.", "h3.", "ace.")
+
+
 @app.post("/api/jobs", status_code=202)
 def api_job_submit(body: JobIn):
+    if not body.kind.startswith(PUBLIC_JOB_PREFIXES) or body.kind not in HANDLERS:
+        raise HTTPException(400, f"このジョブの種類は受け付けていません: {body.kind}(画像・動画・音楽のジョブだけを入れられます)")
     try:
         job = app.state.jobs.submit(body.tab, body.kind, body.params)
     except ValueError as e:
@@ -382,7 +393,7 @@ async def api_tts(body: TtsIn):
         raise HTTPException(e.status, e.message)
 
 
-# ---- MV(リップシンク) ----
+# ---- MV(ミュージックビデオ。歌わせる・歌わせないの 2 通り) ----
 
 class MvIn(BaseModel):
     song_id: str = ""
@@ -768,7 +779,7 @@ async def api_edit_delete(pid: str):
 # ---- プリセット(各タブの入力欄の値に名前を付けたもの) ----
 
 class PresetIn(BaseModel):
-    tab: Optional[str] = None      # image / video / music / mv
+    tab: Optional[str] = None      # image / video / music / mv / short
     name: Optional[str] = None
     values: Any = None             # 入力欄の値の辞書(文字・数・真偽値・それらの配列)。形の検査は presets.check_values(日本語の 400)
 
@@ -817,7 +828,7 @@ def api_presets_export(tab: str = None, include_builtin: bool = False):
     """自分のプリセット(include_builtin=1 なら同梱のものも)を JSON のファイルで返す。そのまま import できる。"""
     with _preset_errors():
         data = presets.export_presets(app.state.ledger, tab, include_builtin)
-    filename = f"h3-presets-{tab}.json" if tab else "h3-presets.json"       # tab は検査済み(image / video / music / mv)
+    filename = f"h3-presets-{tab}.json" if tab else "h3-presets.json"       # tab は検査済み(image / video / music / mv / short)
     return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -854,8 +865,6 @@ def api_gallery(kind: str = "all", tab: str = None, limit: int = 200):
 
 
 JOB_IN_USE = "実行中・順番待ちのジョブで使っています"
-MV_IN_USE = "MV の制作(一時停止中など)で使っています。先に制作を削除してください"
-SHORT_IN_USE = "ショート動画の制作(一時停止中など)で使っています。先に制作を削除してください"
 EDIT_IN_USE = "編集プロジェクトで使っています。先にクリップ・曲から外すか、プロジェクトを削除してください"
 DELETE_MAX = 500          # 一度に消せる数(画面のギャラリーが読む数)
 
@@ -872,9 +881,18 @@ def _strings(value):
             yield from _strings(v)
 
 
+def _project_in_use(proj: dict) -> str:
+    """MV・ショート動画の制作が使っている生成物を消せない理由(どの制作かを、題か ID で示す)。"""
+    noun = "ショート動画の" if proj.get("kind") == "short" else "MV の"
+    title = str(proj["params"].get("title") or "").strip()
+    which = f"「{title}」" if title else f"(ID {proj['id']})"
+    return f"{noun}制作{which}で使っています。先に制作を削除してください"
+
+
 def _in_use(ids) -> dict:
     """ids のうち、まだ要る生成物の ID -> 消せない理由。順番待ち・準備中・実行中のジョブが params で使っているもの(references・first_image・
-    last_image など。入れ子の中も見る)と、続きのある MV の制作(完成・中止以外)が曲・画像に使っているもの、編集プロジェクトの state が使っているクリップ・曲。"""
+    last_image など。入れ子の中も見る)と、MV・ショート動画の制作(状態を問わない。完成した制作もシーンのやり直し・結合し直し、中止した制作も
+    再開ができるので)が曲・画像に使っているもの、編集プロジェクトの state が使っているクリップ・曲。"""
     ids, busy = set(ids), {}
     for job in list(app.state.jobs.jobs.values()):
         if job.status not in TERMINAL:
@@ -882,11 +900,10 @@ def _in_use(ids) -> dict:
                 if s in ids:
                     busy.setdefault(s, JOB_IN_USE)
     for proj in app.state.ledger.list_mv_projects(limit=100000):
-        if proj["state"] not in FINISHED:
-            params = proj["params"]
-            for oid in (params.get("song_id"), params.get("image_id"), *(it.get("id") for it in params.get("images") or [])):       # ショート動画は参照画像(images)
-                if oid in ids:
-                    busy.setdefault(oid, SHORT_IN_USE if proj.get("kind") == "short" else MV_IN_USE)
+        params = proj["params"]
+        for oid in (params.get("song_id"), params.get("image_id"), *(it.get("id") for it in params.get("images") or [])):       # ショート動画は参照画像(images)
+            if oid in ids:
+                busy.setdefault(oid, _project_in_use(proj))
     for proj in app.state.ledger.list_edit_projects(limit=100000):       # 編集プロジェクトは、いまの state のクリップと曲を使い続ける
         for oid in editclip.used_ids(proj["state"]):
             if oid in ids:
@@ -917,7 +934,7 @@ class GalleryDeleteIn(BaseModel):
 
 @app.post("/api/gallery/delete")
 def api_gallery_delete_many(body: GalleryDeleteIn):
-    """生成物をまとめて消す。まだ要るもの(使っているジョブや、続きのある MV の制作があるもの)は消さずに、理由を返す。"""
+    """生成物をまとめて消す。まだ要るもの(使っているジョブ・MV やショート動画の制作・編集プロジェクトがあるもの)は消さずに、理由を返す。"""
     return _delete_outputs(body.ids)
 
 

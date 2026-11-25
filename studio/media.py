@@ -23,9 +23,22 @@ def _tool(name: str) -> Optional[str]:
     return path
 
 
+FPS_MIN, FPS_MAX = 1.0, 240.0
+
+
+def frame_rate(text) -> Optional[float]:
+    """ffprobe の avg_frame_rate / r_frame_rate("24/1"・"30000/1001"・"0/0")をコマ率にする。読めない・ありえない値は None。"""
+    try:
+        num, _, den = str(text or "").partition("/")
+        fps = float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return round(fps, 3) if FPS_MIN <= fps <= FPS_MAX else None
+
+
 def probe(path: Path) -> dict:
-    """{"duration_s", "width", "height"} を返す。読めない項目は None。"""
-    out = {"duration_s": None, "width": None, "height": None}
+    """{"duration_s", "width", "height", "fps"} を返す。読めない項目は None。fps は動画の平均のコマ率(avg_frame_rate、無ければ r_frame_rate)。"""
+    out = {"duration_s": None, "width": None, "height": None, "fps": None}
     exe = _tool("ffprobe")
     if exe is None:
         return out
@@ -42,6 +55,7 @@ def probe(path: Path) -> dict:
     for s in info.get("streams", []):
         if s.get("codec_type") == "video" and s.get("width"):
             out["width"], out["height"] = int(s["width"]), int(s["height"])
+            out["fps"] = frame_rate(s.get("avg_frame_rate")) or frame_rate(s.get("r_frame_rate"))
             break
     return out
 

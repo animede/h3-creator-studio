@@ -42,3 +42,9 @@
 # [llm]
 # gpu = "off"                    # 同梱 LLM を CPU だけで動かす("auto" / "off" / "all" / 層数)
 # mmproj = "/path/to/mmproj-gemma-4-E4B-it-Q8_0.gguf"      # 画像・音声を読む投影ファイルを自分で用意したとき(空なら、自動で探す・取得する)
+
+# MV・ショート動画タブの音声処理と、セリフのテロップ
+# [mv]
+# tools_python = ""          # 空なら setup --mv が作る components/mvtools/.venv の Python
+# device = ""                # ボーカルの分離(Demucs)の装置。空なら CPU("cuda" で GPU)
+# subtitle_font = ""         # テロップの字体。空なら Noto Sans CJK JP(Windows は "Meiryo" など)

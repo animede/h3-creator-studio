@@ -22,6 +22,7 @@ ROLE_LABEL = {"person": "人物", "scenery": "景色・物"}
 FINAL_AUDIOS = ("auto", "none")
 IMAGES_MAX = 4                                  # 参照画像の枚数(人物は 1 枚まで)
 LENGTH_MIN_S, LENGTH_DEFAULT_S, LENGTH_WARN_S = 30.0, 60.0, 300.0     # 曲もセリフも無いときの長さ(最短・既定)。5 分を超えたら画面が警告する
+LENGTH_MAX_S = 3600.0                           # 同じく最長(1 時間。シーン割りを 1 回の LLM の答えで書かせるので、これより長いと答えが収まらない)
 STORY_MAX, NARRATION_MAX = 4000, 4000
 
 STAGE_LABEL = {**mv.STAGE_LABEL, "analyze": "音声の準備"}
@@ -92,16 +93,16 @@ def resolve_params(ledger, params: dict) -> dict:
     else:
         try:
             speaker_id = int(speaker_id)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError("話者は整数(AivisSpeech のスタイル ID)で指定してください")
     if not story and not song and not narration:
         raise ValueError("物語・映像のイメージを書いてください(曲もセリフも無いときは必須です)")
     timeline = timeline_of(narration, song["id"] if song else None)
     length_s = None
     if timeline == "free":
-        length_s = _number(params.get("length_s"), "長さ", LENGTH_DEFAULT_S)
-        if length_s < LENGTH_MIN_S:
-            raise ValueError(f"長さは {LENGTH_MIN_S:g} 秒以上で指定してください")
+        length_s = _number(params.get("length_s"), "長さ", LENGTH_DEFAULT_S)       # NaN・無限大は _number が断る
+        if not LENGTH_MIN_S <= length_s <= LENGTH_MAX_S:
+            raise ValueError(f"長さは {LENGTH_MIN_S:g}〜{LENGTH_MAX_S:g} 秒で指定してください")
     final_audio = str(params.get("final_audio") or "auto")
     if final_audio not in FINAL_AUDIOS:
         raise ValueError("最終の音声は " + " / ".join(FINAL_AUDIOS) + " のいずれかです")

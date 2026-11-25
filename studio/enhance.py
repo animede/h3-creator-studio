@@ -88,6 +88,10 @@ async def enhance_prompt(runner, tab: str, text: str, mode: str = None, seconds:
         busy = "、".join(ctx.sched.comps[n].spec.label for n in plan.blockers) or "別の部品"
         raise EnhanceError(409, f"{ctx.sched.comps[name].spec.label} を GPU に載せられません({busy} が生成中のため)。"
                                 "生成が終わってからもう一度押してください")
+    if (plan is None or plan.action != "ready") and ctx.llm is not None:
+        # 部品を GPU に載せる前に、管理役の LLM が GPU に持っている VRAM を返す(GPU のジョブと同じ。持たせたまま載せると、12GB では部品の取り分が
+        # 減っていた)。LLM の区間(session)に入る前に呼ぶ(入った後だと、自分の区間の終わりを待ってしまう)。部品の後で起こす LLM は、空きに合わせて載る
+        await ctx.llm.release_before_gpu()
     mark, idle = getattr(ctx.sched, "mark_busy", None), getattr(ctx.sched, "mark_idle", None)
     if mark is not None:
         mark(name)                 # 強化の最中は、別の生成がこの部品を GPU から降ろさないようにする

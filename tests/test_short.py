@@ -94,10 +94,20 @@ class ResolveParamsTest(LedgerBase):
         self.assertEqual(self.resolve(story="x")["length_s"], 60.0)                    # 既定 60 秒
         self.assertEqual(self.resolve(story="x", length_s="90")["length_s"], 90.0)
         self.assertEqual(self.resolve(story="x", length_s=30)["length_s"], 30.0)
-        self.assertEqual(self.resolve(story="x", length_s=900)["length_s"], 900.0)     # 上限は無い
+        self.assertEqual(self.resolve(story="x", length_s=900)["length_s"], 900.0)
+        self.assertEqual(self.resolve(story="x", length_s=3600)["length_s"], 3600.0)   # 最長 1 時間
         self.assertIsNone(self.resolve(story="x", song_id=self.song["id"], length_s=10)["length_s"])      # 曲があれば時間軸は曲(長さは見ない)
-        self.assertRejects("長さは 30 秒以上", story="x", length_s=29.9)
+        self.assertRejects("長さは 30〜3600 秒", story="x", length_s=29.9)
+        self.assertRejects("長さは 30〜3600 秒", story="x", length_s=3600.5)
         self.assertRejects("長さ は数字", story="x", length_s="long")
+        for bad in (float("nan"), float("inf"), "Infinity"):                           # JSON の NaN / Infinity も float で届く(範囲の比べをすり抜けていた)
+            self.assertRejects("長さ は数字", story="x", length_s=bad)
+
+    def test_scene_length_and_seed_reject_nan_and_infinity(self):
+        self.assertRejects("シーンの最短 は数字", story="x", min_s=float("nan"))
+        self.assertRejects("シーンの最長 は数字", story="x", max_s=float("inf"))
+        self.assertRejects("seed は整数", story="x", seed=float("inf"))
+        self.assertRejects("seed は整数", story="x", seed=float("nan"))
 
     def test_story_is_required_without_a_song_and_without_narration(self):
         self.assertRejects("物語・映像のイメージを書いてください", story="  ")

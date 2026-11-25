@@ -26,7 +26,7 @@ STEPS_CHOICES = (2, 3, 6)
 def _snap(value, name: str) -> int:
     try:
         v = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f"{name} は整数で指定してください")
     return min(MAX_SIZE, max(MIN_SIZE, round(v / SNAP) * SNAP))
 
@@ -48,10 +48,16 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     else:
         try:
             seed = int(seed)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError("seed は整数で指定してください")
     steps = params.get("steps")
-    steps = None if steps in (None, "") else int(steps)
+    if steps in (None, ""):
+        steps = None
+    else:
+        try:
+            steps = int(steps)
+        except (TypeError, ValueError, OverflowError):      # 数でない値も、選べる数と同じ日本語の理由で断る
+            steps = -1
     if steps is not None and steps not in STEPS_CHOICES:
         raise ValueError(f"steps は {STEPS_CHOICES} のいずれかか、未指定にしてください")
     if ledger is not None:

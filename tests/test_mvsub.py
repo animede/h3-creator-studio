@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,9 +60,31 @@ class WriteTest(unittest.TestCase):
     def test_portrait_lifts_the_caption(self):
         self.assertGreater(S._layout(448, 768)["margin"], S._layout(768, 448)["margin"])
 
-    def test_filter_path_escapes_colons_and_backslashes(self):
-        self.assertEqual(S.filter_path("C:\\work\\sub titles.ass"), "C\\:/work/sub titles.ass")
-        self.assertEqual(S.filter_path("/tmp/a'b.ass"), "/tmp/a\\'b.ass")
+    def test_filter_path_escapes_twice(self):
+        # オプションの段(: と \ と ')を逃がしてから、フィルタの並びの段(\ ' [ ] , ;)を逃がす。C: の : は、\ が 2 つ付いた \\: になる
+        self.assertEqual(S.filter_path("C:\\work\\sub titles.ass"), "C\\\\:/work/sub titles.ass")
+        self.assertEqual(S.filter_path("/tmp/a'b.ass"), "/tmp/a\\\\\\'b.ass")
+        self.assertEqual(S.filter_path("/tmp/x, [y];z.ass"), "/tmp/x\\, \\[y\\]\\;z.ass")
+
+
+@unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg が PATH に無い")
+class FilterPathFfmpegTest(unittest.TestCase):
+    """逃がしたパスを、実際の ffmpeg の ass フィルタが読めるか(Windows の C: と同じ : を含むフォルダ。Windows では : をフォルダ名に使えないので外す)。"""
+
+    def test_ass_filter_reads_escaped_paths(self):
+        names = ["o'k, [a];b"] + ([] if sys.platform == "win32" else ["dr:ive"])
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "src.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:size=320x180:rate=24:duration=1",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)], check=True, capture_output=True)
+            for name in names:
+                d = Path(tmp) / name
+                d.mkdir()
+                ass = d / "subtitles.ass"
+                S.write_subtitles([{"text": "テスト", "start": 0.1, "end": 0.9}], 320, 180, ass, d / "subtitles.srt")
+                r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", f"ass={S.filter_path(ass)}", "-f", "mp4",
+                                    str(d / "out.mp4")], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, f"{name}: {r.stderr[-300:]}")
 
 
 if __name__ == "__main__":

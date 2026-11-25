@@ -399,6 +399,29 @@ class EditManagerTest(EditBase):
         self.assertEqual((rows[0]["clips"], rows[0]["duration"]), (0, 0.0))
         self.assertEqual(set(rows[0]), {"id", "name", "updated_at", "duration", "clips", "thumb_url", "output"})
 
+    def test_fps_comes_from_the_first_video(self):
+        v30 = self.add("video", "v30.mp4", duration_s=6.0, width=1280, height=720, fps=29.97)
+        v = self.mgr.create("30fps", {"clips": [{"id": self.img["id"], "duration": 2}, {"id": v30["id"], "in": 0, "out": 3}, {"id": self.v1["id"], "in": 0, "out": 2}]})
+        self.assertEqual((v["state"]["width"], v["state"]["height"], v["state"]["fps"]), (1280, 720, 30))     # 先頭の動画(画像は見ない)
+        self.assertEqual(self.create()["state"]["fps"], 24)                                                    # コマ率の分からない動画(前の版の行)は 24
+
+    def test_extract_frame_stays_inside_the_last_frame_of_the_clip(self):
+        pid = self.mgr.create("コマ", {"clips": [{"id": self.v1["id"], "in": 0, "out": 4}, {"id": self.v2["id"], "in": 1, "out": 5}]})["id"]
+        seen = []
+
+        def fake_run(argv, dst, what):
+            seen.append(float(argv[argv.index("-ss") + 1]))
+            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            Path(dst).write_bytes(png_bytes())
+            return dst
+        with mock.patch.object(mv_audio, "_ffmpeg", return_value="ffmpeg"), mock.patch.object(mv_audio, "_run_ffmpeg", side_effect=fake_run):
+            mid = self.mgr.extract_frame(pid, 1.0)
+            end = self.mgr.extract_frame(pid, 99)                     # 再生位置が動画の終わり: v2 の out(5 秒)ちょうどは、そこから始まるコマが無い
+            edge = self.mgr.extract_frame(pid, 3.99)                  # v1 の最後のコマの中(境目の手前)
+        self.assertEqual(seen, [1.0, round(5 - 1 / 24, 3), round(4 - 1 / 24, 3)])
+        self.assertEqual((mid["params"]["source_id"], end["params"]["source_id"], edge["params"]["source_id"]), (self.v1["id"], self.v2["id"], self.v1["id"]))
+        self.assertEqual(end["params"]["source_s"], round(5 - 1 / 24, 3))
+
     def test_probe(self):
         self.assertEqual(self.mgr.probe(self.v1["id"]), {"kind": "video", "length_s": 10.0, "width": 1280, "height": 720, "filename": "v1.mp4", "thumb_url": None})
         img = self.mgr.probe(self.img["id"])
@@ -433,6 +456,13 @@ class EditHandlerTest(EditBase):
     def job(self, kind, pid, state, **extra) -> Job:
         return Job(id="j1", tab="edit", kind=kind, params=eh.normalize(kind, {"project_id": pid, "state": state, **extra}, self.ledger))
 
+    def test_the_jobs_table_keeps_the_state_hash_not_the_state(self):
+        v = self.create()
+        params = eh.normalize("edit.preview", {"project_id": v["id"]}, self.ledger)
+        self.assertEqual(eh.HANDLERS["edit.preview"].record(params), {"project_id": v["id"], "state_hash": editclip.state_hash(v["state"]), "seq": 1})
+        exported = eh.HANDLERS["edit.export"].record(eh.normalize("edit.export", {"project_id": v["id"]}, self.ledger))
+        self.assertEqual(exported, {"project_id": v["id"], "state_hash": editclip.state_hash(v["state"])})
+
     def test_normalize(self):
         v = self.create()
         out = eh.normalize("edit.preview", {"project_id": v["id"]}, self.ledger)
@@ -445,6 +475,14 @@ class EditHandlerTest(EditBase):
             eh.normalize("edit.export", {"project_id": empty["id"]}, self.ledger)
         with self.assertRaisesRegex(ValueError, "プレビューの番号"):
             eh.normalize("edit.preview", {"project_id": v["id"], "seq": "x"}, self.ledger)
+        # 渡された state は台帳で検証し直す(フィルタの文に入る寸法・効果の値は、検証した数だけ)
+        forged = {**v["state"], "width": "1;movie=/etc/passwd", "effects": [{"type": "eq", "value": "x"}]}
+        with self.assertRaisesRegex(ValueError, "効果 1の種類"):
+            eh.normalize("edit.export", {"project_id": v["id"], "state": forged}, self.ledger)
+        out = eh.normalize("edit.export", {"project_id": v["id"], "state": {**v["state"], "width": "1;movie=/etc/passwd"}}, self.ledger)
+        self.assertEqual(out["state"], v["state"])                                                     # 寸法は先頭の動画から決め直す
+        with self.assertRaisesRegex(ValueError, "クリップ 1の生成物が見つかりません"):
+            eh.normalize("edit.export", {"project_id": v["id"], "state": {**v["state"], "clips": [{"id": "gone", "in": 0, "out": 1}]}}, self.ledger)
 
     def test_preview_writes_numbered_file_records_hash_and_keeps_only_the_newest(self):
         v = self.create(audio={"mode": "music", "song_id": self.song["id"]})

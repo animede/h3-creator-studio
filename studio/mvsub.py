@@ -1,12 +1,12 @@
 # Ported from Minimax-H3-lipsync-mv (Apache-2.0, Copyright 2026 YUZUKI): app/services/subtitles.py。行の分け方・時間配分・ASS/SRT の書式はそのまま。
 # 字体の名前を設定([mv] subtitle_font)で変えられるようにし、ffmpeg の ass フィルタに渡すパスの逃がし方を足した。
+# SPDX-License-Identifier: Apache-2.0
 """読み上げのテロップ(焼き込み用 ASS と、アップロード用 SRT)を作る。
 
 入力は、読み上げを 1 文ずつ合成したときの文の時刻(sentences.json)。読み上げ音声そのものの時刻なので、音声認識を使わずに正確に同期する。
 """
 import re
 from pathlib import Path
-from typing import Any
 
 FONT_NAME = "Noto Sans CJK JP"       # 無ければ libass が、同じ文字を持つ字体に置き換える(Windows は Meiryo / Yu Gothic など)
 MAX_LINES = 2
@@ -120,6 +120,9 @@ def write_subtitles(timings: list, width: int, height: int, ass_path: Path, srt_
 
 
 def filter_path(path) -> str:
-    """ffmpeg のフィルタの引数に書くパス。区切りは / にして、フィルタの特殊文字(: \\ ' [ ] , ;)を逃がす(Windows の C: のため)。"""
+    """ffmpeg のフィルタの引数に書くパス。区切りは / にして、2 段に逃がす(Windows の C: のため)。
+    ffmpeg は -vf の文字列を 2 回読む: 1 回目はフィルタの並び(特殊文字は \\ ' [ ] , ;)、2 回目はフィルタのオプション(: \\ ')で、
+    どちらも \\ を 1 つ外す。1 段だけ逃がした C\\:/… は 1 回目で C:/… に戻り、2 回目に : でオプションが切れて失敗していた。"""
     text = str(Path(path)).replace("\\", "/")
-    return "".join("\\" + ch if ch in ":\\'[],;" else ch for ch in text)
+    option = "".join("\\" + ch if ch in ":\\'" else ch for ch in text)           # 2 回目(オプション)の分
+    return "".join("\\" + ch if ch in "\\'[],;" else ch for ch in option)        # 1 回目(フィルタの並び)の分

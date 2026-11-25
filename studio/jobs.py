@@ -42,7 +42,7 @@ class JobCancelled(Exception):
 @dataclass
 class Job:
     id: str
-    tab: str                      # image / video / music
+    tab: str                      # image / video / music(画面の /api/jobs)、mv / short / edit(制作・編集の管理役が入れるジョブ)
     kind: str                     # 例: h3image.t2i
     params: dict
     status: str = "queued"        # queued / preparing / running / completed / failed / cancelled
@@ -84,6 +84,8 @@ class Handler:
     cancel: Callable[[Job, Ctx], Awaitable[None]]
     prepare: Optional[Callable[[Job, Ctx], Awaitable[None]]] = None   # 部品を ensure する前の下ごしらえ(LLM の仕事など)
     gpu: bool = True                                                    # GPU を使う(LLM を止めてから ensure する)
+    record: Optional[Callable[[dict], dict]] = None                     # 台帳(jobs 表)に残す params を作る。無ければ params そのまま
+                                                                        # (編集のジョブは state の写しを持つので、指紋だけを残す。写しはメモリのジョブにだけ)
 
 
 COMPONENT_NAMES = {"h3": "動画(MiniMax-H3)", "h3image": "画像(MiniMax-H3-Image)", "ace": "音楽(ACE-Step)"}
@@ -308,7 +310,8 @@ class JobRunner:
             job.progress = 1.0
         self.done_counter += 1
         try:
-            self.ctx.ledger.save_job(job)
+            handler = self.handlers.get(job.kind)
+            self.ctx.ledger.save_job(job, handler.record(job.params) if handler is not None and handler.record else None)
         except Exception:  # noqa: BLE001
             log.exception("ジョブを台帳に保存できません")
         if self._finished_hooks and not self._stopping:

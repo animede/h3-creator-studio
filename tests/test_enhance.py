@@ -32,6 +32,10 @@ class FakeLlm:
         if self.error:
             raise self.error
 
+    async def release_before_gpu(self):
+        self.events.append("release")
+        return False
+
 
 class FakeSched:
     def __init__(self, llm, error=None):
@@ -91,8 +95,8 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
         runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "強化された動画プロンプト", "mode": "h3-official"}))
         out = await enhance_prompt(runner, "video", " 猫が走る ", seconds=8, task="ref2va")
         self.assertEqual(out, {"text": "強化された動画プロンプト"})
-        # 部品を載せてから LLM を起こす(LLM は載った後の空きに合わせて GPU に載る)
-        self.assertEqual(llm.events, ["session+", "ensure h3", "llm", "session-"])
+        # LLM の VRAM を返してから部品を載せ、その後で LLM を起こす(LLM は載った後の空きに合わせて GPU に載る)
+        self.assertEqual(llm.events, ["release", "session+", "ensure h3", "llm", "session-"])
         req = self.requests[0]
         self.assertEqual((req.method, req.url.path), ("POST", "/api/prompt/enhance"))
         form = parse_qs(req.content.decode())
@@ -134,7 +138,7 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
         runner, llm = self.runner(lambda r: httpx.Response(200, json={"prompt": "A cat."}), busy=True)
         out = await enhance_prompt(runner, "image", "猫")
         self.assertEqual(out["text"], "A cat.")
-        self.assertEqual(llm.events, ["session+", "ensure h3image", "llm", "session-"])
+        self.assertEqual(llm.events, ["release", "session+", "ensure h3image", "llm", "session-"])
 
     async def test_refuses_only_when_loading_would_evict_a_busy_component(self):
         runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "x"}),
@@ -148,7 +152,8 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
         for action in ("ready", "fit", "evict"):                      # 載っている・待たずに載せられるなら、いつもどおり
             runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "強化"}), sched=lambda l, a=action: PlanSched(l, a))
             self.assertEqual((await enhance_prompt(runner, "video", "猫"))["text"], "強化")
-            self.assertEqual(llm.events[1], "ensure h3")
+            # 載せるとき(fit / evict)だけ、先に LLM の VRAM を返す。載っていれば(ready)VRAM は要らない
+            self.assertEqual(llm.events[:3], ["session+", "ensure h3", "llm"] if action == "ready" else ["release", "session+", "ensure h3"], action)
 
     async def test_component_is_marked_busy_only_while_enhancing(self):
         """強化の最中に別の生成が、その部品を GPU から降ろさないよう、仕事中の印を付ける(成功でも失敗でも外す)。"""

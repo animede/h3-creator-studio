@@ -41,13 +41,7 @@ enabled = true
 [gpu]
 mode = "auto"
 
-# 管理役が持つ LLM(プロンプト強化・作詞)。llama.cpp の llama-server で Gemma 4 E4B を動かす。
-# gpu = "auto"(空き VRAM に入る分だけ GPU、残りは CPU)/ "off"(CPU のみ)/ "all" / 層数
-# gguf・llama_server を書くと、取得せずにそのファイルを使う。tools_dir は取得先(リポジトリ直下からの相対)。
-# mmproj = 画像・音声を読む投影ファイル(MV の「画像から作る」「曲から作る」。mmproj-gemma-4-E4B-it-Q8_0.gguf、約 0.56GB)。空なら、GGUF の隣か tools_dir を探し、
-# 無ければ画像・音声を頼まれたときに 1 回だけ取得する(無くてもテキストの LLM は動く)。
-# GPU で生成している間は、LLM を待たせず、CUDA を隠した CPU 専用で動かす(遅くなる)。仕事が無くなると GPU 版へ戻る。
-# MV タブ(リップシンク MV)の音声処理(Demucs のボーカル分離、シーン分割)を動かす Python。
+# MV・ショート動画タブの音声処理(Demucs のボーカル分離、シーン分割、読み上げの分割)を動かす Python。
 # 空なら setup --mv が作る components/mvtools/.venv を使う。すでに Demucs と librosa の入った環境があれば、その python を書く。
 # device = ボーカルの分離(Demucs)を動かす装置。空なら CPU("cuda" で GPU。GPU の仕事と VRAM を取り合うので、空きに余裕があるときだけ)。
 # subtitle_font = ショート動画のセリフのテロップ(字幕)の字体の名前。空なら Noto Sans CJK JP(無ければ libass が同じ文字を持つ字体に置き換える。Windows は Meiryo など)。
@@ -55,6 +49,12 @@ mode = "auto"
 tools_python = ""
 device = ""
 
+# 管理役が持つ LLM(プロンプト強化・作詞)。llama.cpp の llama-server で Gemma 4 E4B を動かす。
+# gpu = "auto"(空き VRAM に入る分だけ GPU、残りは CPU)/ "off"(CPU のみ)/ "all" / 層数
+# gguf・llama_server を書くと、取得せずにそのファイルを使う。tools_dir は取得先(リポジトリ直下からの相対)。
+# mmproj = 画像・音声を読む投影ファイル(MV の「画像から作る」「曲から作る」。mmproj-gemma-4-E4B-it-Q8_0.gguf、約 0.56GB)。空なら、GGUF の隣か tools_dir を探し、
+# 無ければ画像・音声を頼まれたときに 1 回だけ取得する(無くてもテキストの LLM は動く)。
+# GPU で生成している間は、LLM を待たせず、CUDA を隠した CPU 専用で動かす(遅くなる)。仕事が無くなると GPU 版へ戻る。
 [llm]
 port = 8701
 gpu = "auto"

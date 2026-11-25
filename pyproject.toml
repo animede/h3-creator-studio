@@ -13,8 +13,9 @@ dependencies = [
     "pillow",
     "python-multipart",
     "huggingface_hub",
-    "tomli; python_version < '3.11'",
+    "py7zr",
+    "multivolumefile",
 ]
 
 [tool.setuptools]
-packages = ["studio"]
+packages = ["studio", "studio.handlers", "studio.mvtools"]

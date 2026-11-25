@@ -147,7 +147,7 @@ class ShortApiTest(unittest.TestCase):
         self.assertEqual((music["params"]["timeline"], music["params"]["length_s"]), ("music", None))
 
     def test_validation_errors_are_400_with_japanese_messages(self):
-        for extra, word in (({"story": ""}, "物語・映像のイメージを書いてください"), ({"length_s": 10}, "長さは 30 秒以上"),
+        for extra, word in (({"story": ""}, "物語・映像のイメージを書いてください"), ({"length_s": 10}, "長さは 30〜3600 秒"),
                             ({"story": "", "narration": "話す。", "speaker_id": 1}, "口を合わせる人物の画像"),
                             ({"story": "", "narration": "話す。", "images": [self.person()]}, "話者を選んでください"),
                             ({"images": [self.person(), {"id": self.garden["id"], "role": "person"}]}, "人物の画像は 1 枚まで"),

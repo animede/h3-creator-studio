@@ -12,7 +12,7 @@ from studio.jobs import Job
 from studio.ledger import Ledger
 
 JOB_IN_USE = "実行中・順番待ちのジョブで使っています"
-MV_IN_USE = "MV の制作(一時停止中など)で使っています。先に制作を削除してください"
+MV_IN_USE = "MV の制作(ID p1)で使っています。先に制作を削除してください"        # 題の無い制作は ID で示す
 
 
 def png_bytes() -> bytes:
@@ -126,18 +126,27 @@ class GalleryDeleteTest(unittest.TestCase):
 
     # ---- 使用中のものは断る: MV の制作 ----
 
-    def test_outputs_used_by_mv_projects_that_can_continue_are_refused(self):
-        refused, allowed = {}, {}
+    def test_outputs_used_by_mv_projects_in_any_state_are_refused(self):
+        # 完成した制作もシーンのやり直し・結合し直し、中止した制作も再開ができるので、状態を問わず曲・画像を守る
+        refused, free = {}, self.add("audio", "free.wav")
         for state in ("analyzing", "scripting", "generating", "assembling", "paused", "failed", "completed", "cancelled"):
             song, image = self.add("audio", f"{state}.wav"), self.add("image", f"{state}.png")
-            self.ledger.create_mv_project(f"p_{state}", state, {"song_id": song["id"], "image_id": image["id"]})
-            (allowed if state in ("completed", "cancelled") else refused)[state] = (song, image)
+            self.ledger.create_mv_project(f"p_{state}", state, {"song_id": song["id"], "image_id": image["id"], "title": f"曲 {state}"})
+            refused[state] = (song, image)
         ids = [r["id"] for pair in refused.values() for r in pair]
-        js = self.delete_many(ids + [r["id"] for pair in allowed.values() for r in pair])
-        self.assertEqual(js["refused"], [{"id": i, "reason": MV_IN_USE} for i in ids])
-        self.assertEqual(sorted(js["deleted"]), sorted(r["id"] for pair in allowed.values() for r in pair))
+        js = self.delete_many(ids + [free["id"]])
+        self.assertEqual(js["refused"], [{"id": r["id"], "reason": f"MV の制作「曲 {state}」で使っています。先に制作を削除してください"}
+                                         for state, pair in refused.items() for r in pair])
+        self.assertEqual(js["deleted"], [free["id"]])
         self.assertTrue(all(self.exists(r) for pair in refused.values() for r in pair))
-        self.assertFalse(any(self.exists(r) for pair in allowed.values() for r in pair))
+
+    def test_short_projects_protect_their_song_and_reference_images_and_name_the_project(self):
+        song, person, place = self.add("audio", "bgm.wav"), self.add("image", "girl.png"), self.add("image", "sea.png")
+        self.ledger.create_mv_project("s1", "completed", {"song_id": song["id"], "images": [{"id": person["id"], "role": "person"},
+                                                                                            {"id": place["id"], "role": "scenery"}], "title": "海の日"}, kind="short")
+        js = self.delete_many([song["id"], person["id"], place["id"]])
+        self.assertEqual([(r["id"], r["reason"]) for r in js["refused"]],
+                         [(i, "ショート動画の制作「海の日」で使っています。先に制作を削除してください") for i in (song["id"], person["id"], place["id"])])
 
     def test_a_paused_project_blocks_its_song_and_image_until_the_project_is_deleted(self):
         song, image = self.add("audio", "s.wav"), self.add("image", "i.png")

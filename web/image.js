@@ -85,7 +85,7 @@ function dropGone(gone) {
   for (let i = refs.length - 1; i >= 0; i--) if (gone(refs[i].id)) refs.splice(i, 1);
   if (refs.length !== before) renderRefs();
 }
-studio.on.items.push(() => dropGone((id) => !byId(id)));
+studio.on.items.push(() => dropGone(goneFromGallery));      // 一覧が全部のときだけ(web/gallery.js の goneFromGallery)
 document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
 async function uploadAndAdd(files) {

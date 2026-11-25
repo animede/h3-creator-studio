@@ -16,6 +16,8 @@ from .config import REPO_ROOT
 
 log = logging.getLogger("studio.procman")
 LOG_DIR = REPO_ROOT / "logs"
+LOG_MAX_BYTES = 50 * 1024 * 1024       # 部品のログがこれを超えていたら、起動のときに前の部分を捨てる(追記だけなので、何か月も使うと GB 単位になる)
+LOG_KEEP_BYTES = 1024 * 1024           # そのとき残す末尾(画面のログ表示と、失敗の理由の末尾に使う分)
 
 
 @dataclass
@@ -33,6 +35,24 @@ _started: list = []                    # atexit で止める対象(自分で起�
 
 def log_path(name: str):
     return LOG_DIR / f"{name}.log"
+
+
+def cap_log(path, max_bytes: int = LOG_MAX_BYTES, keep_bytes: int = LOG_KEEP_BYTES) -> bool:
+    """ログが max_bytes を超えていたら、末尾 keep_bytes だけを残して書き直す(行の途中から始まらないよう、最初の改行の後から)。書き直したら True。
+    別のプロセスがまだ開いている(Windows で消せない)などで書き直せなければ、そのまま(起動は止めない)。"""
+    try:
+        if path.stat().st_size <= max_bytes:
+            return False
+        with open(path, "rb") as f:
+            f.seek(-keep_bytes, os.SEEK_END)
+            tail = f.read()
+        tail = tail[tail.find(b"\n") + 1:] if b"\n" in tail else tail
+        note = f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} ログが {max_bytes // 1048576}MB を超えたので、前の部分を消しました ===\n"
+        with open(path, "wb") as f:
+            f.write(note.encode("utf-8") + tail)
+        return True
+    except OSError:
+        return False
 
 
 def log_tail(name: str, lines: int = 100) -> str:
@@ -118,6 +138,8 @@ def start(spec, extra_env: dict = None) -> Proc:
     if sys.platform == "win32":
         env.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")   # 開発者モードなしでは symlink を作れず、HF のキャッシュ作成が失敗する
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if cap_log(log_path(spec.name)):
+        log.info("%s のログが大きくなったので、末尾だけを残しました", spec.label)
     kwargs = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP

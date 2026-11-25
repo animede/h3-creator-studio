@@ -163,9 +163,10 @@ class FfmpegSpy:
     def __init__(self):
         self.calls = []                # (argv, dst, what, 一覧ファイルの中身 or None)
 
-    def __call__(self, argv, dst, what):
+    def __call__(self, argv, dst, what, timeout=None, run=None):
         listing = Path(argv[argv.index("-i") + 1]) if "concat" in argv else None
         self.calls.append((list(argv), Path(dst), what, listing.read_text(encoding="utf-8") if listing is not None else None))
+        self.timeouts = [*getattr(self, "timeouts", []), timeout]       # 待つ最長(秒。結合は尺に合わせて延ばす)
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         Path(dst).write_bytes(b"ffmpeg-output")
         return Path(dst)

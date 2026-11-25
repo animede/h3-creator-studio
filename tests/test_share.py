@@ -225,6 +225,36 @@ class ShareAdmissionTest(ShareBase):
         s.mark_idle("a")
         self.assertEqual(s.plan("b").action, "fit")
 
+    async def test_two_claimed_components_are_not_stuck_when_other_apps_grow_after_dispatch(self):
+        # 2 つの仕事を「載る」と見て割り当てた後に、他のアプリが VRAM を使った。前は、載せる直前に基準を測り直して容量が縮み、まだ載っていない 2 つが
+        # 互いを「生成中」と見て、どちらも待ち続けていた(管理役の外の 4GiB で、MV のシーンが「GPU の空きを待っています」のまま止まった)
+        s = self.sched(48, a=24, b=17)
+        await s.adopt_running()                                  # 起動時の基準 2GiB: 容量 44.5 ≥ 41
+        self.assertEqual((s.plan("a").action, s.mark_busy("a"), s.plan("b").action), ("fit", None, "fit"))
+        s.mark_busy("b")
+        self.monitor.gpu["used_mib"] = 6 * GIB
+        ops = [s.new_operation("ensure", n) for n in "ab"]
+        await asyncio.wait_for(asyncio.gather(s.ensure("a", ops[0]), s.ensure("b", ops[1])), 2)
+        self.assertEqual(sorted(s.residents), ["a", "b"])
+        self.assertEqual(s.baseline_mib, 2 * GIB)                # 仕事を割り当ててある間は測り直さない
+
+    async def test_admission_does_not_count_claims_that_are_not_loaded_yet(self):
+        # 基準が測れていない(起動時に外部の部品があった)とき、容量は今の使用量から見積もる。割り当ての後に縮んでも、載せる直前は載っている部品だけで判定する
+        s = self.sched(48, a=24, b=17)
+        s.mark_busy("a")
+        s.mark_busy("b")
+        self.monitor.gpu["used_mib"] = 6 * GIB                   # 見積もりの容量 48 - 6 - 1.5 = 40.5 < 41
+        self.assertEqual(s.plan("b").action, "wait")             # 割り当ての判定は、まだ載っていない a の分も数える(割り当てすぎない)
+        self.assertEqual(s.plan("b", admitting=True).action, "fit")
+        await asyncio.wait_for(asyncio.gather(s.ensure("a"), s.ensure("b")), 2)
+        self.assertEqual(sorted(s.residents), ["a", "b"])
+
+    async def test_baseline_is_still_measured_when_only_the_target_is_claimed(self):
+        s = self.sched(48, used_mib=3 * GIB, a=24)
+        s.mark_busy("a")                                         # その部品自身の仕事だけなら、今までどおり測る
+        await s.ensure("a")
+        self.assertEqual(s.baseline_mib, 3 * GIB)
+
     async def test_oversized_budget_loads_alone(self):
         s = self.sched(40, a=10, huge=60)              # 容量 36.5 < 60: 他を全部降ろして 1 つだけ載せる
         await s.ensure("a")
@@ -812,13 +842,15 @@ class StatusPayloadTest(RunnerBase):
         saved = {k: getattr(main.app.state, k, None) for k in ("sched", "monitor", "jobs")}
         self.addCleanup(lambda: [setattr(main.app.state, k, v) for k, v in saved.items()])
         main.app.state.sched, main.app.state.jobs = s, runner
-        main.app.state.monitor = types.SimpleNamespace(snapshot=lambda: {"gpu": self.monitor.gpu, "ram": None, "shared_gpu_mib": None, "warning": None})
+        main.app.state.monitor = types.SimpleNamespace(snapshot=lambda: {"gpu": self.monitor.gpu, "ram": None, "shared_gpu_mib": 300,
+                                                                          "shared_gpu_total_mib": 16 * GIB, "warning": None})
         j1 = runner.submit("image", "a.go", {"gate": "g1", "name": "j1"})
         await self.status(j1, "running")
         j2 = runner.submit("video", "b.go", {"gate": "g2", "name": "j2"})
         await self.until(lambda: "GPU の空き" in (j2.wait_reason or ""), "j2 が空き待ち")
         st = main.api_status()
         self.assertEqual(st["gpu_mode"], "share")
+        self.assertEqual((st["shared_gpu_mib"], st["shared_gpu_total_mib"]), (300, 16 * GIB))      # 共有 GPU メモリの使用量と上限(Windows)
         self.assertEqual(st["residents"], [{"name": "a", "label": "a", "budget_mib": 30 * GIB, "busy": True}])
         self.assertEqual((st["lanes"]["a"]["running"], st["lanes"]["a"]["queued"]), ([j1.id], 0))
         self.assertEqual((st["lanes"]["b"]["running"], st["lanes"]["b"]["queued"]), ([], 1))

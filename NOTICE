@@ -68,6 +68,21 @@ remain under the Apache License, Version 2.0; each file carries
                padded by cloning its last frame.
 
 ----------------------------------------------------------------------
+studio/mvsub.py
+----------------------------------------------------------------------
+This file is also ported from Minimax-H3-lipsync-mv, Copyright 2026 YUZUKI,
+licensed under the Apache License, Version 2.0, and has been modified. It
+remains under the Apache License, Version 2.0; it carries
+"SPDX-License-Identifier: Apache-2.0" and a header describing the changes.
+
+  mvsub.py     narration captions: sentence-timing based cues, line breaking
+               at punctuation / kana boundaries, ASS (burn-in) and SRT output.
+               Ported from app/services/subtitles.py (split_caption, build_cues,
+               write_subtitles). Modified: the font name is configurable
+               ([mv] subtitle_font); filter_path() escapes the ASS path for the
+               ffmpeg "ass" filter (Windows drive letters).
+
+----------------------------------------------------------------------
 studio/mvdescribe.py
 ----------------------------------------------------------------------
 This file is also ported from Minimax-H3-lipsync-mv, Copyright 2026 YUZUKI,

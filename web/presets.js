@@ -1,4 +1,4 @@
-// プリセットの欄(画像・動画・音楽・MV タブ共通): 入力欄の値に名前を付けて保存し、選ぶと入力欄へ反映する。
+// プリセットの欄(画像・動画・音楽・MV・ショート動画タブ共通): 入力欄の値に名前を付けて保存し、選ぶと入力欄へ反映する。
 // 同梱のプリセット(presets/*.json)は変更できず(複製して編集する)、自分のプリセットは台帳(/api/presets)に入る。
 // 反映は入力欄を書き換えるだけで、生成はしない。参照画像・曲・フレームなどの生成物はプリセットに含めない。
 // 各タブは wirePresets に、get()(いまの入力欄の値の辞書)と apply(values)(入力欄への反映。反映できなかった項目名の配列を返す)を渡す。
@@ -31,7 +31,7 @@ function presetSetSeed(seed, random, value) {
   presetSet(random, !fixed);
 }
 
-// box にプリセットの欄を組み立てる。tab は image / video / music / mv
+// box にプリセットの欄を組み立てる。tab は image / video / music / mv / short
 function wirePresets({ tab, box, get, apply }) {
   let list = [];                  // このタブのプリセット(同梱が先、自分のものが後)
   let selected = "";              // 選んでいるプリセットの ID

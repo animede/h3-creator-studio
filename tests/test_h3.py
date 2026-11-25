@@ -253,6 +253,8 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
             ("h3.t2va", {"prompt": "p", "seconds": 0}),                 # 0 は ref2va だけ
             ("h3.t2va", {"prompt": "p", "resolution": "big"}),
             ("h3.t2va", {"prompt": "p", "seed": "x"}),
+            ("h3.t2va", {"prompt": "p", "seed": float("inf")}),           # JSON の Infinity
+            ("h3.t2va", {"prompt": "p", "seconds": float("nan")}),
             ("h3.fl2va", {"prompt": "p"}),                              # 先頭も最後も無い
             ("h3.fl2va", {"prompt": "p", "first_image": "nope"}),
             ("h3.fl2va", {"prompt": "p", "first_image": aud}),          # 画像ではない

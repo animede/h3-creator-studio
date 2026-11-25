@@ -12,11 +12,16 @@ const VIDEO_SIZES = {
 };
 const VIDEO_QUALITY_NOTE = { fast: "6〜12GB の GPU 向け。いちばん速い", standard: "16GB 以上の GPU 向け", high: "24GB 以上の GPU 向け。時間がかかります" };
 
-// JSON の API を呼ぶ(失敗は、サーバの日本語の理由を載せた Error)
+// JSON の API を呼ぶ(失敗は、サーバの日本語の理由を載せた Error。HTTP の状態は .status に入れる)。
+// 理由が無い失敗(入力の形の誤り 422 以外。サーバの落ち・中継の HTML など)は、通信の失敗として状態の番号を出す
 async function apiJson(url, method = "GET", body) {
   const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
   const js = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : "入力を確認してください");
+  if (!r.ok) {
+    const err = new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? "入力を確認してください" : `通信に失敗しました(${r.status})`);
+    err.status = r.status;
+    throw err;
+  }
   return js;
 }
 
@@ -59,12 +64,17 @@ function makeProjectPanel(cfg) {
     try { projects = await apiJson(`${cfg.base}?limit=100`); } catch (e) { /* 次の周で再試行 */ }
   }
 
+  // 詳細を読む。待っている間に別の制作を選んだ・もっと新しい読み込み(や操作の答え)があれば、古い答えは捨てる(loadSeq が世代)
+  let loadSeq = 0;
   async function loadView() {
-    if (!current) { view = null; return; }
+    const id = current, my = ++loadSeq;
+    if (!id) { view = null; return; }
     try {
-      const r = await fetch(`${cfg.base}/${current}`);
+      const r = await fetch(`${cfg.base}/${id}`);
+      const fresh = () => my === loadSeq && id === current;
+      if (!fresh()) return;
       if (r.status === 404) { current = null; view = null; }
-      else if (r.ok) view = await r.json();
+      else if (r.ok) { const v = await r.json(); if (fresh()) view = v; }
     } catch (e) { /* 一時的な通信失敗は次の周で */ }
   }
 
@@ -97,8 +107,9 @@ function makeProjectPanel(cfg) {
   async function act(path, method = "POST", body) {
     ui.actionErr.hidden = true;
     try {
-      view = await apiJson(path, method, body);
-      renderProject();
+      const v = await apiJson(path, method, body);
+      loadSeq++;                 // 先に出ていた読み込みの答え(操作の前の状態)で、上書きしない
+      if (v && v.id === current) { view = v; renderProject(); }
     } catch (e) {
       ui.actionErr.hidden = false;
       ui.actionErr.textContent = `できませんでした: ${e.message || e}`;

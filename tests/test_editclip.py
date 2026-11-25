@@ -52,7 +52,10 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual([e["value"] for e in looks["effects"]], [None] * len(E.LOOKS))        # 見た目の効果は値を持たない
         graph = E.build_graph(looks, PATHS)[0]
         for k, flt in E.LOOKS.items():
-            self.assertIn(f"{flt}:enable='between(t,1,2)'", graph, k)                              # 固定のフィルタに区間の enable
+            sep = ":" if "=" in flt else "="                                                       # オプションの無い negate は「negate=enable=…」
+            self.assertIn(f"{flt}{sep}enable='between(t,1,2)'", graph, k)                          # 固定のフィルタに区間の enable
+        self.assertIn(",negate=enable='between(t,1,2)',", graph)
+        self.assertNotIn("negate:enable", graph)
         rng = E.validate_state({"clips": [clip()], "effects": [{"type": "fade_from_black", "start": 0, "end": 1}, {"type": "black", "start": 1, "end": 2},
                                                                {"type": "fade_to_white", "start": 2, "end": 3}, {"type": "zoom_in", "start": 0, "end": 4},
                                                                {"type": "zoom_out", "value": 1.5, "start": 1, "end": 3}]}, SOURCES)
@@ -87,6 +90,30 @@ class ValidateTest(unittest.TestCase):
         self.assertIn(f"crop={W}:{H}:x='(iw-{W})/2':y='(ih-{H})*clip((t-0)/2,0,1)'", g)                    # 下へ
         self.assertIn(f"crop={W}:{H}:x='(iw-{W})/2':y='(ih-{H})*(1-clip((t-0)/2,0,1))'", g)                # 上へ
         self.assertIn(f"if(between(t,0,2),1+(1.3-1)*clip((t-0)/2,0,1),1)", g)                               # ズームしながら
+
+    def test_shortest_piece_rule_is_the_same_for_split_delete_and_validation(self):
+        # 分割・削除は MIN_CLIP_S - EPS(0.099 秒)までの切れ端を残す。検証も、動画・画像とも同じ許容で受ける(画像だけ 0.1 ちょうどを求めて断っていた)
+        img = E.validate_state({"clips": [{"id": "p", "duration": 3}]}, SOURCES)
+        for piece in (E.split_at(img, 0.099), E.delete_range(img, 0.099, 3.0)):
+            self.assertAlmostEqual(piece["clips"][0]["duration"], 0.099)
+            self.assertEqual(E.validate_state(piece, SOURCES)["clips"][0]["duration"], 0.099)
+        vid = E.validate_state({"clips": [clip("a", 0, 4)]}, SOURCES)
+        self.assertEqual(E.validate_state(E.split_at(vid, 0.099), SOURCES)["clips"][0]["duration"], 0.099)
+        for raw in ({"id": "p", "duration": 0.098}, {"id": "a", "in": 0, "out": 0.098}):
+            with self.assertRaises(ValueError, msg=raw):
+                E.validate_state({"clips": [raw]}, SOURCES)
+
+    def test_zoom_and_pan_crop_to_the_rendered_size(self):
+        # プレビューは短辺 480 に縮めて作るので、ズーム・パンの crop もその寸法で切る(元の寸法で切ると、854×480 から 1024×576 は切り出せず失敗していた)
+        st = E.validate_state({"clips": [{"id": "p", "duration": 3}], "effects": [{"type": "zoom_in", "start": 0, "end": 2},
+                                                                                {"type": "pan_right", "start": 1, "end": 3}]}, SOURCES)
+        self.assertEqual((st["width"], st["height"]), (1024, 576))
+        preview, export = graph(st, preview=True), graph(st)
+        self.assertIn("crop=854:480:(iw-854)/2:(ih-480)/2", preview)
+        self.assertIn("crop=854:480:x='(iw-854)*clip((t-1)/2,0,1)':y='(ih-480)/2'", preview)
+        self.assertNotIn("crop=1024", preview)
+        self.assertIn("crop=1024:576:(iw-1024)/2:(ih-576)/2", export)
+        self.assertIn("crop=1024:576:x='(iw-1024)*clip((t-1)/2,0,1)':y='(ih-576)/2'", export)
 
     def test_empty_and_image_only(self):
         self.assertEqual(E.validate_state({}, SOURCES), E.empty_state())
@@ -497,6 +524,16 @@ class RealFfmpegTest(unittest.TestCase):
         self.assertAlmostEqual(float(info["format"]["duration"]), 4.0, delta=0.15)
         self.assertEqual((streams["video"]["width"], streams["video"]["height"]), (960, 540))     # 書き出しは元の寸法(先頭の動画)
         self.assertAlmostEqual(float(streams["audio"]["duration"]), 4.0, delta=0.15)
+
+    def test_preview_zoom_pan_and_negate_range_on_a_large_project(self):
+        # 画像だけ(1024×576)のプレビュー(854×480)で、ズーム・パンと、区間つきの色の反転が ffmpeg に通る
+        raw = {"clips": [{"id": "p", "kind": "image", "duration": 3}],
+               "effects": [{"type": "zoom_in", "start": 0, "end": 1}, {"type": "pan_left", "start": 1, "end": 2},
+                           {"type": "zoom_in_right", "start": 2, "end": 3}, {"type": "negate", "start": 0.5, "end": 1.5}]}
+        for preview, size in ((True, (854, 480)), (False, (1024, 576))):
+            st, dst, info = self.render(raw, f"kenburns_{preview}.mp4", preview=preview)
+            video = next(s for s in info["streams"] if s["codec_type"] == "video")
+            self.assertEqual((video["width"], video["height"]), size)
 
     def test_original_audio_and_none(self):
         raw = {"clips": [{"id": "b", "in": 0, "out": 1}, {"id": "a", "in": 0, "out": 1}]}          # 先頭の動画は音声なし、2 つ目にはある

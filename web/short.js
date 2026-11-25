@@ -5,7 +5,7 @@
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
   const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 投稿先 × 画質の寸法と、画質の説明(web/project.js。MV タブと共通)
   const CHAR_MAX = 600, IMAGES_MAX = 4;
-  const LENGTH_MIN = 30, WARN_S = 300;                  // 曲もセリフも無いときの長さの最短(秒)と、警告を出す長さ(5 分)
+  const LENGTH_MIN = 30, LENGTH_MAX = 3600, WARN_S = 300;      // 曲もセリフも無いときの長さの範囲(秒。サーバと同じ)と、警告を出す長さ(5 分)
   const SCENE_S = 7.5, SCENE_MIN_A4000 = 3.5;           // 警告の見積り: シーンの平均の長さ(秒)と、A4000 の高速で 1 シーンにかかる時間(分)
   const SPEECH_CHARS_PER_S = 5.5;                       // 読み上げの長さの目安(1 秒あたりの文字数。実際の長さは、作り始めて読み上げを作ってから決まる)
   const ROLE_LABEL = { person: "人物", scenery: "景色・物" };
@@ -186,7 +186,7 @@
     if (song && gone(song.id)) clearSong();
     if (images.some((r) => gone(r.item.id))) { images = images.filter((r) => !gone(r.item.id)); renderImages(); changed(); }
   }
-  studio.on.items.push(() => dropGone((id) => !byId(id)));
+  studio.on.items.push(() => dropGone(goneFromGallery));      // 一覧が全部のときだけ(web/gallery.js の goneFromGallery)
   document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
   // ---- 入力: 自動の説明(画像から人物の説明、物語からナレーション) ----
@@ -261,7 +261,7 @@
       pendingSpeaker = null;
     } catch (e) {
       speakersFailed = true;
-      setSpeakerNote(`話者を取得できません: ${e.message || e}`);
+      setSpeakerNote(`話者を取得できません: ${e.message || e}(話者の欄を押すと読み直します)`);
     } finally {
       speakersLoading = false;
     }
@@ -347,11 +347,12 @@
     const story = sh("story").value.trim(), narration = sh("narr").value.trim();
     if (!story && !song && !narration) { showMsg("物語・映像のイメージを書いてください(曲もセリフも無いときは必須です)"); return; }
     if (narration && !person()) { showMsg("セリフがあるときは、口を合わせる人物の画像を入れて、役割を「人物」にしてください"); return; }
+    if (narration && !speakers) { speakersFailed = false; loadSpeakers(); showMsg("話者の一覧を読めていません。読み込んでから、話者を選んでください"); return; }      // 読めていなければ読み直す
     if (narration && !sh("speaker").value) { showMsg("セリフを読み上げる話者を選んでください"); return; }
     const min = +sh("min").value, max = +sh("max").value;
     if (!(min >= 5 && max <= 10 && min <= max)) { showMsg("シーンの長さは 5〜10 秒で、最短は最長以下にしてください"); return; }
     const length = +sh("length").value;
-    if (t === "free" && !(length >= LENGTH_MIN)) { showMsg(`長さは ${LENGTH_MIN} 秒以上で指定してください`); return; }
+    if (t === "free" && !(length >= LENGTH_MIN && length <= LENGTH_MAX)) { showMsg(`長さは ${LENGTH_MIN}〜${LENGTH_MAX} 秒で指定してください`); return; }
     if (t === "music" && !tools.available) { showMsg(tools.hint || "曲の分析に必要な道具が見つかりません"); return; }
     const seed = sh("random").checked || sh("seed").value === "" ? null : parseInt(sh("seed").value, 10);
     showMsg("");
@@ -377,7 +378,7 @@
   function getPresetValues() {
     return { aspect: sh("aspect").value, quality: sh("quality").value, min_s: +sh("min").value, max_s: +sh("max").value,
       seed: presetGetSeed(sh("seed"), sh("random")), background_text: sh("bgtext").value, final_audio: sh("final").value,
-      length_s: +sh("length").value >= LENGTH_MIN ? +sh("length").value : 60, speaker_id: sh("speaker").value === "" ? null : +sh("speaker").value,
+      length_s: +sh("length").value >= LENGTH_MIN && +sh("length").value <= LENGTH_MAX ? +sh("length").value : 60, speaker_id: sh("speaker").value === "" ? null : +sh("speaker").value,
       subtitles: sh("subs").checked };
   }
 
@@ -390,7 +391,7 @@
     if ("background_text" in v && !presetSet(sh("bgtext"), v.background_text)) skipped.push("背景の文字");
     if (typeof v.subtitles === "boolean") presetSet(sh("subs"), v.subtitles);
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
-    if (Number.isFinite(v.length_s) && v.length_s >= LENGTH_MIN) presetSet(sh("length"), v.length_s);      // input で警告が合う
+    if (Number.isFinite(v.length_s) && v.length_s >= LENGTH_MIN && v.length_s <= LENGTH_MAX) presetSet(sh("length"), v.length_s);      // input で警告が合う
     if ("seed" in v) presetSetSeed(sh("seed"), sh("random"), v.seed);
     if (Number.isInteger(v.speaker_id)) {
       if (speakers) { if (!presetSet(sh("speaker"), v.speaker_id)) skipped.push("話者"); }

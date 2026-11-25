@@ -134,6 +134,15 @@ def resolve_counter_path() -> str:
     return _counter_path
 
 
+def shared_total_mib(ram_total_bytes: int, plat: str = None) -> Optional[int]:
+    """Windows の「共有 GPU メモリ」の上限(MiB)。WDDM はシステムのメモリの半分を共有 GPU メモリに割り当てる(タスク マネージャーの
+    「共有 GPU メモリ」の分母と同じ規則)。Perflib のカウンター(GPU Process Memory の Shared Usage)は使用量だけで上限を持たないので、
+    ここでは RAM の合計の半分として計算する(DXGI の SharedSystemMemory を読むより安い)。Linux には無いので None。"""
+    if (plat or sys.platform) != "win32" or not ram_total_bytes:
+        return None
+    return int(ram_total_bytes / 2 / 1048576)
+
+
 def read_shared_mib() -> Optional[int]:
     """Windows の「共有 GPU メモリ」合計(MiB)。取れなければ None。Linux には無い。"""
     if sys.platform != "win32":
@@ -152,7 +161,7 @@ class GpuMonitor:
         self.rss_provider = rss_provider or (lambda: {})
         self.generating = generating or (lambda: False)
         self._smi = find_nvidia_smi()
-        self._snap: dict = {"gpu": None, "ram": None, "procs": {}, "shared_gpu_mib": None,
+        self._snap: dict = {"gpu": None, "ram": None, "procs": {}, "shared_gpu_mib": None, "shared_gpu_total_mib": None,
                             "warning": None if self._smi else WARN_NO_SMI, "ts": 0}
         self._shared_hist = collections.deque()   # (時刻, MiB)
         self._shared_at = 0.0
@@ -223,6 +232,7 @@ class GpuMonitor:
         snap = {"gpu": gpu, "ram": {"used_mib": int(vm.used / 1048576), "total_mib": int(vm.total / 1048576)},
                 "procs": {k: int(v / 1048576) for k, v in self.rss_provider().items() if v is not None},
                 "shared_gpu_mib": self._shared if sys.platform == "win32" else None,
+                "shared_gpu_total_mib": shared_total_mib(vm.total),          # 共有 GPU メモリの上限(Windows だけ。RAM の半分)
                 "warning": warning, "ts": now}
         with self._lock:
             self._snap = snap

@@ -47,6 +47,9 @@ class Tts:
         comp = self.sched.comps.get(COMPONENT)
         if comp is None:
             raise TtsError("AivisSpeech の設定がありません(studio.toml の [components.aivis])", 503)
+        check = getattr(self.sched, "check_alive", None)
+        if check is not None:
+            check(COMPONENT)        # 落ちた AivisSpeech は状態が ready のまま残り、ensure を飛ばして合成が失敗し続けていた。落ちていれば stopped に戻して起こし直す
         if comp.state != "ready":
             op = self.sched.new_operation("ensure", COMPONENT)
             try:

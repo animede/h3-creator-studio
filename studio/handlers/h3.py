@@ -44,7 +44,7 @@ def _int(value, name: str, allow_none: bool = False):
         raise ValueError(f"{name} を指定してください")
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f"{name} は整数で指定してください")
 
 

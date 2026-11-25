@@ -98,7 +98,10 @@ function render(s) {
   if (gpu) setGauge("g-vram", gpu.used_mib, gpu.total_mib, `${gib(gpu.used_mib)} / ${gib(gpu.total_mib)} GiB`);
   else setGauge("g-vram", 0, 0, "GPU なし");
   $("g-shared").hidden = s.shared_gpu_mib == null;
-  if (s.shared_gpu_mib != null) setGauge("g-shared", s.shared_gpu_mib, 4096, `${gib(s.shared_gpu_mib)} GiB`);
+  if (s.shared_gpu_mib != null) {      // Windows の共有 GPU メモリ。上限はサーバが知っていればそれ(ふつう CPU メモリの半分)、無ければ 4GiB で目安にする
+    const total = s.shared_gpu_total_mib || 4096;
+    setGauge("g-shared", s.shared_gpu_mib, total, `${gib(s.shared_gpu_mib)} / ${gib(total)} GiB`);
+  }
   if (s.ram) setGauge("g-ram", s.ram.used_mib, s.ram.total_mib, `${gib(s.ram.used_mib)} / ${gib(s.ram.total_mib)} GiB`);
   const w = $("warning");
   w.hidden = !s.warning;

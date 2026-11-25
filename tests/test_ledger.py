@@ -1,11 +1,14 @@
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
+from studio import media
 from studio.ledger import Ledger
 
 
@@ -52,15 +55,17 @@ class LedgerTest(unittest.TestCase):
         mp4.parent.mkdir()
         wav.parent.mkdir()
         run = lambda *a: subprocess.run(["ffmpeg", "-v", "error", "-y", *a], check=True)
-        run("-f", "lavfi", "-i", "testsrc=size=640x360:rate=24:duration=2", "-pix_fmt", "yuv420p", str(mp4))
+        run("-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:duration=2", "-pix_fmt", "yuv420p", str(mp4))
         run("-f", "lavfi", "-i", "sine=frequency=440:duration=1.5", str(wav))
         v = self.ledger.add_output("video", mp4, "video")
-        self.assertEqual((v["width"], v["height"]), (640, 360))
+        self.assertEqual((v["width"], v["height"], v["fps"]), (640, 360, 30.0))                  # コマ率も読む(編集の書き出しが合わせる)
+        self.assertEqual(self.ledger.get_output(v["id"])["fps"], 30.0)
         self.assertAlmostEqual(v["duration_s"], 2.0, delta=0.1)
         with Image.open(self.root / v["thumb_path"]) as im:
             self.assertEqual((im.format, im.width, im.height), ("JPEG", 320, 180))
         a = self.ledger.add_output("audio", wav, "video")
         self.assertIsNone(a["thumb_path"])
+        self.assertIsNone(a["fps"])
         self.assertAlmostEqual(a["duration_s"], 1.5, delta=0.1)
         self.assertTrue(self.ledger.delete_output(v["id"]))
         self.assertFalse((self.root / v["thumb_path"]).exists())
@@ -79,6 +84,56 @@ class LedgerTest(unittest.TestCase):
         self.assertFalse((self.root / rec["thumb_path"]).exists())
         self.assertIsNone(self.ledger.get_output(rec["id"]))
         self.assertFalse(self.ledger.delete_output(rec["id"]))
+
+    def test_delete_removes_the_srt_next_to_a_short_video(self):
+        d = self.root / "video"
+        d.mkdir(parents=True)
+        for name in ("short_p1.mp4", "plain.mp4"):
+            (d / name).write_bytes(b"mp4")
+        for name in ("short_p1.srt", "other.srt", "plain.srt"):
+            (d / name).write_text("1\n", "utf-8")
+        with mock.patch.object(media, "probe", return_value={"duration_s": 5.0, "width": 64, "height": 64}), \
+                mock.patch.object(media, "video_thumb", return_value=False):
+            rec = self.ledger.add_output("video", d / "short_p1.mp4", "short", params={"srt": "short_p1.srt"})
+            plain = self.ledger.add_output("video", d / "plain.mp4", "video")
+        self.assertTrue(self.ledger.delete_output(rec["id"]))
+        self.assertFalse((self.root / "video" / "short_p1.srt").exists())                   # 結合が隣に置いた SRT も消す
+        self.assertTrue((self.root / "video" / "other.srt").exists())                       # 別の字幕は残す
+        self.assertTrue(self.ledger.delete_output(plain["id"]))
+        self.assertTrue((d / "plain.srt").exists())                                           # params に srt の無い動画は、本体だけ
+
+    def test_frame_rate_parsing(self):
+        self.assertEqual([media.frame_rate(x) for x in ("24/1", "30000/1001", "0/0", "", None, "90000/1", "x/y", "25")],
+                         [24.0, 29.97, None, None, None, None, None, 25.0])
+
+    def test_old_outputs_table_gets_the_fps_column(self):
+        self.ledger.close()
+        root = self.root / "old"
+        root.mkdir()
+        db = sqlite3.connect(root / "studio.db")                     # fps 列の無い、前の版の outputs
+        db.execute("CREATE TABLE outputs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, tab TEXT NOT NULL, job_id TEXT, path TEXT NOT NULL, filename TEXT,"
+                   " width INTEGER, height INTEGER, duration_s REAL, created_at REAL NOT NULL, params_json TEXT, thumb_path TEXT)")
+        db.execute("INSERT INTO outputs VALUES ('o1', 'video', 'video', NULL, 'video/a.mp4', 'a.mp4', 640, 360, 2.0, 1.0, '{}', NULL)")
+        db.commit()
+        db.close()
+        self.ledger = Ledger(root)
+        self.assertIsNone(self.ledger.get_output("o1")["fps"])         # 既存の行は空(分からない)
+        with mock.patch.object(media, "probe", return_value={"duration_s": 1.0, "width": 8, "height": 8, "fps": 25.0}), \
+                mock.patch.object(media, "video_thumb", return_value=False):
+            (root / "video").mkdir()
+            (root / "video" / "b.mp4").write_bytes(b"x")
+            self.assertEqual(self.ledger.add_output("video", root / "video" / "b.mp4", "video")["fps"], 25.0)
+
+    def test_remove_stale_parts(self):
+        for rel in ("video/edit_x.mp4.part", "edit/p1/preview_3_0123456789abcdef.mp4.part", "short/p2/vocals.wav.part"):
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / rel).write_bytes(b"half")
+        keep = self.root / "video" / "done.mp4"
+        keep.write_bytes(b"whole")
+        self.assertEqual(self.ledger.remove_stale_parts(), 3)
+        self.assertEqual(sorted(p.name for p in self.root.rglob("*.part")), [])
+        self.assertTrue(keep.is_file())
+        self.assertEqual(self.ledger.remove_stale_parts(), 0)
 
     def test_rejects_path_outside_root(self):
         with self.assertRaises(ValueError):

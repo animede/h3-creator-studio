@@ -1,8 +1,8 @@
 # YUZU Creator Studio
 
-(リポジトリ名: `h3-creator-studio`。旧名の h3-creator-studio から改名)
+(リポジトリ名は `h3-creator-studio` のまま)
 
-**最新版: 2026-11-25 11:10 JST** — 名前を **YUZU Creator Studio** に(リポジトリ名はそのまま)。ライセンスを Apache-2.0 に、画面の下に著作権と部品のクレジット、題を大きく明るいレモン色に。編集タブ(第 4 版)。編集タブ(第 4 版)。元の動画は変わらず、元に戻す/やり直す、プレビューつき)。他のタブの動作は変わらない。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+**最新版: 2026-11-25 12:40 JST** — 名前を **YUZU Creator Studio** に(リポジトリ名はそのまま)、ライセンスを Apache-2.0 に。画面の下に著作権と部品のクレジット、題の左に柚子のロゴ。編集タブ(第 4 版: つなぐ・切る・挿入・色調・選択区間の効果(フェード / ズーム / パン)・境目の効果・音声の差し替え。元の動画は変えず、元に戻す / やり直す、プレビューつき、このコマを画像に)。他のタブの動作は変わらない。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 **mv-V3 や story のシンプル版を統合した、誰でも使える簡易な画像・動画・音楽コンテンツ制作スタジオ。**
 ブラウザ 1 枚の画面で、画像・動画(音声つき)・音楽を作る。ComfyUI のようにノードをつなぐ必要はない。
@@ -131,7 +131,7 @@ dir = "/home/you/ACE-Step-1.5-fast"
 
 - **上**: メモリ計(VRAM・CPU メモリ。Windows では共有 GPU メモリも)と「部品」の一覧。今どの部品が GPU にいるか、起動中か、エラーかが分かる。その下に、GPU の使い方(1 部品ずつ / 同時に複数)と、部品ごとの実行中・待ちのジョブが出る。
 - **タブが 6 つ**: 画像 / 動画 / 音楽 / MV(ミュージックビデオ。リップシンク MV / イメージ MV)/ ショート動画 / 編集。
-- **プリセット**: 各タブの左上。入力欄の値に名前を付けて保存し、選ぶだけで呼び戻せる(下の「プリセット」)。
+- **プリセット**: 編集以外の各タブの左上。入力欄の値に名前を付けて保存し、選ぶだけで呼び戻せる(下の「プリセット」)。
 - **左: 操作**。**右上: 生成物**(できたものを大きく表示、保存ボタン)。**右下: 履歴**(そのタブで作ったもの)。
 - 履歴の「ギャラリー」ボタンで、右側が **ギャラリー**(すべての生成物。全て・画像・動画・音楽で絞り込み)に切り替わる。「戻る」で履歴に戻る。
 - **ドラッグ&ドロップ**: 入力欄には、PC のファイルも、ギャラリーや履歴の生成物も、**同じ操作で落とせる**。作ったものを次の入力に使える。
@@ -222,7 +222,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 - **曲**(任意。音楽タブの曲・ギャラリー・PC の音声ファイル): あれば BGM になる。
 - **セリフ・ナレーション**(任意): あれば AivisSpeech で読み上げ、人物がそれに口を合わせる。**📝 物語から作る** で、物語の文章からナレーションの案を書かせられる(確かめて直してから作る。書いた文は、確認なしには置き換えない)。空なら、セリフなしの動画。**話者** は動画タブの TTS と同じ AivisSpeech の一覧から選ぶ(セリフがあるときは必須)。
 - **参照画像**(0〜4 枚。画像タブの画像・ギャラリー・PC の画像): 1 枚ごとに **役割** を選ぶ。**人物**(全シーンに同じ人物。1 枚まで。複数の出演者は扱わない)か、**景色・物**(その場所・物を出すシーンの参照)。人物の画像を入れると **人物の説明** の欄が出る(🔍 画像から作る は MV と同じ)。
-- **長さ**: 曲があれば曲の長さ、セリフがあれば読み上げの長さ、どちらも無いときだけ指定する(30 秒以上、既定 60 秒)。セリフと曲の両方があれば読み上げの長さで、曲は BGM として下に敷く。
+- **長さ**: 曲があれば曲の長さ、セリフがあれば読み上げの長さ、どちらも無いときだけ指定する(30 秒〜1 時間、既定 60 秒)。セリフと曲の両方があれば読み上げの長さで、曲は BGM として下に敷く。
 - **投稿先・画質・シーンの長さ(5〜10 秒)・背景の文字・シード** は MV と同じ。字幕・テロップは出さない。
 - **最終の音声**: **自動** / **音声なし**(映像だけの MP4。他のツールで音を付けたい人向け)。完成後に **結合し直す** の横の選びで変えて、つなぎ直せる(前の動画はギャラリーに残る)。
 - **セリフのテロップ(字幕)**: 「セリフのテロップ(字幕)を焼き込む」に印を付けると、読み上げの文の時刻どおりに白い字のテロップを画面の下(縦長は少し上)に焼き込む(音声認識は使わず、合成した文の時刻を使うので、ずれない)。同じ内容の **SRT** を最終の動画の隣に保存し(投稿サイトの字幕用)、完成の画面に **SRT** のリンクが出る。完成後に **結合し直す** の横の「テロップ」で付け外しできる。字体は `studio.local.toml` の `[mv] subtitle_font`(空なら Noto Sans CJK JP。無ければ ffmpeg(libass)が同じ文字を持つ字体に置き換える。Windows は Meiryo など)。セリフの無い制作では何もしない。
@@ -262,12 +262,12 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 **区間の指定の仕方**: **開始・終了** の秒を数字で入れる(矢印キーや Tab で動かせる)。または、右のプレビューを再生して目的の位置で止め、プレビューのすぐ下(左の区間の欄にも同じものがある)の **ここから** / **ここまで** を押すと、その位置が開始・終了に入る(いまの区間は右に「区間 a〜b 秒」と出る)。 **◀ 1 コマ** / **1 コマ ▶** で、止めた位置を 1 コマ(1/fps 秒)ずつ動かせる。 **クリア** で開始・終了を消す。**このコマを画像に** で、止めた位置のコマを元の動画から元の解像度の PNG にしてギャラリー(画像)に入れる(色調などの効果は掛からない。画像タブの参照や、編集の挿入にそのまま使える)。**全体** は 0〜最後。右の目盛り(クリップごとの帯)の上でクリックすると、その位置を再生でき、いまの区間が青い帯で重なる。
 
-**ギャラリーから入れる**: 右下の **ギャラリー** を開くと(編集タブでは、上のプレビューは見えたまま右下に出る)、動画・画像をクリックするだけでクリップの末尾に入り、曲をクリックすると音声に入る(ギャラリーは開いたままなので、続けて選べる。「履歴へ」で戻る)。挿入は、挿入の欄へのドロップ。**区間の秒は、クロスフェードで縮む前の、クリップをつないだだけの時間** で数える(プレビューの再生位置からは「ここから」が自動で直してくれる)。区間を削除すると、色調の区間も削った分だけ詰まる。
+**ギャラリーから入れる**: 右下の **ギャラリー** を開くと(編集タブでは、上のプレビューは見えたまま右下に出る)、動画・画像をクリックするだけでクリップの末尾に入り、曲をクリックすると音声に入る(ギャラリーは開いたままなので、続けて選べる。「戻る」で履歴に戻る)。挿入は、挿入の欄へのドロップ。**区間の秒は、クロスフェードで縮む前の、クリップをつないだだけの時間** で数える(プレビューの再生位置からは「ここから」が自動で直してくれる)。区間を削除すると、色調の区間も削った分だけ詰まる。
 
 **プレビューと書き出し**:
 
 - 操作のたびに **プレビュー**(短辺 480 の軽い MP4)を作り直す。作っている間は動画がぼけて、進みが出る。続けて操作すると、作りかけは中止して新しく作る。「プレビューは古い版です」と出たら、**作り直す** を押す。
-- **書き出し** は元の解像度の MP4(`outputs/video/edit_<ID>.mp4`。2 回目以降は `_2`…)で、ギャラリーに載る。数分かかることがある(進みが出る)。右下の「最後に書き出した動画」から保存でき、他のタブの入力欄にも落とせる。
+- **書き出し** は元の解像度の MP4(`outputs/video/edit_<ID>.mp4`。2 回目以降は `_2`…)で、ギャラリーに載る。数分かかることがある(進みが出る)。プレビューの下の「最後に書き出した動画」から保存でき、他のタブの入力欄にも落とせる。
 - 出力の寸法とフレームレートは、**先頭のクリップ** に合わせる(画像だけなら 1024×576・24fps)。大きさの違う動画は、縮めて黒い縁を付ける。
 
 **元に戻す / やり直す**: 操作 1 回が 1 段(最大 100 段)。管理役を再起動しても、戻せる。
@@ -278,7 +278,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 ### プリセット
 
-各タブの左上の欄で、入力欄の値(プロンプト・サイズ・秒数・STEP・モデル・ジャンルなど)に名前を付けて保存できる。選ぶと入力欄に反映する(生成はしない)。参照画像や曲など、落とした生成物はプリセットに含めない。
+編集以外の各タブの左上の欄で、入力欄の値(プロンプト・サイズ・秒数・STEP・モデル・ジャンルなど)に名前を付けて保存できる(編集は素材ごとに違うので、プリセットは無い)。選ぶと入力欄に反映する(生成はしない)。参照画像や曲など、落とした生成物はプリセットに含めない。
 
 - **同梱のプリセット**(画像の画風、SNS 向けのサイズ、曲調、MV・ショート動画の投稿先など)は変更できない。「別名で保存」で複製してから編集する。
 - 自分のプリセットは「保存」(選んでいるものの上書き)/「別名で保存」/「名前の変更」/「削除」。「書き出し」で JSON に保存し、「読み込み」で別の PC に移せる。
@@ -299,7 +299,7 @@ GPU のメモリは足りない。4 つの部品を同時に載せると、す�
 4. **VRAM が 10GB 未満(8GB のカードなど)のときは、音楽に自動で省メモリの設定を入れる。** 次の 5 つ。
    - `ACESTEP_GPU_PROFILE=12gb`(2B モデルのプロファイル)
    - `ACESTEP_LM_OFFLOAD_TO_CPU=1`(言語モデルを CPU に置く)
-   - `ACESTEP_RESIDENT_COMPONENTS=`(常駐させる部品を無くす)
+   - `ACESTEP_RESIDENT_COMPONENTS=none`(常駐させる部品を無くす。空にはしない: Windows では空は未設定と同じ)
    - `ACESTEP_VAE_DECODE_CHUNK_SIZE=128`(最後のデコードを小さく区切る)
    - `ACESTEP_QUANTIZATION=int8_weight_only`(int8 に量子化)
 
@@ -320,7 +320,7 @@ GPU のメモリは足りない。4 つの部品を同時に載せると、す�
 
 | 部品 | フォルダ | 更新 |
 |---|---|---|
-| MiniMax-H3 | `components\minimax-h3` | `git pull` → `.\scripts\install.bat`(Linux: `bash scripts/install.sh`)→ モデルの更新があるときだけ `.\venv\Scripts\python.exe scripts\prepare_lowvram.py`(Linux: `venv/bin/python scripts/prepare_lowvram.py`) |
+| MiniMax-H3 | `components\minimax-h3` | `git pull` → `.\scripts\install.bat`(Linux: `bash scripts/install.sh`)→ モデルの更新があるときだけ `.\venv\Scripts\python.exe scripts\prepare_lowvram.py --ref`(Linux: `venv/bin/python scripts/prepare_lowvram.py --ref`。`--no-ref` で入れた人は `--ref` を付けない) |
 | MiniMax-H3-Image | `components\minimax-h3-image-server` | `git pull` → `uv pip install --python .venv\Scripts\python.exe -r requirements-windows.txt`(Linux: `uv pip install --python .venv/bin/python -r requirements.txt`)→ モデルの更新があるときだけ `.venv\Scripts\python.exe scripts\prepare_models.py`(Linux: `.venv/bin/python scripts/prepare_models.py`) |
 | ACE-Step | `components\ACE-Step-1.5-fast` | `git pull` → `.\setup.bat --12gb`(Linux: `./setup.sh --12gb --no-client`)。XL モデルも入れているなら `--12gb` を外す |
 | AivisSpeech | `components\AivisSpeech-Engine` | git ではない(配布版)。フォルダを消して、Studio の `setup` をもう一度実行すると、取得し直す |
@@ -344,7 +344,7 @@ git pull
 .\setup.bat --no-models
 ```
 
-`--no-models` は管理役の環境(`.venv`)の更新と、足りない部品の取り込みだけをする。部品のモデルは触らない。
+`--no-models` は管理役の環境(`.venv`)の更新と、足りない部品の取り込み、各部品の環境の確認(済んでいれば短く終わる)をする。部品のモデルは触らない。
 
 **部品を入れ直したいとき**は、そのフォルダを消して、`setup` を実行し直す(消したフォルダだけ、取り込みから用意する)。`studio.local.toml` の `dir` で指しているフォルダは、setup は消さない。自分で消す。
 
@@ -360,6 +360,7 @@ git pull
 | 同 `enabled` | `false` でその部品を使わない(例: 音楽は要らない) |
 | 同 `port` | 部品のポート(競合したとき変える) |
 | 同 `env` | 部品に渡す環境変数。`[components.h3.env]` のように書く |
+| `[llm]` の `port` / `tools_dir` | 同梱 LLM(llama-server)のポート(既定 8701)と、取得先のフォルダ |
 | `[llm]` の `gpu` | 同梱 LLM を載せる先。`auto`(空きに入る分だけ GPU)/ `off`(CPU のみ)/ `all` / 層数 |
 | `[llm]` の `gguf` / `llama_server` / `mmproj` | 書くと、取得せずに、そのファイルを使う(`mmproj` は画像・音声を読む投影ファイル。空なら自動で探し、無ければ「画像から作る」「曲から作る」で 1 回だけ取得する) |
 | `[gpu]` の `mode` | `auto`(総 VRAM 40GiB 以上なら同時に複数、未満なら 1 部品ずつ)/ `exclusive`(1 部品ずつ)/ `share`(同時に複数) |
@@ -372,7 +373,7 @@ git pull
 ## トラブルシューティング
 
 - **部品が「エラー」と出る**: その行の「ログ」を開く。同じ内容は `logs\<名前>.log`(`logs/h3.log` など)にある。モデルが無い、環境が無い、のときは、setup をもう一度実行する。
-- **ポートが使われている**: 8700(管理役)、8611(動画)、8633(画像)、8001(音楽)、10101(読み上げ)のどれかを別のアプリが使っている。相手を止めるか、`studio.local.toml` でポートを変える。
+- **ポートが使われている**: 8700(管理役)、8701(同梱 LLM)、8611(動画)、8633(画像)、8001(音楽)、10101(読み上げ)のどれかを別のアプリが使っている。相手を止めるか、`studio.local.toml` でポートを変える。
 - **「VRAM があふれて…」と警告が出る**: 画角(サイズ・解像度)を下げる。他の GPU アプリ(ブラウザの動画再生、ゲーム、別の生成ツール)を閉じる。
 - **「中止」を押してもすぐ止まらない**: 中止は **いまのステップの後で止まる**。音楽は、言語モデル(LM)の段と、最後のデコードの最中は止まらないことがある。
 - **外部で動いている部品は止めない**: 管理役が起動したものだけを止める。別に起動していた部品がすでにポートで待ち受けていれば、それをそのまま使い、停止はしない(画面にも「外部」と出る)。画像・動画の部品は外部でも GPU から降ろせるが、ACE-Step は降ろす方法が無く、止めるしかない。外部の ACE-Step が GPU にいて載せ替えが必要なときは、GPU に次の部品の分(目安: 動画 12GB、画像 13.5GB、音楽 14GB + 1GB)の空きがあれば止めずに同居し、無ければ「同居できません」と断る。その場合は先に自分で止めるか、`studio.local.toml` の `[components.ace]` に別の `port` を書いて管理役に起こさせる。
@@ -388,12 +389,15 @@ h3-creator-studio/
 ├── setup.bat / setup.sh   セットアップ(uv を入れ、scripts/setup.py を呼ぶ)
 ├── run.bat / run.sh       管理役の起動
 ├── scripts/setup.py       部品の取り込み、環境とモデルの準備(部品自身のスクリプトを呼ぶ)
-├── studio/                管理役(FastAPI): 部品の起動と停止、載せ替え、メモリ監視、ジョブ、LLM、MV の制作
-├── studio/mvtools/        MV の音声処理(ボーカル分離・シーン分割。components/mvtools の Python で動かす)
+├── studio/                管理役(FastAPI): 部品の起動と停止、載せ替え、メモリ監視、ジョブ、LLM、MV・ショート動画の制作、編集
+├── studio/mvtools/        MV・ショート動画の音声処理(ボーカル分離・シーン分割。components/mvtools の Python で動かす)
 ├── presets/               同梱のプリセット(タブごとの JSON)
 ├── web/                   画面(素の HTML / JavaScript / CSS。ビルド不要)
 ├── studio.toml            既定の設定
-├── studio.local.toml      自分の設定(git の管理外。見本は studio.local.toml.example)
+├── studio.local.toml      自分の設定(git の管理外)
+├── studio.local.toml.example  自分の設定の見本
+├── pyproject.toml / requirements.txt  管理役の Python の依存
+├── LICENSE / NOTICE       Apache-2.0 と、移植したファイルの記録
 ├── components/            取り込んだ部品(それぞれ独立した git リポジトリ。git の管理外)と、mvtools(MV の音声処理の環境)
 ├── outputs/               生成物と台帳(studio.db)(git の管理外)
 ├── logs/                  部品のログ(git の管理外)
@@ -404,10 +408,10 @@ h3-creator-studio/
 ## クレジット
 
 - **このアプリ**: © 2026 ゆずき(YUZUKI、GitHub: animede)。コードは Apache License 2.0([LICENSE](LICENSE)、[NOTICE](NOTICE))。
-- **[MiniMax-H3 / MiniMax-H3-Image](https://huggingface.co/MiniMaxAI)**(MiniMax): 動画・音声・静止画・画像のモデル。モデルの重みは MiniMax Community License(非商用は無料、商用は年商 $20M 未満まで、要クレジット。本家のモデルカードを確認)。このアプリは [Diffusers_minimax-h3](https://github.com/animede/Diffusers_minimax-h3) と [minimax-h3-image-server](https://github.com/animede/minimax-h3-image-server)(どちらも MIT)を部品として動かす。
+- **[MiniMax-H3 / MiniMax-H3-Image](https://huggingface.co/MiniMaxAI)**(MiniMax): 動画・音声・静止画・画像のモデル。モデルの重みは MiniMax Community License(非商用は無料、商用は年商 $20M 未満まで、要クレジット。本家のモデルカードを確認)。このアプリは [Diffusers_minimax-h3](https://github.com/animede/Diffusers_minimax-h3) と [minimax-h3-image-server](https://github.com/animede/minimax-h3-image-server)(Diffusers_minimax-h3 は Apache-2.0、minimax-h3-image-server は MIT)を部品として動かす。
 - **[ACE-Step](https://github.com/ace-step/ACE-Step)**(ACE Studio / StepFun): 音楽のモデル(MIT)。部品は [ACE-Step-1.5-fast](https://github.com/animede/ACE-Step-1.5-fast)(MIT)。
 - **[AivisSpeech-Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)**(Aivis Project): 読み上げ(LGPL-3.0。別プロセスとして HTTP で呼ぶだけで、組み込まない)。音声モデル(aivm)は、それぞれの作者の利用規約に従う。
-- そのほか: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)と Google の Gemma 4(Gemma 利用規約)、[Demucs](https://github.com/facebookresearch/demucs)(MIT)、[librosa](https://librosa.org/)(ISC)、[ffmpeg](https://ffmpeg.org/)(LGPL/GPL。PATH のものを使う)。
+- そのほか: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)と Google の Gemma 4(ライセンスはモデルカード [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) を確認)、[Demucs](https://github.com/facebookresearch/demucs)(MIT)、[librosa](https://librosa.org/)(ISC)、[ffmpeg](https://ffmpeg.org/)(LGPL/GPL。PATH のものを使う)。
 
 画面の下にも、著作権と主な部品のクレジットを出している。
 

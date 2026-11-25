@@ -1,4 +1,4 @@
-"""MV(リップシンク)のハンドラ: mv.analyze / mv.listen / mv.script / mv.scene / mv.assemble。
+"""MV(ミュージックビデオ。歌わせるリップシンクと、歌わせないイメージ MV)のハンドラ: mv.analyze / mv.listen / mv.script / mv.scene / mv.assemble。
 
 どのジョブをいつ入れるか(順番・一時停止・やり直し)は mv.Director が決める。ここは 1 つのジョブの仕事だけをして、結果を台帳の mv_projects に書く
 (シーンを「生成中」にするのと、失敗・中止の記録は Director の仕事)。ジョブの params は {"project_id", ("scene")} だけで、中身はその都度台帳から読む。
@@ -49,7 +49,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     if stage == "scene":
         try:
             out["scene"] = int(params.get("scene"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError("シーンの番号を整数で指定してください")
         if proj is not None and not any(s["index"] == out["scene"] for s in proj["scenes"]):
             raise ValueError(f"シーン {out['scene']} はありません")
@@ -69,11 +69,12 @@ def _device() -> str:
     return value if value in DEVICES else "cpu"
 
 
-async def _ffmpeg(build, dst: Path, what: str) -> None:
-    """ffmpeg を別スレッドで走らせる。build(exe, tmp) が引数を返し、出力先 tmp(= dst.part)に書かせて、成功したら dst に置き換える。失敗は JobFailed。"""
+async def _ffmpeg(build, dst: Path, what: str, media_s: float = None) -> None:
+    """ffmpeg を別スレッドで走らせる。build(exe, tmp) が引数を返し、出力先 tmp(= dst.part)に書かせて、成功したら dst に置き換える。失敗は JobFailed。
+    取り消されたら(ジョブの中止・管理役の停止)ffmpeg も止める。media_s は作る動画の尺(秒。長い動画の作り直しは、待つ最長をそれに合わせて延ばす)。"""
     try:
         exe = mv_audio._ffmpeg()
-        await asyncio.to_thread(mv_audio._run_ffmpeg, build(exe, mv_audio._part(dst)), dst, what)
+        await mv_audio.run_ffmpeg(build(exe, mv_audio._part(dst)), dst, what, media_s=media_s)
     except mv_audio.MvAudioError as e:
         raise JobFailed(e.message, e.log_tail) from e
 
@@ -101,10 +102,6 @@ async def cancel_task(job: Job, ctx: Ctx) -> None:
     task = _tasks.get(job.id)
     if task is not None:
         task.cancel()
-
-
-async def cancel_flag(job: Job, ctx: Ctx) -> None:
-    """何もしない。実行中の run が、区切りごとに job.cancel_requested を見る(ffmpeg は数秒で終わるので途中では止めない)。"""
 
 
 # ---- mv.analyze ----
@@ -357,7 +354,7 @@ def ready_clips(proj: dict, work: Path) -> tuple:
 async def register_video(job: Job, ctx: Ctx, pid: str, dest: Path, name: str, meta: dict, p: dict, duration: float) -> dict:
     """最終の動画をギャラリー(台帳)に載せ、制作に結びつける。"""
     rec = await asyncio.to_thread(ctx.ledger.add_output, "video", dest, job.tab, job.id, name, meta,
-                                  width=p.get("width"), height=p.get("height"), duration_s=duration)
+                                  width=p.get("width"), height=p.get("height"), duration_s=duration, fps=mvclip.FPS)
     job.outputs.append(rec["id"])
     ctx.ledger.update_mv_project(pid, output_id=rec["id"], params_patch={"assembled": True})
     return rec
@@ -366,6 +363,10 @@ async def register_video(job: Job, ctx: Ctx, pid: str, dest: Path, name: str, me
 async def run_assemble(job: Job, ctx: Ctx) -> None:
     if job.cancel_requested:
         raise JobCancelled()
+    await _cancellable(job, _assemble(job, ctx))        # 中止は、走っている ffmpeg ごと止める(長い MV の結合は数分かかる)
+
+
+async def _assemble(job: Job, ctx: Ctx) -> None:
     proj = _project(ctx, job)
     pid, p = proj["id"], proj["params"]
     work = work_dir(ctx.outputs_dir, pid)
@@ -381,11 +382,11 @@ async def run_assemble(job: Job, ctx: Ctx) -> None:
     try:
         job.progress, job.message = 0.1, "シーンをつないでいます"
         await asyncio.to_thread(listing.write_text, mvclip.concat_list(clips), "utf-8")
-        await _ffmpeg(lambda exe, tmp: mvclip.concat_args(exe, listing, tmp), video_only, "シーンの結合")
+        await _ffmpeg(lambda exe, tmp: mvclip.concat_args(exe, listing, tmp), video_only, "シーンの結合", duration)
         if job.cancel_requested:
             raise JobCancelled()
         job.progress, job.message = 0.6, "元の曲を載せています"
-        await _ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, song, tmp, duration), dest, "曲の差し替え")
+        await _ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, song, tmp, duration), dest, "曲の差し替え", duration)
     finally:
         listing.unlink(missing_ok=True)
         video_only.unlink(missing_ok=True)
@@ -402,5 +403,5 @@ HANDLERS = {
     "mv.listen": Handler(component=None, normalize=normalize, run=run_listen, cancel=cancel_task, gpu=False),
     "mv.script": Handler(component=None, normalize=normalize, run=run_script, cancel=cancel_task, gpu=False),
     "mv.scene": Handler(component=h3.COMPONENT, normalize=normalize, run=run_scene, cancel=h3.cancel),
-    "mv.assemble": Handler(component=None, normalize=normalize, run=run_assemble, cancel=cancel_flag, gpu=False),
+    "mv.assemble": Handler(component=None, normalize=normalize, run=run_assemble, cancel=cancel_task, gpu=False),
 }

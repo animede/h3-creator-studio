@@ -3,24 +3,32 @@ const OUT_MIME = "application/x-studio-output";     // ドラッグするデー�
 const KIND_LABEL = { image: "画像", video: "動画", audio: "音楽" };
 const TAB_KIND = { image: "image", video: "video", music: "audio" };
 
+const GALLERY_LIMIT = 500;   // 読む生成物の数(新しい順)。これより多ければ、古いものは studio.items に無い
 const studio = {
   tab: "image",
-  items: [],                 // /api/gallery の結果(新しい順)
+  items: [],                 // /api/gallery の結果(新しい順。GALLERY_LIMIT まで)
+  complete: false,           // items が全部か(GALLERY_LIMIT で切れていない)。切れていれば、items に無い生成物が消えたとは限らない
   viewing: {},               // タブ -> 生成物ビューアに出している ID(未指定なら、そのタブの最新)
   galleryKind: "all",
   actions: {},               // タブ -> (生成物) => [{label, run}]  生成物ビューアに出すボタン(各タブの js が入れる)
-  own: {},                   // タブ -> {history(grid), open(生成物), ids(), remove(ids)}  右側の生成物ビューアと履歴を自前で描くタブ(MV タブ)。open はギャラリーでクリックされたとき、ids と remove は選択モードで、履歴の ID の一覧と、選んだものの削除(消したら true)
-  select: { on: false, ids: new Set() },     // 選択モード(履歴とギャラリーで共通): 選んでいる ID。MV タブの履歴では制作の ID
+  own: {},                   // タブ -> {history(grid), open(生成物), ids(), remove(ids)}  右側の生成物ビューアと履歴を自前で描くタブ(MV・ショート動画・編集タブ)。open はギャラリーでクリックされたとき(true を返せばギャラリーは開いたまま)、ids と remove は選択モードで、履歴の ID の一覧と、選んだものの削除(消したら true)
+  select: { on: false, ids: new Set() },     // 選択モード(履歴とギャラリーで共通): 選んでいる ID。MV・ショート動画・編集タブの履歴では制作(プロジェクト)の ID
   on: { tab: [], items: [] },   // 各タブの js が入れる: タブが変わったとき / 一覧が更新されたとき
 };
 
 const byId = (id) => studio.items.find((i) => i.id === id);
+// 一覧を読み直したとき、入力欄に入れた生成物が消えたとみなすか(一覧が全部で、そこに無い)。切れた一覧では、古くて載っていないだけかもしれないので外さない
+// (消したときは studio-deleted で外す)
+const goneFromGallery = (id) => studio.complete && !byId(id);
 const fmtSec = (s) => (s >= 60 ? `${Math.floor(s / 60)}分${Math.round(s % 60)}秒` : `${s.toFixed(1)}秒`);
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
 async function loadGallery() {
   try {
-    studio.items = await fetch("/api/gallery?limit=500").then((r) => r.json());
+    const items = await fetch(`/api/gallery?limit=${GALLERY_LIMIT}`).then((r) => r.json());
+    if (!Array.isArray(items)) return;
+    studio.items = items;
+    studio.complete = items.length < GALLERY_LIMIT;
   } catch (e) { return; }
   renderHistory();
   renderGallery();
@@ -313,7 +321,7 @@ function setTab(tab) {
   studio.tab = tab;
   if (studio.select.on) setSelecting(false);      // 選択モードは、タブを越えて続けない
   $("workspace").dataset.tab = tab;
-  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
+  document.querySelectorAll(".tab").forEach((x) => { x.classList.toggle("active", x.dataset.tab === tab); x.setAttribute("aria-selected", String(x.dataset.tab === tab)); });
   document.querySelectorAll(".tabpanel").forEach((p) => { p.hidden = p.id !== "tab-" + tab; });
   $("progress").hidden = true;      // 進捗は、そのタブのジョブがあるときだけ各タブの js が出す
   renderHistory();

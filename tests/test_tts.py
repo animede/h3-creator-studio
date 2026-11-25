@@ -1,5 +1,7 @@
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -8,7 +10,10 @@ from pathlib import Path
 
 import httpx
 
+from studio import procman
+from studio.components import get_spec
 from studio.ledger import Ledger
+from studio.scheduler import Scheduler
 from studio.tts import MAX_TEXT, Tts, TtsError
 
 SPEAKERS = [
@@ -115,6 +120,45 @@ class TtsTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TtsError) as cm:
             await tts.synthesize("やあ", 999)
         self.assertIn("422", cm.exception.message)
+
+
+
+class DeadAivisTest(unittest.IsolatedAsyncioTestCase):
+    """自分で起動した AivisSpeech が落ちたら、ready のまま残さず、次の合成の前に起こし直す(本物の Scheduler、ensure だけ記録)。"""
+
+    async def test_a_crashed_aivis_is_ensured_again(self):
+        spec = get_spec("aivis")
+        sched = Scheduler(specs={"aivis": spec})
+        comp = sched.comps["aivis"]
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        comp.proc, comp.state = procman.Proc(spec=spec, popen=dead, pid=dead.pid), "ready"       # 落ちた子プロセスと、古い ready
+        ensured = []
+
+        async def ensure(name, op=None):
+            ensured.append((name, comp.state))
+            comp.state = "ready"
+        sched.ensure = ensure
+        client = await Tts(sched, None, "/tmp")._ready()
+        await client.aclose()
+        self.assertEqual(ensured, [("aivis", "stopped")])                     # 落ちていたので stopped に戻してから ensure
+        self.assertIsNone(comp.proc)
+
+    async def test_a_live_ready_aivis_is_not_ensured(self):
+        spec = get_spec("aivis")
+        sched = Scheduler(specs={"aivis": spec})
+        comp = sched.comps["aivis"]
+        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: (live.kill(), live.wait()))
+        comp.proc, comp.state = procman.Proc(spec=spec, popen=live, pid=live.pid), "ready"
+        ensured = []
+
+        async def ensure(name, op=None):
+            ensured.append(name)
+        sched.ensure = ensure
+        client = await Tts(sched, None, "/tmp")._ready()
+        await client.aclose()
+        self.assertEqual((ensured, comp.state), ([], "ready"))
 
 
 if __name__ == "__main__":

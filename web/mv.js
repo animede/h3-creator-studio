@@ -114,7 +114,7 @@
     if (song && gone(song.id)) { clearSong(); fill(mvp("concept"), ""); }
     if (image && gone(image.id)) { image = null; fill(mvp("char"), ""); renderImage(); }
   }
-  studio.on.items.push(() => dropGone((id) => !byId(id)));
+  studio.on.items.push(() => dropGone(goneFromGallery));      // 一覧が全部のときだけ(web/gallery.js の goneFromGallery)
   document.addEventListener("studio-deleted", (e) => dropGone((id) => e.detail.ids.includes(id)));
 
   // ---- 入力: 自動の説明(画像から人物の説明、曲から曲の内容・世界観) ----
@@ -230,7 +230,7 @@
   mvp("aspect").onchange = renderSize;
   mvp("quality").onchange = () => { qualityTouched = true; renderSize(); };
   mvp("random").onchange = () => { mvp("seed").disabled = mvp("random").checked; };
-  // 歌わせないときだけ、「曲の内容」に出したくないものを書く案内を出す(プリセットの反映は change を飛ばすので、ここで追従する)
+  // 歌わせないときだけ、「曲の内容」に出したくないものを書く案内を出す(プリセットの反映も presetSet が change を流すので、ここで追従する)
   const renderLipsyncNote = () => { mvp("lipsync-note").hidden = mvp("lipsync").value !== "false"; };
   mvp("lipsync").onchange = renderLipsyncNote;
   renderLipsyncNote();

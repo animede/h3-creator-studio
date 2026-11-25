@@ -313,8 +313,10 @@ def _name(p: dict) -> str:
 
 
 async def run_assemble(job: Job, ctx: Ctx) -> None:
-    if job.cancel_requested:
-        raise JobCancelled()
+    await _run(job, _assemble(job, ctx))          # 中止は、走っている ffmpeg ごと止める(テロップの焼き込みは映像を作り直すので、長い動画では数分かかる)
+
+
+async def _assemble(job: Job, ctx: Ctx) -> None:
     proj = mvh._project(ctx, job)
     pid, p = proj["id"], proj["params"]
     work = work_dir(ctx.outputs_dir, pid)
@@ -350,23 +352,24 @@ async def run_assemble(job: Job, ctx: Ctx) -> None:
         job.progress, job.message = 0.1, "シーンをつないでいます"
         await asyncio.to_thread(listing.write_text, mvclip.concat_list(clips), "utf-8")
         await mvh._ffmpeg(lambda exe, tmp: mvclip.concat_args(exe, listing, tmp, drop_audio=final_audio == "none", faststart=final_concat),
-                          dest if final_concat else video_only, "シーンの結合")
+                          dest if final_concat else video_only, "シーンの結合", duration)
         if not final_concat:
             if job.cancel_requested:
                 raise JobCancelled()
             what = "(テロップを焼き込みながら)" if ass is not None else ""
             if narration is not None and song is not None:
                 job.progress, job.message = 0.6, f"読み上げに曲(BGM)を混ぜて載せています{what}"
-                await mvh._ffmpeg(lambda exe, tmp: mvclip.mix_args(exe, video_only, narration, song, tmp, duration, song_s, ass=ass), dest, "読み上げと曲の混合")
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.mix_args(exe, video_only, narration, song, tmp, duration, song_s, ass=ass), dest, "読み上げと曲の混合",
+                                  duration)
             elif narration is not None:
                 job.progress, job.message = 0.6, f"読み上げを載せています{what}"
-                await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, narration, tmp, duration, ass=ass), dest, "読み上げの差し替え")
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, narration, tmp, duration, ass=ass), dest, "読み上げの差し替え", duration)
             elif song is not None:
                 job.progress, job.message = 0.6, "元の曲を載せています"
-                await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, song, tmp, duration), dest, "曲の差し替え")
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.mux_args(exe, video_only, song, tmp, duration), dest, "曲の差し替え", duration)
             else:
                 job.progress, job.message = 0.6, "テロップを焼き込んでいます"
-                await mvh._ffmpeg(lambda exe, tmp: mvclip.burn_args(exe, video_only, ass, tmp), dest, "テロップの焼き込み")
+                await mvh._ffmpeg(lambda exe, tmp: mvclip.burn_args(exe, video_only, ass, tmp), dest, "テロップの焼き込み", duration)
     finally:
         listing.unlink(missing_ok=True)
         video_only.unlink(missing_ok=True)
@@ -395,5 +398,5 @@ HANDLERS = {
     "short.plan": Handler(component=None, normalize=normalize, run=run_plan, cancel=mvh.cancel_task, gpu=False),
     "short.script": Handler(component=None, normalize=normalize, run=run_script, cancel=mvh.cancel_task, gpu=False),
     "short.scene": Handler(component=h3.COMPONENT, normalize=normalize, run=run_scene, cancel=h3.cancel),
-    "short.assemble": Handler(component=None, normalize=normalize, run=run_assemble, cancel=mvh.cancel_flag, gpu=False),
+    "short.assemble": Handler(component=None, normalize=normalize, run=run_assemble, cancel=mvh.cancel_task, gpu=False),
 }

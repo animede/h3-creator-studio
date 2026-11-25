@@ -313,7 +313,7 @@ class Scheduler:
                 if self.gpu_resident == name and c.state == "ready":
                     op.add("準備完了")
                     return
-                self._note_baseline()
+                self._note_baseline(name)
                 if self.gpu_resident and self.gpu_resident != name:
                     await self._release(self.comps[self.gpu_resident], op, target=c)
             await self._bring_up(c, op)
@@ -336,8 +336,8 @@ class Scheduler:
                     op.wait_reason = None
                     op.add("準備完了")
                     return
-                self._note_baseline()
-                plan = self.plan(name)
+                self._note_baseline(name)
+                plan = self.plan(name, admitting=True)
                 if plan.action == "refuse":
                     raise SwitchError(plan.reason)
                 if plan.action != "wait":
@@ -382,7 +382,7 @@ class Scheduler:
             elif c.spec.uses_gpu and self.gpu_resident not in (None, name):
                 raise SwitchError(f"{self.comps[self.gpu_resident].spec.label} が GPU を使っています。「準備」で切り替えてください")
             if c.spec.uses_gpu:
-                self._note_baseline()
+                self._note_baseline(name)
             await self._admit(c, op)
             op.add("起動しました")
 
@@ -402,7 +402,6 @@ class Scheduler:
                 op.done = True
 
     async def _stop_impl(self, c: Component, op: Operation) -> None:
-        name = c.spec.name
         async with self._lock_for(c):
             if c.external:
                 raise SwitchError(f"{c.spec.label} は外部で動いているため、ここからは停止しません")
@@ -458,15 +457,16 @@ class Scheduler:
         self._check_alive(c)
         return c.spec.name in self.residents and c.state == "ready"
 
-    def plan(self, name: str) -> Plan:
-        """部品 name を ready にするときの見通し(何も変えない)。JobRunner が仕事を始めてよいかの判断と、強化 API が載せてよいかの判断に使う。"""
+    def plan(self, name: str, admitting: bool = False) -> Plan:
+        """部品 name を ready にするときの見通し(何も変えない)。JobRunner が仕事を始めてよいかの判断と、強化 API が載せてよいかの判断に使う。
+        admitting は、ロックを持って実際に載せる直前の判定(share の _ensure_share)。仕事を割り当てただけでまだ載っていない部品の予算は数えない。"""
         c = self.comps[name]
         if not c.spec.uses_gpu:
             return Plan("ready")
         for n in list(self.residents):           # 落ちた部品の予算を押さえたままにしない
             if n in self.comps:
                 self._check_alive(self.comps[n])
-        return self._plan_share(c) if self.mode == "share" else self._plan_exclusive(c)
+        return self._plan_share(c, admitting) if self.mode == "share" else self._plan_exclusive(c)
 
     def _plan_exclusive(self, c: Component) -> Plan:
         name = c.spec.name
@@ -480,13 +480,16 @@ class Scheduler:
             return Plan("evict", victims=[res], needs={res})
         return Plan("fit")
 
-    def _plan_share(self, c: Component) -> Plan:
+    def _plan_share(self, c: Component, admitting: bool = False) -> Plan:
         name = c.spec.name
         if name in self.residents and c.state == "ready":
             return Plan("ready")
         cap, need = self.capacity_mib(), self._budget_of(c)
         held = {n: self._budget_of(self.comps[n]) for n in self.residents if n != name and n in self.comps}
-        for n in self._busy:          # 仕事を割り当てた(まだ載っていない)部品も、載るつもりで予算を押さえる
+        # 仕事を割り当てた(まだ載っていない)部品も、載るつもりで予算を押さえる(後から来た仕事を割り当てすぎないように)。ただし載せる直前の判定
+        # (admitting)では数えない: 載せるのはロックで 1 つずつなので、まだ載っていない部品は自分の番に、載った部品を見て判定する。数えると、割り当てた後に
+        # 容量が縮んだとき(他のアプリが VRAM を使った)、まだ載っていない 2 つの仕事が互いを「生成中」と見て、どちらも載らずに待ち続けていた
+        for n in (() if admitting else self._busy):
             if n != name and n not in held and n in self.comps and self.comps[n].spec.uses_gpu:
                 held[n] = self._budget_of(self.comps[n])
         pinned = [n for n in held if self._pinned(self.comps[n])]
@@ -530,6 +533,12 @@ class Scheduler:
 
     # ---- 内部 ----
 
+    def check_alive(self, name: str) -> None:
+        """部品 name(自分で起動したもの)が落ちていたら stopped に戻す。ensure を通らない使い方(TTS が「ready なら ensure を飛ばす」)の前に呼ぶ。"""
+        c = self.comps.get(name)
+        if c is not None:
+            self._check_alive(c)
+
     def _check_alive(self, c: Component) -> None:
         """自分で起動した部品が落ちていたら stopped に戻す。"""
         if c.proc is not None and not c.external and not procman.is_alive(c.proc):
@@ -538,9 +547,12 @@ class Scheduler:
             if c.state in ("ready", "unloaded", "starting"):
                 self._set(c, "stopped")
 
-    def _note_baseline(self) -> None:
-        """どの GPU 部品も載っていない今の VRAM 使用量を、空き確認の基準として覚える。"""
+    def _note_baseline(self, target: str = None) -> None:
+        """どの GPU 部品も載っていない今の VRAM 使用量を、空き確認の基準として覚える。target(いま載せようとしている部品)以外の GPU 部品に
+        仕事を割り当ててある間は測り直さない(その仕事は今の基準の容量で割り当てたので、ここで容量が縮むと、その仕事が載れなくなる)。"""
         gpu = self.monitor.snapshot().get("gpu") if self.monitor else None
+        if any(n != target and n in self.comps and self.comps[n].spec.uses_gpu for n in self._busy):
+            return
         if gpu and self.gpu_resident is None and not any(
                 c.state in ("starting", "ready") and c.spec.uses_gpu for c in self.comps.values()):
             self.baseline_mib = gpu["used_mib"]
@@ -571,15 +583,35 @@ class Scheduler:
             code = await http_post(spec.base_url + spec.unload_path, timeout=120)
             if code == 409:
                 raise Busy("生成中の部品があるので切り替えられません")
-            if code is None or code >= 300:
+            if code is None and await self._gone(c):
+                self._forget(c, op)
+            elif code is None or code >= 300:
                 raise SwitchError(f"{spec.label} の unload に失敗しました(HTTP {code})", procman.log_tail(spec.name, 20))
-            self._set(c, "unloaded")
-        else:
-            if c.external:
+            else:
+                self._set(c, "unloaded")
+        elif c.external:
+            if not await self._gone(c):
                 raise SwitchError(self._external_refusal(spec))
+            self._forget(c, op)
+        else:
             await self._stop_process(c, op)
         self.residents.pop(spec.name, None)
         await self._wait_gpu_free(op, keep_mib=self._held_mib())
+
+    async def _gone(self, c: Component) -> bool:
+        """部品のプロセスがもう無いか: 準備確認の URL が応答せず、自分で起動したものならプロセスも終わっている(外部のものはプロセスを見られない)。
+        外部で動いていた部品が閉じられると、常駐の記録が残ったまま unload が届かず、他の部品の仕事がすべて失敗し続けていた。"""
+        if not c.external and procman.is_alive(c.proc):
+            return False          # 応答しなくても、生きているプロセスは VRAM を持っているかもしれない(今までどおり失敗にする)
+        status, _ = await http_get_json(c.spec.health_url)
+        return status is None
+
+    def _forget(self, c: Component, op: Operation) -> None:
+        """もう動いていない部品を、止まったものとして扱う(常駐から外し、外部の印も外す。次に使うときは管理役が起動し直す)。"""
+        op.add(f"{c.spec.label} はもう動いていないので、止まったものとして扱います")
+        c.proc, c.external, c.budget_mib = None, False, None
+        self.residents.pop(c.spec.name, None)
+        self._set(c, "stopped")
 
     async def _stop_process(self, c: Component, op: Operation) -> None:
         op.add(f"{c.spec.label} を停止しています")

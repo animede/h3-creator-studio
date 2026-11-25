@@ -7,6 +7,11 @@
 // 時間はすべて「プロジェクトの秒」: クリップをつないだだけの時間軸(境目の効果で縮む前)。state の形は docs/SPEC.md 第 4 版 §1。
 const EDIT_LOGIC = (() => {
   const EPS = 0.0005;
+  // サーバ(studio/editclip.py)と同じ決まり: クリップの最短 MIN_CLIP_S(これより短い切れ端は作らない。境目からこれ以内の挿入は境目に寄せる)と、
+  // 時刻・長さの比べの許容 E3(効果の区間は、これより長いものだけ残す)。合わせないと、組み立てた state をサーバが断る
+  const MIN_CLIP_S = 0.1, E3 = 1e-3;
+  const longEnough = (d) => d >= MIN_CLIP_S - 1e-6;           // 切れ端として残せる長さか(画像はサーバが 0.1 秒ちょうどから受けるので、許容は付けない)
+  const keepFx = (e) => e.start == null || e.end == null || e.end - e.start > E3 + 1e-6;      // 1 ミリ秒以下の効果は外す(サーバが「終了は開始より後に」で断る)
   const r3 = (x) => Math.round(x * 1000) / 1000;
   const floor3 = (x) => Math.floor(x * 1000 + 1e-6) / 1000;
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -29,51 +34,70 @@ const EDIT_LOGIC = (() => {
     return n;
   }
 
-  // 時刻 t で、そこを含むクリップを 2 つに分ける(境目の効果は、分けたところには付かない = cut)。戻り: { state, at: t より前のクリップの数 }
+  // クリップの境目の時刻(先頭 0、各クリップの始まり、末尾 = 全体の長さ)と、時刻 t にいちばん近い境目の添字(同じ近さなら前のもの)
+  const bounds = (clips) => [...timeline(clips).map((x) => x.start), total(clips)];
+  const nearest = (bs, t) => bs.reduce((k, x, i) => (Math.abs(x - t) < Math.abs(bs[k] - t) ? i : k), 0);
+
+  // 時刻 t で、そこを含むクリップを 2 つに分ける(境目の効果は、分けたところには付かない = cut)。
+  // サーバの split_at と同じく、両側が MIN_CLIP_S 以上残るときだけ分ける(境目の近く・範囲の外は分けない)。戻り: { state, at: 分けた・寄せた境目の添字 = その前のクリップの数 }
   function splitAt(state, t) {
     const s = clone(state), tl = timeline(s.clips);
     for (let i = 0; i < tl.length; i++) {
-      if (t > tl[i].start + EPS && t < tl[i].end - EPS) {
+      if (t >= tl[i].start + MIN_CLIP_S - E3 && t <= tl[i].end - MIN_CLIP_S + E3) {
         const c = s.clips[i], off = r3(t - tl[i].start);
         s.clips.splice(i, 1, piece(c, 0, off), piece(c, off, clipLen(c)));
         s.transitions = (s.transitions || []).map((x) => (x.after >= i ? { ...x, after: x.after + 1 } : x));
         return { state: s, at: i + 1 };
       }
     }
-    return { state: s, at: tl.filter((x) => x.end <= t + EPS).length };
+    return { state: s, at: nearest(bounds(s.clips), t) };
   }
 
-  // 区間 [a, b] を削除して前後をつなぐ。かかるクリップは分けて、区間の外の部分だけを残す。
-  // 残る境目の効果は付け替え(区間の中や、区間の端に触れた境目は消えて cut)、効果の区間(秒)は削った分だけ詰める。
+  // 区間 [a, b] を削除して前後をつなぐ。かかるクリップは分けて、区間の外の部分だけを残す(サーバの delete_range と同じ: MIN_CLIP_S に満たない切れ端は残さない)。
+  // 残る境目の効果は、両側のクリップが元のままつながるものだけ付け替え(区間の中や、区間の端に触れた境目は消えて cut)、効果の区間(秒)は削った分だけ詰める。
   function deleteRange(state, a, b) {
     const tot = total(state.clips);
     a = Math.max(0, r3(a));
     b = Math.min(tot, r3(b));
     if (!(b - a > EPS)) throw new Error("区間の終了は、開始より後にしてください");
-    const s = clone(state), tl = timeline(s.clips), out = [], map = {};
+    const s = clone(state), tl = timeline(s.clips), tr = {}, pieces = [];      // pieces: { clip, idx(元の添字), head(先頭が元のまま), tail(末尾が元のまま) }
+    for (const x of s.transitions || []) if (x.type !== "cut") tr[x.after] = x;
     tl.forEach((x, i) => {
       const c = s.clips[i];
-      if (a - x.start > EPS) out.push(piece(c, 0, Math.min(x.end, a) - x.start));
-      if (x.end - Math.max(x.start, b) > EPS) out.push(piece(c, Math.max(x.start, b) - x.start, x.end - x.start));
-      if (x.end < a - EPS || x.end > b + EPS) map[i] = out.length - 1;      // 後ろの端がそのまま残る境目
+      if (Math.min(x.end, b) - Math.max(x.start, a) < E3) { pieces.push({ clip: c, idx: i, head: true, tail: true }); return; }      // 区間にかからない
+      if (longEnough(a - x.start)) pieces.push({ clip: piece(c, 0, a - x.start), idx: i, head: true, tail: false });
+      if (longEnough(x.end - b)) pieces.push({ clip: piece(c, b - x.start, x.end - x.start), idx: i, head: false, tail: true });
     });
-    s.clips = out;
-    s.transitions = (s.transitions || []).filter((x) => x.after in map).map((x) => ({ ...x, after: map[x.after] }));
+    s.clips = pieces.map((p) => p.clip);
+    s.transitions = pieces.flatMap((p, k) => {
+      const t = tr[p.idx], nxt = pieces[k + 1];
+      return t && p.tail && nxt && nxt.idx === p.idx + 1 && nxt.head ? [{ ...t, after: k }] : [];
+    });
     const d = b - a, mp = (t) => (t <= a ? t : t >= b ? t - d : a);
-    s.effects = (s.effects || []).map((e) => (e.start == null || e.end == null ? e : { ...e, start: r3(mp(e.start)), end: r3(mp(e.end)) }))
-      .filter((e) => e.start == null || e.end == null || e.end - e.start > EPS);
+    s.effects = (s.effects || []).map((e) => (e.start == null || e.end == null ? e : { ...e, start: r3(mp(e.start)), end: r3(mp(e.end)) })).filter(keepFx);
     return s;
   }
 
-  // 時刻 t にクリップ clip を挿入する(t を含むクリップは分ける)。t の位置の境目の効果は消え(cut)、後ろの境目は 1 つずれ、効果の区間は挿入した分だけ後ろへずれる
+  // 時刻 t にクリップ clip を挿入する(サーバの insert_at と同じ: 境目から MIN_CLIP_S 以内ならその境目に、そうでなければ t を含むクリップを分けて入れる)。
+  // 入れた位置の境目の効果は消え(cut)、後ろの境目は 1 つずれ、効果の区間は挿入した分だけ後ろへずれる
   function insertAt(state, t, clip) {
-    const sp = splitAt(state, Math.max(0, Math.min(t, total(state.clips)))), s = sp.state, b = sp.at, len = clipLen(clip);
-    const tl = timeline(s.clips);
-    const p = b < tl.length ? tl[b].start : total(s.clips);
+    const len = clipLen(clip);
+    if (!longEnough(len)) throw new Error(`挿入するクリップは短すぎます(${MIN_CLIP_S} 秒以上にしてください)`);
+    t = Math.max(0, Math.min(Number(t), total(state.clips)));
+    let base = state, bs = bounds(state.clips);
+    let near = bs.map((x, i) => (Math.abs(t - x) < MIN_CLIP_S - E3 ? i : -1)).filter((i) => i >= 0);
+    if (!near.length) {
+      base = splitAt(state, t).state;
+      bs = bounds(base.clips);
+      near = [nearest(bs, t)];
+    }
+    const first = near[0], last = near[near.length - 1];
+    const b = Math.abs(t - bs[first]) <= Math.abs(t - bs[last]) ? first : last, p = bs[b];
+    const s = clone(base);
     s.clips.splice(b, 0, clip);
     s.transitions = (s.transitions || []).filter((x) => x.after !== b - 1).map((x) => (x.after >= b ? { ...x, after: x.after + 1 } : x));
     s.effects = (s.effects || []).map((e) => (e.start == null || e.end == null ? e
-      : { ...e, start: r3(e.start >= p ? e.start + len : e.start), end: r3(e.end > p ? e.end + len : e.end) }));
+      : { ...e, start: r3(e.start >= p - E3 ? e.start + len : e.start), end: r3(e.end > p + E3 ? e.end + len : e.end) }));
     return s;
   }
 
@@ -88,12 +112,13 @@ const EDIT_LOGIC = (() => {
     const s = clone(state), c = s.clips[i];
     if (c.kind === "image") {
       const d = r3(patch.duration);
-      if (!(d >= 0.1)) throw new Error("画像の秒数は 0.1 以上にしてください");
+      if (!longEnough(d)) throw new Error(`画像の秒数は ${MIN_CLIP_S} 以上にしてください`);
       c.in = 0; c.out = d; c.duration = d;
     } else {
       const a = r3(patch.in != null ? patch.in : c.in), b = r3(patch.out != null ? patch.out : c.out);
       if (!(a >= 0)) throw new Error("in は 0 以上にしてください");
-      if (!(b - a >= 0.05)) throw new Error("out は、in より後にしてください");
+      if (!(b > a)) throw new Error("out は、in より後にしてください");
+      if (!longEnough(b - a)) throw new Error(`クリップは ${MIN_CLIP_S} 秒以上にしてください(out − in)`);
       if (length != null && b > length + EPS) throw new Error(`out は、元の長さ(${r3(length)} 秒)までです`);
       c.in = a; c.out = b;
       if ("duration" in c) c.duration = r3(b - a);
@@ -124,7 +149,8 @@ const EDIT_LOGIC = (() => {
     return s;
   }
 
-  // 操作のあとの整え: 範囲から外れた境目の効果・短すぎて付けられなくなった効果を外し、効果の区間を全体の長さに収める(収まらない・空になったものは外す)
+  // 操作のあとの整え: 範囲から外れた境目の効果・短すぎて付けられなくなった効果を外し、効果の区間を全体の長さに収める(収まらない・空になったものは外す)。
+  // 先頭・末尾のフェードは、合わせて書き出しの長さ(境目の効果で縮んだ後)に収める(サーバの検証と同じ。先頭を優先して、末尾を縮める)
   function fixup(state) {
     const s = clone(state), n = s.clips.length, tot = total(s.clips);
     s.transitions = (s.transitions || []).filter((x) => x.type !== "cut" && x.after >= 0 && x.after < n - 1).flatMap((x) => {
@@ -133,10 +159,18 @@ const EDIT_LOGIC = (() => {
       return d >= 0.5 ? [{ ...x, duration: r3(d) }] : [];
     });
     s.effects = (s.effects || []).map((e) => (e.start == null || e.end == null ? e : { ...e, start: Math.min(e.start, tot), end: Math.min(e.end, tot) }))
-      .filter((e) => e.start == null || e.end == null || e.end - e.start > EPS);
-    s.fade_in = Math.min(s.fade_in || 0, tot);
-    s.fade_out = Math.min(s.fade_out || 0, tot);
+      .filter(keepFx);
+    const out = exportLength(s);
+    s.fade_in = r3(Math.min(Math.max(0, s.fade_in || 0), out));
+    s.fade_out = r3(Math.min(Math.max(0, s.fade_out || 0), Math.max(0, out - s.fade_in)));
     return s;
+  }
+
+  // 書き出しの長さ(つないだだけの長さから、境目の効果で重なる分を引いたもの。サーバの export_duration と同じ)
+  function exportLength(state) {
+    const n = state.clips.length;
+    const over = (state.transitions || []).filter((x) => x.type !== "cut" && x.after >= 0 && x.after < n - 1).reduce((a, x) => a + Number(x.duration || 0), 0);
+    return Math.max(0, r3(total(state.clips) - over));
   }
 
   // 書き出しの時間軸(境目の効果で縮んだ後): 各クリップの始まり。crossfade / fadeblack は xfade なので、その秒数だけ後ろのクリップが前に食い込む
@@ -169,7 +203,7 @@ const EDIT_LOGIC = (() => {
     return r3(tl[j].start + Math.max(0, Math.min(p - starts[j], tl[j].end - tl[j].start)));
   }
 
-  return { r3, clone, clipLen, timeline, total, splitAt, deleteRange, insertAt, newClip, setClip, moveClip, setTransition, fixup, outStarts, tlToOut, outToTl };
+  return { r3, clone, clipLen, timeline, total, splitAt, deleteRange, insertAt, newClip, setClip, moveClip, setTransition, fixup, exportLength, outStarts, tlToOut, outToTl };
 })();
 
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
@@ -200,14 +234,17 @@ const EDIT_LOGIC = (() => {
   let current = null;               // 選んでいるプロジェクトの ID
   let view = null;                  // その view(サーバの答えのまま)
   let timer = null;
-  let working = false;              // 操作を送っている最中(この間は次の操作を受けない)
+  let working = false;              // 操作を送っている最中、または送る操作が並んでいる(この間は、2 秒おきの読み直しで表示を戻さない)
   let gen = 0;                      // 操作の世代。古い通信の答えで、新しい表示を上書きしない
   let insItem = null;               // 挿入待ちの動画・画像(生成物のレコード)
+  let rangeCleared = false;         // 「クリア」で区間を消した(次の操作のあとも、プロジェクトが変わるまでは区間を入れ直さない)
+  const errShown = new Map(), jobKinds = new Map();      // プロジェクトの ID -> 出したジョブの失敗の理由(同じ失敗を 2 秒おきに出し直さない)/ 最後に見たジョブの種類
   const songs = {};                 // 曲の ID -> 生成物のレコード(ギャラリーに載る前の取り込みでも名前を出せるように)
   let opsSig = "", rulerSig = "", cardsSig = "", shownPreview = null, shownOutput = null, playerFor = null;
   const api = apiJson;              // JSON の API(web/project.js)
 
   const f = (x) => String(Math.round(x * 100) / 100);
+  const f3 = (x) => String(Math.round(x * 1000) / 1000);         // 区間の欄は小数 3 桁(クリップの長さは 3 桁なので、2 桁に丸めると境目・末尾からずれる)
   const num = (input) => parseFloat(input.value);
   const mmss = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
   const totalTl = () => (view ? L.total(view.state.clips) : 0);
@@ -243,10 +280,10 @@ const EDIT_LOGIC = (() => {
 
   // 開いているプロジェクトを、表示を消さずに読み直す(タブに戻ったとき。別のところで進んだジョブも拾う)
   async function reload() {
-    const id = current;
+    const id = current, g = gen;
     try {
       const v = await api(`/api/edit/${id}`);
-      if (current === id && !working) setView(v);
+      if (g === gen && current === id && !working) setView(v);       // 待っている間に操作した・別のプロジェクトを開いたなら、古い答えで戻さない
     } catch (e) { /* 次に開いたとき */ }
   }
 
@@ -328,30 +365,47 @@ const EDIT_LOGIC = (() => {
 
   // ---- 操作の送信: state を作って PUT、続けてプレビュー ----
 
-  // fn(id) は view を返す通信。終わったら view を入れ替え(undo / redo / state の変更)、previewAfter ならプレビューを作らせる
-  async function work(fn, previewAfter = true) {
-    if (!view || working) return;
+  // 操作は 1 つずつ順に送る。前の操作の答えを待っている間に来た操作(ギャラリーで続けてクリックした・取り込みが終わったなど)は、捨てずに後ろに並べる。
+  // fn(id) は view を返す通信。終わったら view を入れ替え(undo / redo / state の変更)、previewAfter ならプレビューを作らせる。
+  // 戻り値は、サーバが受けたか(true / false)の Promise。並べたあとに別のプロジェクトを開いたら、その操作は送らない
+  let queue = Promise.resolve(), queued = 0, failedInRow = false;
+  function work(fn, previewAfter = true) {
+    if (!view) return Promise.resolve(false);
     const id = view.id;
+    queued++;
     working = true;
-    gen++;
-    showMsg("");
     renderFoot();
+    queue = queue.then(() => runWork(id, fn, previewAfter)).catch(() => false);
+    return queue;
+  }
+
+  async function runWork(id, fn, previewAfter) {
+    let ok = false;
     try {
+      if (!view || view.id !== id || current !== id) return false;
+      gen++;
+      if (!failedInRow) showMsg("");          // 続けて並んだ操作の途中で失敗したら、その理由は消さずに残す
+      renderFoot();
       const v = await fn(id);
-      if (current !== id) return;
+      if (current !== id) return false;
+      ok = true;
       setView(v);
       if (previewAfter && v.state.clips.length) {
         try { if (current === id) setView(await api(`/api/edit/${id}/preview`, "POST")); }
         catch (e) { showMsg(`プレビューを作れませんでした: ${errText(e)}`); }
       }
     } catch (e) {
+      failedInRow = true;
       showMsg(errText(e));
       renderOps(true);          // 入力欄を、いまの state の値に戻す
     } finally {
-      working = false;
+      queued--;
+      working = queued > 0;
+      if (!working) failedInRow = false;
       renderFoot();
       loadList();
     }
+    return ok;
   }
 
   // build(view) は新しい state を返す(または throw)。整えてから送る
@@ -361,24 +415,28 @@ const EDIT_LOGIC = (() => {
 
   // ---- 区間 ----
 
-  // 開始・終了(秒)。誤りは Error
+  // 開始・終了(秒)。誤りは Error。終了が全体の長さの 0.01 秒手前より後なら、末尾まで(2 桁で入れた末尾から、切れ端を残さない)
   function getRange() {
     const a = num(ed("start")), b = num(ed("end")), tot = totalTl();
     if (!(a >= 0) || !(b > a)) throw new Error("区間は、開始 < 終了(秒)で入れてください");
     if (a >= tot) throw new Error(`開始は、全体の長さ(${f(tot)} 秒)より前にしてください`);
-    return [a, Math.min(b, tot)];
+    return [a, b > tot - 0.01 ? tot : b];
   }
 
+  // 区間の欄を、いまの全体の長さに合わせる(reset = プロジェクトが変わった: 全体にする)。「クリア」した後は、プロジェクトが変わるまで空のまま
   function renderRange(reset) {
     const tot = totalTl();
-    let a = num(ed("start")), b = num(ed("end"));
-    if (reset || !(a >= 0)) a = 0;
-    if (a > tot) a = 0;
-    if (reset || !(b > 0) || b > tot || b <= a) b = tot;
-    ed("start").value = f(a);
-    ed("end").value = f(b);
-    ed("start").max = ed("end").max = f(tot);
-    ed("range-note").textContent = view ? `全体 ${f(tot)} 秒(つないだだけの長さ)` : "";
+    if (reset) rangeCleared = false;
+    if (!rangeCleared) {
+      let a = num(ed("start")), b = num(ed("end"));
+      if (reset || !(a >= 0)) a = 0;
+      if (a > tot) a = 0;
+      if (reset || !(b > 0) || b > tot || b <= a) b = tot;
+      ed("start").value = f3(a);
+      ed("end").value = f3(b);
+    }
+    ed("start").max = ed("end").max = f3(tot);
+    ed("range-note").textContent = view ? `全体 ${f3(tot)} 秒(つないだだけの長さ)` : "";
     renderSel();
   }
 
@@ -391,15 +449,19 @@ const EDIT_LOGIC = (() => {
     sel.hidden = false;
     sel.style.left = `${Math.min(100, x / dur * 100)}%`;
     sel.style.width = `${Math.max(0.3, Math.min(100 - x / dur * 100, (y - x) / dur * 100))}%`;
-    ed("sel-text").textContent = `区間 ${f(a)}〜${f(b)} 秒`;
+    ed("sel-text").textContent = `区間 ${f3(a)}〜${f3(b)} 秒`;
   }
-  ed("start").oninput = ed("end").oninput = renderSel;
-  ed("start").onchange = ed("end").onchange = renderSel;
+  const typedRange = () => { rangeCleared = false; renderSel(); };      // 自分で入れたら、「クリア」の印は外す
+  ed("start").oninput = ed("end").oninput = typedRange;
+  ed("start").onchange = ed("end").onchange = typedRange;
 
-  // プレビューの再生位置(書き出しの秒)を、プロジェクトの秒にして入れる
+  // プレビューの再生位置(書き出しの秒)を、プロジェクトの秒にして入れる。もう一方の欄が空(クリアの後)なら、開始は 0・終了は末尾にする
   function fromPlayer(field) {
     if (!view) return;
-    ed(field).value = f(L.outToTl(view.state, ed("video").currentTime || 0));
+    rangeCleared = false;
+    ed(field).value = f3(L.outToTl(view.state, ed("video").currentTime || 0));
+    const other = field === "start" ? "end" : "start";
+    if (!(num(ed(other)) >= 0)) ed(other).value = f3(other === "end" ? totalTl() : 0);
     renderSel();
   }
   // 1 コマずつ動かす(プロジェクトの fps。止めてから、いまの位置 ± 1/fps へ)
@@ -430,8 +492,8 @@ const EDIT_LOGIC = (() => {
   ed("next").onclick = () => stepFrame(1);
   ed("from").onclick = ed("from2").onclick = () => fromPlayer("start");       // 左の欄と、右のプレビューの下の両方にある
   ed("to").onclick = ed("to2").onclick = () => fromPlayer("end");
-  ed("all").onclick = () => { ed("start").value = "0"; ed("end").value = f(totalTl()); renderSel(); };
-  ed("clear").onclick = ed("clear2").onclick = () => { ed("start").value = ""; ed("end").value = ""; renderSel(); };      // 区間を消す(左の欄と、プレビューの下の両方にある)
+  ed("all").onclick = () => { rangeCleared = false; ed("start").value = "0"; ed("end").value = f3(totalTl()); renderSel(); };
+  ed("clear").onclick = ed("clear2").onclick = () => { rangeCleared = true; ed("start").value = ""; ed("end").value = ""; renderSel(); };      // 区間を消す(左の欄と、プレビューの下の両方にある)
 
   // ---- 操作 ----
 
@@ -478,18 +540,13 @@ const EDIT_LOGIC = (() => {
     body.append(row);
   }
 
-  ed("ins-go").onclick = () => {
+  ed("ins-go").onclick = async () => {
     if (!insItem) return;
     const item = insItem, at = num(ed("start")), sec = num(ed("ins-sec"));
     if (!(at >= 0)) { showMsg("挿入する位置を、開始(秒)に入れてください"); return; }
     if (item.kind === "image" && !(sec >= 0.5)) { showMsg("画像の秒数は 0.5 以上にしてください"); return; }
-    mutate(async (v) => {
-      const clip = L.newClip({ ...(await probe(item)), id: item.id }, sec);
-      const s = L.insertAt(v.state, at, clip);
-      insItem = null;
-      renderIns();
-      return s;
-    });
+    const ok = await mutate(async (v) => L.insertAt(v.state, at, L.newClip({ ...(await probe(item)), id: item.id }, sec)));
+    if (ok && insItem === item) { insItem = null; renderIns(); }      // サーバが受けてから外す(断られたら、そのままもう一度押せる)
   };
 
   // 色調(fx: 見た目を選ぶ、値なし)・調整(adj: 値を決める)・選択区間の効果(rng: 区間が必須)。どれも同じ effects に積む
@@ -551,13 +608,13 @@ const EDIT_LOGIC = (() => {
     const box = ed("fx-list");
     box.replaceChildren();
     const list = view ? view.state.effects || [] : [];
-    if (!list.length) { box.append(el("div", "note", "色調はまだ付けていません")); return; }
+    if (!list.length) { box.append(el("div", "note", "色調・調整・区間の効果は、まだ付けていません")); return; }
     list.forEach((e, i) => {
       const row = el("div", "edfxrow");
       row.append(el("span", `edfxdot fx-${e.type}`), el("span", "edname", fxText(e)));
       const x = el("button", "rdel", "×");
       x.type = "button";
-      x.title = "この色調を外す";
+      x.title = "この効果を外す";
       x.onclick = () => mutate((v) => { const s = L.clone(v.state); s.effects.splice(i, 1); return s; });
       row.append(x);
       box.append(row);
@@ -663,7 +720,7 @@ const EDIT_LOGIC = (() => {
     } catch (e) { showMsg(`取り込めませんでした: ${errText(e)}`); }
   }
 
-  const active = () => studio.tab === "edit" && !!view && !working;
+  const active = () => studio.tab === "edit" && !!view;      // 操作の途中に落としたものも受ける(後ろに並ぶ)
   wireDrop(ed("clips-drop"), { active, msg: showMsg, onItem: (it) => addItems([it]), onFiles: (files) => upload(files, ed("clips-drop"), ["video", "image"], "動画・画像", addItems) });
   wireDrop(ed("ins-drop"), { active, msg: showMsg, onItem: setIns, onFiles: (files) => upload(files, ed("ins-drop"), ["video", "image"], "動画・画像", (recs) => setIns(recs[0])) });
   wireDrop(ed("song"), { active, msg: showMsg, onItem: setSong, onFiles: (files) => upload(files, ed("song"), ["audio"], "音声", (recs) => setSong(recs[0])) });
@@ -742,7 +799,8 @@ const EDIT_LOGIC = (() => {
   }
 
   function renderPlayer() {
-    const vid = ed("video"), pv = view && view.preview, job = view && view.job;
+    const vid = ed("video"), job = view && view.job;
+    const pv = view && view.state.clips.length ? view.preview : null;      // クリップを全部外したら、前のプレビュー(と「古い版です」)は出さない
     const url = pv ? pv.url : null;
     const pid = view ? view.id : null;
     if (playerFor !== pid) { playerFor = pid; shownPreview = null; vid.removeAttribute("src"); vid.load(); }      // 別のプロジェクト: 前のプレビューを外す
@@ -773,6 +831,17 @@ const EDIT_LOGIC = (() => {
     ed("stale").hidden = !(stale || (!url && view && view.state.clips.length && !job));
     ed("stale").firstChild.textContent = stale ? "プレビューは古い版です " : "プレビューがありません ";
     updateTime();
+  }
+
+  // 最後のジョブ(プレビュー・書き出し)の失敗の理由(view.error)を、失敗ごとに 1 回だけ出す。ジョブが走り出したら、次の失敗をまた出せるようにする
+  function renderError() {
+    if (!view) return;
+    if (view.job) { errShown.delete(view.id); jobKinds.set(view.id, view.job.kind); return; }
+    if (!view.error || errShown.get(view.id) === view.error) return;
+    errShown.set(view.id, view.error);
+    const kind = jobKinds.get(view.id);
+    const what = kind === "edit.export" ? "書き出し" : kind === "edit.preview" ? "プレビューの作成" : "プレビューの作成・書き出し";
+    showMsg(`${what}に失敗しました: ${view.error}`);
   }
   ed("regen").onclick = () => work(async (id) => api(`/api/edit/${id}/preview`, "POST"), false);
 
@@ -899,6 +968,7 @@ const EDIT_LOGIC = (() => {
     const sig = view ? JSON.stringify([view.id, view.state, view.duration, view.clips.map((c) => c.filename)]) : "";
     if (sig !== rulerSig) { rulerSig = sig; renderRuler(); }
     renderPlayer();
+    renderError();
     renderOutput();
     renderFoot();
     renderProjSelect();
@@ -925,7 +995,10 @@ const EDIT_LOGIC = (() => {
       try {
         const v = await api(`/api/edit/${id}`);
         if (g === gen && current === id && !working) setView(v);       // 操作の途中や、操作が済んだあとの古い答えでは、表示を戻さない
-      } catch (e) { /* 次の周で再試行 */ }
+      } catch (e) {
+        if (e && e.status === 404) { if (current === id) refresh(); return; }      // 別の画面・API で消された: 読み直すのをやめ、一覧から開き直す
+        /* それ以外(一時的な通信失敗)は次の周で再試行 */
+      }
       if (current === id && studio.tab === "edit") schedule();
     }, POLL_MS);
   }

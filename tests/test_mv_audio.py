@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 import wave
@@ -333,14 +334,31 @@ class WrapperTest(unittest.IsolatedAsyncioTestCase):
 # ---- ffmpeg(偽の ffmpeg で引数を確かめる) ----
 
 class FakeFfmpeg:
+    """subprocess.Popen の代わり(_run_ffmpeg が使う口だけ)。引数を残し、成功なら出力先に書く。"""
+
     def __init__(self, rc=0, stderr=b"", write=True):
-        self.rc, self.stderr, self.write, self.calls = rc, stderr, write, []
+        self.rc, self.stderr, self.write, self.calls, self.timeouts = rc, stderr, write, [], []
 
     def __call__(self, argv, **kw):
         self.calls.append((list(argv), kw))
-        if self.rc == 0 and self.write:
-            Path(argv[-1]).write_bytes(b"RIFFdata")
-        return subprocess.CompletedProcess(argv, self.rc, b"", self.stderr)
+        fake = self
+
+        class Proc:
+            pid, returncode = 999999, None
+
+            def communicate(self, timeout=None):
+                fake.timeouts.append(timeout)
+                if fake.rc == 0 and fake.write:
+                    Path(argv[-1]).write_bytes(b"RIFFdata")
+                self.returncode = fake.rc
+                return b"", fake.stderr
+
+            def poll(self):
+                return self.returncode
+
+            def kill(self):
+                pass
+        return Proc()
 
 
 class FfmpegArgsTest(unittest.IsolatedAsyncioTestCase):
@@ -354,7 +372,7 @@ class FfmpegArgsTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(p.stop)
 
     def run_with(self, fake):
-        return mock.patch.object(mv_audio.subprocess, "run", fake)
+        return mock.patch.object(mv_audio.subprocess, "Popen", fake)
 
     async def test_normalize_command_and_atomic_result(self):
         fake = FakeFfmpeg()
@@ -414,6 +432,41 @@ class FfmpegArgsTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(mv_audio.media, "_tool", return_value=None), self.assertRaises(mv_audio.MvAudioError) as cm:
             await mv_audio.normalize(self.src, self.dst)
         self.assertIn("ffmpeg が見つかりません", cm.exception.message)
+
+
+class StoppableFfmpegTest(unittest.IsolatedAsyncioTestCase):
+    """ffmpeg の代わりに眠るだけの子プロセスで、取り消し(ジョブの中止・管理役の停止)と時間切れで止まることを確かめる。"""
+
+    SLEEPER = [sys.executable, "-c", "import os, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"]
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = Path(self._t.name)
+
+    async def test_cancel_kills_the_process_and_leaves_no_partial_file(self):
+        pidfile, dst = self.root / "pid", self.root / "out.mp4"
+        task = asyncio.create_task(mv_audio.run_ffmpeg([*self.SLEEPER, str(pidfile)], dst, "結合"))
+        for _ in range(500):
+            if pidfile.is_file() and pidfile.read_text():
+                break
+            await asyncio.sleep(0.01)
+        t0 = time.monotonic()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertLess(time.monotonic() - t0, 5)
+        self.assertFalse(psutil.pid_exists(int(pidfile.read_text())))         # 止めて、片づけ(wait)まで済んでいる
+        self.assertEqual(list(self.root.glob("*.part")), [])
+
+    async def test_timeout_stops_the_process(self):
+        with self.assertRaises(mv_audio.MvAudioError) as cm:
+            await asyncio.to_thread(mv_audio._run_ffmpeg, [*self.SLEEPER, str(self.root / "pid")], self.root / "out.mp4", "テロップの焼き込み", timeout=0.5)
+        self.assertIn("テロップの焼き込みが", cm.exception.message)
+        self.assertIn("超えたので止めました", cm.exception.message)
+
+    def test_timeout_scales_with_the_length(self):
+        self.assertEqual([mv_audio.ffmpeg_timeout(x) for x in (None, 0, 10, 30, 600, "x")], [600.0, 600.0, 600.0, 600.0, 12000.0, 600.0])
 
 
 def write_sine(path: Path, seconds: float, rate: int, channels: int = 1, freq: float = 440.0) -> Path:

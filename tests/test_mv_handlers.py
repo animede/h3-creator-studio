@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -224,9 +226,10 @@ class FfmpegSpy:
     def __init__(self):
         self.calls = []                # (argv, dst, what, 一覧ファイルの中身 or None)
 
-    def __call__(self, argv, dst, what):
+    def __call__(self, argv, dst, what, timeout=None, run=None):
         listing = Path(argv[argv.index("-i") + 1]) if "concat" in argv else None
         self.calls.append((list(argv), Path(dst), what, listing.read_text(encoding="utf-8") if listing is not None else None))
+        self.timeouts = [*getattr(self, "timeouts", []), timeout]       # 待つ最長(秒。結合は尺に合わせて延ばす)
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         Path(dst).write_bytes(b"ffmpeg-output")
         return Path(dst)
@@ -997,6 +1000,44 @@ class AssembleTest(HandlerBase):
         job.cancel_requested = True
         with self.assertRaises(JobCancelled):
             await mvh.run_assemble(job, self.ctx())
+
+    async def test_timeouts_follow_the_length_of_the_mv(self):
+        spy = FfmpegSpy()
+        spy.patch(self)
+        self.finished_project()
+        await mvh.run_assemble(self.job("mv.assemble"), self.ctx())
+        self.assertEqual(spy.timeouts, [mv_audio.ffmpeg_timeout(21.0)] * 2)          # 尺(21 秒)が短ければ 10 分のまま
+        self.assertEqual(mv_audio.ffmpeg_timeout(21.0), 600.0)
+        self.assertEqual(mv_audio.ffmpeg_timeout(300.0), 6000.0)                     # 5 分の動画は 100 分まで待つ
+
+    async def test_cancel_stops_a_running_ffmpeg(self):
+        # 結合の途中で中止すると、走っている ffmpeg を止める(前は中止しても、ffmpeg は最後まで走り続けた)
+        self.finished_project()
+        mp = mock.patch.object(mv_audio, "_ffmpeg", lambda: "ffmpeg")
+        mp.start()
+        self.addCleanup(mp.stop)
+        started, stopped = threading.Event(), threading.Event()
+
+        def slow(argv, dst, what, timeout=None, run=None):
+            started.set()
+            for _ in range(500):               # run.stop() まで待つ(最長 5 秒)
+                if run is not None and run.cancelled:
+                    stopped.set()
+                    raise mv_audio.MvAudioError(f"{what}を中止しました")
+                time.sleep(0.01)
+            raise AssertionError("止められなかった")
+        job = self.job("mv.assemble")
+        with mock.patch.object(mv_audio, "_run_ffmpeg", slow):
+            task = asyncio.create_task(mvh.run_assemble(job, self.ctx()))
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            job.cancel_requested = True
+            await mvh.HANDLERS["mv.assemble"].cancel(job, self.ctx())
+            with self.assertRaises(JobCancelled):
+                await asyncio.wait_for(task, 3)
+        self.assertTrue(stopped.is_set())
+        self.assertFalse((self.work() / "concat.txt").exists())
+        self.assertEqual(self.ledger.list_outputs(tab="mv"), [])
 
 
 # ---- 本物の ffmpeg で(小さい動画) ----

@@ -486,8 +486,15 @@ class MvApiTest(unittest.TestCase):
     def test_jobs_api_does_not_take_mv_jobs(self):
         """MV のジョブは Director が入れる。/api/jobs の tab に mv は増やしていない(そのまま 422)。"""
         pid = self.create()["id"]
+        before = len(self.runner.jobs)
         r = self.client.post("/api/jobs", json={"tab": "mv", "kind": "mv.analyze", "params": {"project_id": pid}})
         self.assertEqual(r.status_code, 422)
+        # tab を画像などにしても、kind で MV・ショート動画・編集のジョブ(と、知らない種類)は入れられない
+        for kind in ("mv.analyze", "mv.assemble", "short.scene", "edit.export", "edit.preview", "nope.x", "h3.unknown"):
+            r = self.client.post("/api/jobs", json={"tab": "image", "kind": kind, "params": {"project_id": pid}})
+            self.assertEqual(r.status_code, 400, kind)
+            self.assertIn("このジョブの種類は受け付けていません", r.json()["detail"], kind)
+        self.assertEqual(len(self.runner.jobs), before)                                              # どれも入っていない
 
 
 class LifespanTest(unittest.IsolatedAsyncioTestCase):
@@ -503,6 +510,9 @@ class LifespanTest(unittest.IsolatedAsyncioTestCase):
         ledger.create_mv_project("gen", "generating", {"title": "t"}, scenes, "シーン 1 / 2")
         ledger.create_mv_project("done", "completed", {"title": "t"}, [], "MV ができました")
         ledger.close()
+        part = root / "edit" / "p1" / "preview_2_0123456789abcdef.mp4.part"           # 前回の強制終了で残った作りかけ
+        part.parent.mkdir(parents=True)
+        part.write_bytes(b"half")
 
         class FakeMonitor:
             def __init__(self, rss_provider=None, generating=None):
@@ -544,6 +554,7 @@ class LifespanTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(gen["scenes"][0]["status"], "pending")
                 self.assertEqual(main.app.state.ledger.get_mv_project("done")["state"], "completed")
                 self.assertEqual(runner.jobs, {})                                      # 勝手にジョブを入れない
+                self.assertFalse(part.exists())                                        # 作りかけ(*.part)は起動時に消す
                 self.assertTrue({"mv.analyze", "mv.script", "mv.scene", "mv.assemble"} <= set(runner.handlers))
 
 

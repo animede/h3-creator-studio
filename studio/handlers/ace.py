@@ -65,7 +65,7 @@ def _opt_int(params: dict, key: str, low: int, high: int, label: str):
         return None
     try:
         v = int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f"{label}は整数で指定してください")
     if not low <= v <= high:
         raise ValueError(f"{label}は {low}〜{high} にしてください")
@@ -102,7 +102,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     duration = params.get("duration", -1)
     try:
         duration = -1 if duration in (None, "", "auto") else int(duration)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError("duration は秒数(整数)か -1(自動)で指定してください")
     if duration != -1 and not MIN_SECONDS <= duration <= MAX_SECONDS:
         raise ValueError(f"曲の長さは {MIN_SECONDS}〜{MAX_SECONDS} 秒か、自動(-1)にしてください")

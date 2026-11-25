@@ -84,6 +84,15 @@ class JobsTest(JobsBase):
         self.assertEqual(ledger.get_job(job.id)["status"], "completed")   # 終わったジョブは台帳へ
         self.assertEqual(runner.list("image")[0]["id"], job.id)
 
+    async def test_record_keeps_only_what_the_handler_chooses_in_the_ledger(self):
+        # 大きな params(編集の state の写しなど)は、台帳には要る分だけを残し、メモリのジョブには全部を持たせる
+        log = []
+        runner, ledger = self.make(FakeSched(), make_handler(log, record=lambda p: {"prompt_len": len(p["prompt"])}))
+        job = runner.submit("image", "h3image.t2i", {"prompt": "x" * 50, "big": list(range(1000))})
+        await self.wait_for(job, "completed")
+        self.assertEqual(ledger.get_job(job.id)["params"], {"prompt_len": 50})
+        self.assertEqual(len(runner.get(job.id).params["big"]), 1000)
+
     async def test_is_generating_while_running(self):
         gate = asyncio.Event()
 

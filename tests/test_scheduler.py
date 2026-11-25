@@ -158,3 +158,71 @@ class ExternalCoexistTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("同居できません", ctx.exception.message)
         self.assertIn("port", ctx.exception.message)
         self.assertEqual(fake.calls, [])
+
+    async def test_a_closed_external_ace_is_forgotten_instead_of_refused(self):
+        fake = DeadPorts({"13"})                                   # 外部の ACE は閉じられた(準備確認が応答しない)
+        s = self.make(fake, free_mib=4000)
+        await s.ensure("h3")
+        self.assertEqual(fake.calls, [("start", "h3")])
+        ace = s.comps["ace"]
+        self.assertEqual((ace.state, ace.external, ace.proc, s.gpu_resident), ("stopped", False, None, "h3"))
+
+
+class DeadPorts(Fake):
+    """指定したポートの部品は、もう動いていない(接続できない)。"""
+
+    def __init__(self, dead: set, unload_code=200):
+        super().__init__(unload_code)
+        self.dead = dead
+
+    async def get(self, url, timeout=3.0):
+        return (None, None) if url.split(":")[2].split("/")[0] in self.dead else (200, {})
+
+    async def post(self, url, timeout=30.0):
+        code = await super().post(url, timeout)
+        return None if url.split(":")[2].split("/")[0] in self.dead else code
+
+
+class ClosedExternalTest(unittest.IsolatedAsyncioTestCase):
+    """外部で動いていた部品(取り込んで常駐の記録にあるもの)が閉じられたとき、unload が届かないまま他の部品の仕事を失敗させ続けない。"""
+
+    def make(self, fake, mode="exclusive"):
+        specs = {"h3": spec("h3", port=11), "h3image": spec("h3image", port=12)}
+        patches = [mock.patch.object(S, "http_get_json", fake.get), mock.patch.object(S, "http_post", fake.post),
+                   mock.patch.object(S.procman, "start", fake.start), mock.patch.object(S.procman, "stop", fake.stop),
+                   mock.patch.object(S.procman, "adopt_if_running", lambda sp: None),
+                   mock.patch.object(S.procman, "is_alive", lambda p: p is not None),
+                   mock.patch.object(S.procman, "log_tail", lambda n, k=20: "")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        s = Scheduler(specs, monitor=None, poll_s=0.01, mode=mode)
+        h3 = s.comps["h3"]
+        h3.proc, h3.external, h3.state = types.SimpleNamespace(spec=specs["h3"], popen=None, external=True, pid=None, job=None), True, "ready"
+        s.gpu_resident = "h3"
+        return s
+
+    async def test_a_closed_external_resident_is_forgotten_and_the_next_component_loads(self):
+        fake = DeadPorts({"11"})
+        s = self.make(fake)
+        await s.ensure("h3image")
+        self.assertEqual(fake.calls, [("post", "unload", "11"), ("start", "h3image")])
+        h3 = s.comps["h3"]
+        self.assertEqual((h3.state, h3.external, h3.proc, s.gpu_resident), ("stopped", False, None, "h3image"))
+
+    async def test_a_live_external_that_does_not_unload_still_fails(self):
+        fake = Fake(unload_code=500)                               # 応答はある(動いている)が unload に失敗: 今までどおり失敗にする
+        s = self.make(fake)
+        with self.assertRaisesRegex(S.SwitchError, "unload に失敗しました"):
+            await s.ensure("h3image")
+        self.assertEqual((s.comps["h3"].state, s.comps["h3"].external, s.gpu_resident), ("ready", True, "h3"))
+
+    async def test_share_mode_victim_that_was_closed_is_forgotten(self):
+        fake = DeadPorts({"11"})
+        s = self.make(fake, mode="share")
+        s.total_mib = 20 * 1024
+        s.residents = {"h3": S.Resident(budget_mib=16 * 1024)}
+        s.comps["h3image"].spec.vram_budget_gb = 10                # 2 つは収まらない: h3 を降ろす
+        await s.ensure("h3image")
+        self.assertEqual(set(s.residents), {"h3image"})
+        self.assertEqual(s.comps["h3"].state, "stopped")

@@ -21,6 +21,7 @@ mv.scene × シーン数(H3)→ mv.assemble(結合、CPU)。[ ] は、曲の台�
 """
 import asyncio
 import logging
+import math
 import random
 import re
 import shutil
@@ -46,7 +47,6 @@ SEED_MOD = 2_147_483_647
 
 RUNNING = ("analyzing", "scripting", "generating", "assembling")
 STATES = (*RUNNING, "paused", "completed", "failed", "cancelled")
-FINISHED = ("completed", "cancelled")           # 終わった制作。これ以外(一時停止・失敗も)は続きがあるので、曲と画像を使い続ける
 # 段階の名前(ジョブの種類は "<接頭辞>.<段階>": MV は mv.analyze…、ショート動画は short.analyze…)→ 制作の状態・画面に出す名前。
 # plan(物語からシーンに割る)はショート動画だけ
 STAGE_STATE = {"analyze": "analyzing", "listen": "analyzing", "plan": "scripting", "script": "scripting", "scene": "generating", "assemble": "assembling"}
@@ -89,12 +89,16 @@ def _clip(text: str, limit: int) -> str:
 
 
 def _number(value, name: str, default: float) -> float:
+    """数(空なら default)。NaN・無限大は数として扱わない(JSON の NaN / Infinity も float として届き、範囲の比べをすり抜けるため)。"""
     if value in (None, ""):
         return default
     try:
-        return float(value)
+        x = float(value)
     except (TypeError, ValueError):
+        raise ValueError(f"{name} は数字で指定してください") from None
+    if not math.isfinite(x):
         raise ValueError(f"{name} は数字で指定してください")
+    return x
 
 
 def concept_from_song(params: dict) -> str:
@@ -150,8 +154,8 @@ def resolve_format(params: dict) -> dict:
     else:
         try:
             seed = int(seed)
-        except (TypeError, ValueError):
-            raise ValueError("seed は整数で指定してください")
+        except (TypeError, ValueError, OverflowError):        # OverflowError: 無限大(int(float("inf")))
+            raise ValueError("seed は整数で指定してください") from None
     background_text = str(params.get("background_text") or "auto")
     if background_text not in ("auto", "large", "none"):
         raise ValueError("background_text は auto / large / none のいずれかです")
@@ -276,14 +280,16 @@ class Director:
         return self.view(pid)
 
     def restore(self) -> int:
-        """管理役の起動時: 走っていた制作(ジョブは再起動で消えた)を一時停止にし、「生成中」のシーンを未生成に戻す。戻す数を返す。"""
+        """管理役の起動時: 走っていた制作(ジョブは再起動で消えた)を一時停止にし、「生成中」のシーンを未生成に戻す。一時停止にした数を返す。
+        一時停止・中止の後も走り続けていたシーンのジョブ(終わるまで続ける)が再起動で消えた制作は、状態はそのままで、シーンだけを未生成に戻す。"""
         n = 0
         for proj in self.ledger.list_mv_projects(limit=100000, kind=self.KIND):
-            if proj["state"] not in RUNNING:
-                continue
             patches = {s["index"]: {"status": "pending"} for s in proj["scenes"] if s["status"] == "running"}
-            self.ledger.update_mv_project(proj["id"], state="paused", message=RESTART_MESSAGE, scene_patches=patches)
-            n += 1
+            if proj["state"] in RUNNING:
+                self.ledger.update_mv_project(proj["id"], state="paused", message=RESTART_MESSAGE, scene_patches=patches)
+                n += 1
+            elif patches:
+                self.ledger.update_mv_project(proj["id"], scene_patches=patches)
         return n
 
     async def pause(self, pid: str) -> dict:
@@ -549,5 +555,5 @@ class Director:
 def _int(value, name: str) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError(f"{name} は整数で指定してください")

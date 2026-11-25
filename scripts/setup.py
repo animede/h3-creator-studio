@@ -5,7 +5,7 @@
 それぞれ自分のセットアップスクリプトで環境とモデルを用意する。何度実行してもよく、済んでいる所は飛ばし、
 途中で止まっても再実行で続きから進む。
 
-  python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 100GB)
+  python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 150GB)
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
   python scripts/setup.py --only h3,ace   # 指定した部品だけ
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
@@ -34,7 +34,8 @@ AIVIS_VERSION = "1.2.0"
 AIVIS_BASE = f"https://github.com/Aivis-Project/AivisSpeech-Engine/releases/download/{AIVIS_VERSION}/"
 MIN_RAM_GIB = 30           # 32GB の PC は 31 GiB 台で見えることがあるので、少し下に線を引く
 MIN_VRAM_GIB = 5.8         # 6GB のカードは 5.9〜6.0 GiB で見える
-NEED_DISK_GIB = 100
+NEED_DISK_GIB = 150            # 部品とモデルの合計(動画の参照モード用キャッシュ 32GB を含む)
+NEED_DISK_NO_REF_GIB = 120     # --no-ref のとき
 
 
 @dataclass(frozen=True)
@@ -110,9 +111,10 @@ def resource_warnings(ram_gib: Optional[float], vram_mib: Optional[int]) -> list
     return out
 
 
-def disk_warning(free_gib: float, models: bool) -> Optional[str]:
-    if models and free_gib < NEED_DISK_GIB:
-        return f"ディスクの空きが {free_gib:.0f}GB です。モデルまで入れると約 {NEED_DISK_GIB}GB 要ります"
+def disk_warning(free_gib: float, models: bool, ref: bool = True) -> Optional[str]:
+    need = NEED_DISK_GIB if ref else NEED_DISK_NO_REF_GIB
+    if models and free_gib < need:
+        return f"ディスクの空きが {free_gib:.0f}GB です。モデルまで入れると約 {need}GB 要ります"
     return None
 
 
@@ -438,7 +440,7 @@ def gpu_info() -> Optional[tuple]:
     return parse_gpu_query(out.stdout) if out.returncode == 0 else None
 
 
-def check_prerequisites(selected: list, models: bool, free_path: Path) -> bool:
+def check_prerequisites(selected: list, models: bool, free_path: Path, ref: bool = True) -> bool:
     """事前確認を表示する。続行できなければ False。"""
     say("== 事前確認 ==")
     ok = True
@@ -459,7 +461,7 @@ def check_prerequisites(selected: list, models: bool, free_path: Path) -> bool:
     free_path.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(free_path).free / 2**30
     say(f"  ディスクの空き({free_path}): {free:.0f}GB")
-    for w in resource_warnings(ram, gpu[1] if gpu else None) + [x for x in [disk_warning(free, models)] if x]:
+    for w in resource_warnings(ram, gpu[1] if gpu else None) + [x for x in [disk_warning(free, models, ref)] if x]:
         say(f"  ※ {w}")
     return ok
 
@@ -650,7 +652,7 @@ def main(argv: list = None) -> int:
     say(f"対象の部品: {', '.join(selected + ([MV_NAME] if want_mv else []))}" + ("   [環境だけ。モデルは取得しません]" if not models else ""))
 
     try:
-        if selected and not check_prerequisites(selected, models, Path(cfg.root) / cfg.components_dir):
+        if selected and not check_prerequisites(selected, models, Path(cfg.root) / cfg.components_dir, ref=not args.no_ref):
             say("\n足りないものを入れてから、setup をもう一度実行してください。")
             return 1
     except KeyboardInterrupt:

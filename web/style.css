@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;      /* スクロールバー・数の欄の矢印など、ブラウザの部品も暗い色で描かせる */
   --bg: #14161a; --panel: #1d2026; --line: #2d323b; --text: #e6e8ec; --muted: #8b93a1;
   --accent: #5b9dff; --ok: #3fb97a; --warn: #e9a23b; --err: #e5584f; --bar: #2a2f38;
 }
@@ -483,6 +484,25 @@ fieldset.edbody:disabled { opacity: .55; }
 .edtime { margin-top: 4px; margin-bottom: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .edposrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .edposrow .mini { font-size: 12px; }
-.edseltext { color: var(--fg); }
+.edseltext { color: var(--text); }
 .edouthead .edoutname { color: var(--text); cursor: grab; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16em; display: inline-block; vertical-align: bottom; }
-#ed-fx-valwrap input[type=range] { flex: 1; width: auto; min-width: 0; }
+#ed-adj-valwrap input[type=range], #ed-rng-valwrap input[type=range] { flex: 1; width: auto; min-width: 0; }      /* 値の字はスライダーの横に */
+
+/* 幅の狭い画面(スマートフォン・縦のタブレット): 操作・生成物・履歴を 1 列に縦に並べ、高さは中身に合わせる(広い画面の見た目は変えない) */
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; gap: 8px 16px; }
+  .topright { flex-basis: 100%; }
+  .gauges { flex-wrap: wrap; justify-content: flex-start; gap: 6px 16px; }
+  .gauge { min-width: 0; flex: 1 1 160px; }
+  .lanes { justify-content: flex-start; }
+  .tabs { flex-wrap: wrap; }
+  .tab { padding: 6px 14px; }
+  .workspace, .workspace[data-tab="mv"], .workspace[data-tab="short"], .workspace[data-tab="edit"] {
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; min-height: 0; }
+  .workspace .panel { margin: 0 16px 12px; }
+  .workspace .ops, .workspace .gallery, .workspace[data-tab="edit"] .gallery { grid-row: auto; grid-column: auto; overflow: visible; }
+  .viewer { flex: none; height: 56vh; }
+  .workspace[data-tab="mv"] .mvproj, .workspace[data-tab="short"] .mvproj, .workspace[data-tab="edit"] .mvproj { max-height: 75vh; min-height: 0; }
+  .thumbs { flex: none; max-height: 60vh; }
+  .row .label { width: auto; }
+}

@@ -179,6 +179,11 @@ class H3ImageTest(unittest.IsolatedAsyncioTestCase):
                              ("h3image.t2i", {"prompt": "a", "steps": 4}), ("h3image.t2i", {"prompt": "a", "seed": "x"})]:
             with self.assertRaises(ValueError, msg=str(params)):
                 n(kind, params)
+        for steps in ("abc", "3.5", float("inf"), [3]):                     # 数でない値も、英語の例外文ではなく日本語の理由で断る
+            with self.assertRaisesRegex(ValueError, "steps は .* のいずれかか、未指定", msg=repr(steps)):
+                n("h3image.t2i", {"prompt": "a", "steps": steps})
+        with self.assertRaisesRegex(ValueError, "seed は整数"):
+            n("h3image.t2i", {"prompt": "a", "seed": float("inf")})            # JSON の Infinity(int にできず OverflowError だった)
         self.assertEqual(len(n("h3image.edit", {"prompt": "a", "references": [str(i) for i in range(16)]})["references"]), 16)
         with self.assertRaises(ValueError):   # 台帳に無い参照
             n("h3image.edit", {"prompt": "a", "references": ["zzz"]}, self.ledger)
