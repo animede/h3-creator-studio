@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # YUZU Creator Studio のセットアップ(Linux)。uv を用意し、管理役の .venv を作って、scripts/setup.py に渡す。
 #
-#   ./setup.sh                  # エンジンの取り込み + 環境 + モデル(合計 約 150GB、回線次第で数時間)
+#   ./setup.sh                  # エンジンの取り込み + 環境 + モデル(合計 約 160GB、回線次第で数時間)
 #   ./setup.sh --no-models      # 環境だけ(モデルは後で)
 #   ./setup.sh --only h3,ace    # 指定したエンジンだけ
 #   ./setup.sh --llm            # 同梱 LLM(約 5GB)も先に取得する

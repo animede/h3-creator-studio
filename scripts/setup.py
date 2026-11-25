@@ -5,7 +5,7 @@
 それぞれ自分のセットアップスクリプトで環境とモデルを用意する。何度実行してもよく、済んでいる所は飛ばし、
 途中で止まっても再実行で続きから進む。
 
-  python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 150GB)
+  python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 160GB)
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
   python scripts/setup.py --only h3,ace   # 指定したエンジンだけ
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
@@ -34,8 +34,8 @@ AIVIS_VERSION = "1.2.0"
 AIVIS_BASE = f"https://github.com/Aivis-Project/AivisSpeech-Engine/releases/download/{AIVIS_VERSION}/"
 MIN_RAM_GIB = 30           # 32GB の PC は 31 GiB 台で見えることがあるので、少し下に線を引く
 MIN_VRAM_GIB = 5.8         # 6GB のカードは 5.9〜6.0 GiB で見える
-NEED_DISK_GIB = 150            # エンジンとモデルの合計(動画の参照モード用キャッシュ 32GB を含む)
-NEED_DISK_NO_REF_GIB = 120     # --no-ref のとき
+NEED_DISK_GIB = 160            # 4 つのエンジンのモデル(約 130GB。動画の参照モード用キャッシュ 32GB を含む)と Python 環境(約 25GB)の合計
+NEED_DISK_NO_REF_GIB = 130     # --no-ref のとき
 
 
 @dataclass(frozen=True)

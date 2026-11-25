@@ -178,9 +178,9 @@ class PrerequisiteTest(unittest.TestCase):
         self.assertIn("CPU メモリ 32GB 未満では動画の準備(量子化)と音楽の同梱 LLM が厳しくなります", w[0])
         self.assertIn("VRAM", w[1])
         self.assertIsNone(S.disk_warning(500, True))
-        self.assertIn("150GB", S.disk_warning(50, True))
-        self.assertIn("120GB", S.disk_warning(50, True, ref=False))
-        self.assertIsNone(S.disk_warning(130, True, ref=False))
+        self.assertIn("160GB", S.disk_warning(50, True))
+        self.assertIn("130GB", S.disk_warning(50, True, ref=False))
+        self.assertIsNone(S.disk_warning(140, True, ref=False))
         self.assertIsNone(S.disk_warning(50, False))
 
 
