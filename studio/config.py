@@ -75,7 +75,7 @@ class Settings:
         return {str(k): str(v) for k, v in self.components.get(name, {}).get("env", {}).items()}
 
     def component_budget_gb(self, name: str) -> Optional[float]:
-        """share のときの VRAM の予算(GiB)の上書き(vram_budget_gb)。書かれていなければ None(総 VRAM から決める)。"""
+        """share のときの VRAM の利用枠(GiB)の上書き(vram_budget_gb)。書かれていなければ None(総 VRAM から決める)。"""
         v = self.components.get(name, {}).get("vram_budget_gb")
         if v in (None, ""):
             return None

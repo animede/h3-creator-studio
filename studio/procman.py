@@ -127,7 +127,7 @@ def _windows_job_object(popen: subprocess.Popen):
 def start(spec, extra_env: dict = None) -> Proc:
     """spec のコマンドを子プロセスとして起動する(出力は logs/<name>.log に追記)。
 
-    extra_env は起動のたびに決まる環境変数(share の VRAM の予算など)。spec.env の後、studio.toml の env の前に重ねる。
+    extra_env は起動のたびに決まる環境変数(share の VRAM の利用枠など)。spec.env の後、studio.toml の env の前に重ねる。
     注意: Linux の PDEATHSIG は「親スレッド」の死に反応するので、イベントループのスレッドから呼ぶこと。
     """
     cmd = spec.build_command(spec.dir)           # 未導入なら ComponentNotInstalled

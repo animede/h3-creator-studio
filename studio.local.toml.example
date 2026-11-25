@@ -32,7 +32,7 @@
 # [components.h3]
 # enabled = false                # このエンジンを使わない
 # port = 8612                    # エンジンのポートを変える(競合したとき)
-# vram_budget_gb = 40            # share のときの VRAM の予算(GiB)を決め打ちする
+# vram_budget_gb = 40            # share のときの VRAM の利用枠(GiB)を決め打ちする
 # [components.h3.env]
 # H3_VRAM_LIMIT_GB = "8"         # エンジンに渡す環境変数
 #

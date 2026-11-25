@@ -78,7 +78,7 @@ function showOp(op) {
   if (op.error && op.log_tail) line.append(el("pre", "", op.log_tail));
 }
 
-// 状態バーの 2 行目: レーンごとの実行中のジョブ(種類と進み)と順番待ちの数。share のときは、GPU に載っているエンジンと予算も出す
+// 状態バーの 2 行目: レーンごとの実行中のジョブ(種類と進み)と順番待ちの数。share のときは、GPU に載っているエンジンと利用枠も出す
 function renderLanes(s) {
   const share = s.gpu_mode === "share";
   const items = [el("span", "lane", share ? "GPU: 共有(複数のエンジンを同時に載せる)" : "GPU: エンジン 1 つずつ")];
@@ -89,7 +89,7 @@ function renderLanes(s) {
     if (l.queued) parts.push(`待ち ${l.queued}`);
     items.push(el("span", "lane run", `${LANE_LABEL[name] || name}: ${parts.join(" / ")}`));
   }
-  if (share) for (const r of s.residents || []) items.push(el("span", "lane res" + (r.busy ? " busy" : ""), `${LANE_LABEL[r.name] || r.name} 予算 ${gib(r.budget_mib)} GiB${r.busy ? "(仕事中)" : ""}`));
+  if (share) for (const r of s.residents || []) items.push(el("span", "lane res" + (r.busy ? " busy" : ""), `${LANE_LABEL[r.name] || r.name} 利用枠 ${gib(r.budget_mib)} GiB${r.busy ? "(仕事中)" : ""}`));
   $("lanes").replaceChildren(...items);
 }
 
@@ -114,7 +114,7 @@ function render(s) {
     r.badge.textContent = STATE_LABEL[c.state] || c.state;
     r.badge.className = "badge " + c.state;
     r.tag.hidden = !c.gpu_resident;
-    r.tag.textContent = c.budget_mib ? `GPU ${gib(c.budget_mib)} GiB` : "GPU";      // share のときは予算つき
+    r.tag.textContent = c.budget_mib ? `GPU ${gib(c.budget_mib)} GiB` : "GPU";      // share のときは利用枠つき
     r.ext.hidden = !c.external;
     r.port.textContent = `:${c.port}`;
     r.rss.textContent = c.rss_mib != null ? `RSS ${gib(c.rss_mib)} GiB` : "";

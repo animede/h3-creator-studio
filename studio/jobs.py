@@ -2,7 +2,7 @@
 
 ジョブは「エンジンを ensure(必要なら載せ替え)→ 種類ごとのハンドラがエンジンの API を呼ぶ」の順に流れる。
 レーンはエンジンごとに 1 本(同じエンジンの仕事は 1 つずつ)。GPU を使わない仕事(component=None)は CPU のレーンで、2 本まで同時に走る。
-別のレーンの仕事は並行に走るが、GPU に同時に載るかは scheduler の判定による(exclusive なら エンジン 1 つずつ、share なら予算が収まるかぎり)。
+別のレーンの仕事は並行に走るが、GPU に同時に載るかは scheduler の判定による(exclusive なら エンジン 1 つずつ、share なら利用枠が収まるかぎり)。
 """
 import asyncio
 import logging
@@ -297,7 +297,7 @@ class JobRunner:
         if handler.component and handler.gpu:
             mark = getattr(self.ctx.sched, "mark_busy", None)
             if mark is not None:
-                mark(handler.component)               # 仕事中のエンジンは降ろされず、予算も押さえたままになる
+                mark(handler.component)               # 仕事中のエンジンは降ろされず、利用枠も押さえたままになる
         if plan is not None and plan.victims:
             self._reserved[job.id] = set(plan.victims)
         self._tasks[job.id] = asyncio.create_task(self._execute(job, handler), name=f"job-{job.id}")

@@ -68,8 +68,8 @@ class ComponentSpec:
     env: Callable[[Path, int], dict] = lambda d, p: {}
     extra_env: dict = field(default_factory=dict)   # studio.toml の env
     vram_need_mib: int = 0                          # 1 回の生成に要る VRAM の目安(同居できるかの判断に使う)
-    vram_budget_gb: Optional[float] = None          # share のときの VRAM の予算の上書き(studio.toml の vram_budget_gb)
-    budget_env: Callable[[int], dict] = lambda mib: {}   # share で起動するとき、予算(MiB)を環境変数にして渡す(exclusive では使わない)
+    vram_budget_gb: Optional[float] = None          # share のときの VRAM の利用枠の上書き(studio.toml の vram_budget_gb)
+    budget_env: Callable[[int], dict] = lambda mib: {}   # share で起動するとき、利用枠(MiB)を環境変数にして渡す(exclusive では使わない)
 
     @property
     def base_url(self) -> str:
@@ -122,19 +122,19 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
             "ACESTEP_VAE_DECODE_CHUNK_SIZE": "128", "ACESTEP_QUANTIZATION": "int8_weight_only"}
 
 
-# ---- share のときの VRAM の予算 ----
+# ---- share のときの VRAM の利用枠 ----
 
 H3_PROFILES = (96, 80, 48, 32, 16, 8)       # H3 の H3_PROFILE が受ける級(GiB)
 
 
 def default_budget_gb(name: str, total_mib: int) -> Optional[float]:
-    """share のときの、エンジンごとの既定の予算(GiB)。総 VRAM T に対して H3 = min(T×0.5, 48)、H3-Image = min(T×0.35, 31)、ACE = 14。CPU のエンジンは None。"""
+    """share のときの、エンジンごとの既定の利用枠(GiB)。総 VRAM T に対して H3 = min(T×0.5, 48)、H3-Image = min(T×0.35, 31)、ACE = 14。CPU のエンジンは None。"""
     total_gb = total_mib / 1024
     return {"h3": min(total_gb * 0.5, 48), "h3image": min(total_gb * 0.35, 31), "ace": 14}.get(name)
 
 
 def h3_profile(budget_gb: float) -> str:
-    """予算(GiB)に収まる最大の級(96gb / 80gb / 48gb / 32gb / 16gb / 8gb)。8GiB に満たなければ最小の 8gb。"""
+    """利用枠(GiB)に収まる最大の級(96gb / 80gb / 48gb / 32gb / 16gb / 8gb)。8GiB に満たなければ最小の 8gb。"""
     return f"{next((g for g in H3_PROFILES if g <= budget_gb), H3_PROFILES[-1])}gb"
 
 
@@ -148,11 +148,11 @@ def h3_budget_env(budget_mib: int) -> dict:
 
 
 def h3image_budget_env(budget_mib: int) -> dict:
-    return {"H3IMG_VRAM_GB": str(int(budget_mib // 1024))}      # 整数の GiB(切り捨て。予算を超えない)
+    return {"H3IMG_VRAM_GB": str(int(budget_mib // 1024))}      # 整数の GiB(切り捨て。利用枠を超えない)
 
 
 def ace_budget_env(budget_mib: int) -> dict:
-    """ACE のプロファイルは、予算が 14GiB 以上なら 16gb、それ未満は 12gb。10GiB 未満は 8GB のカード向けの省メモリ設定(ace_gpu_env)も足す。"""
+    """ACE のプロファイルは、利用枠が 14GiB 以上なら 16gb、それ未満は 12gb。10GiB 未満は 8GB のカード向けの省メモリ設定(ace_gpu_env)も足す。"""
     return {"ACESTEP_GPU_PROFILE": "16gb" if budget_mib >= 14 * 1024 else "12gb", **ace_gpu_env(budget_mib)}
 
 

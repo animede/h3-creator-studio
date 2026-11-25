@@ -1,4 +1,4 @@
-"""ジョブの同時実行: share の予算と載せる判定、レーンと公平さ、CPU のレーン。
+"""ジョブの同時実行: share の利用枠と載せる判定、レーンと公平さ、CPU のレーン。
 
 scheduler は本物(HTTP と procman だけ差し替え)、エンジンの仕事は run が gate を待つだけの偽物。
 """
@@ -77,7 +77,7 @@ class ShareBase(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(p.stop)
 
     def sched(self, total_gib, mode="share", used_mib=2048, **budgets):
-        """budgets: エンジン名 -> 予算(GiB)。ポートは 11, 12, ... を順に振る。"""
+        """budgets: エンジン名 -> 利用枠(GiB)。ポートは 11, 12, ... を順に振る。"""
         self.backend = Backend()
         self.patch(self.backend)
         specs = {n: spec(n, gb, port=11 + i) for i, (n, gb) in enumerate(budgets.items())}
@@ -95,7 +95,7 @@ class ModeTest(unittest.TestCase):
         self.assertEqual(resolve_gpu_mode("auto", 40 * 1024 - 1), "exclusive")
         self.assertEqual(resolve_gpu_mode("auto", 12288), "exclusive")
         self.assertEqual(resolve_gpu_mode("auto", None), "exclusive")         # 総 VRAM が分からない
-        self.assertEqual(resolve_gpu_mode("share", None), "exclusive")        # share は予算の計算に総 VRAM が要る
+        self.assertEqual(resolve_gpu_mode("share", None), "exclusive")        # share は利用枠の計算に総 VRAM が要る
         self.assertEqual(resolve_gpu_mode("share", 16376), "share")           # 明示すれば小さな GPU でも share
         self.assertEqual(resolve_gpu_mode("exclusive", 97887), "exclusive")
 
@@ -142,7 +142,7 @@ class BudgetTest(ShareBase):
         await s.ensure("h3")
         await s.ensure("h3image")                     # h3 を降ろす(unload)
         self.assertEqual((s.comps["h3"].state, "h3" in s.residents), ("unloaded", False))
-        s.comps["h3"].spec.vram_budget_gb = 10        # 設定を変えても、起動済みのエンジンの予算は変わらない
+        s.comps["h3"].spec.vram_budget_gb = 10        # 設定を変えても、起動済みのエンジンの利用枠は変わらない
         self.backend.calls.clear()
         await s.ensure("h3")                          # h3image を降ろして h3 を reload
         self.assertEqual(self.backend.calls, [("post", "unload", "12"), ("post", "reload", "11")])
@@ -275,7 +275,7 @@ class ShareAdmissionTest(ShareBase):
         s = self.sched(50, a=30, b=30)
         await s.ensure("a")
         with mock.patch.object(S.procman, "is_alive", lambda p: False):
-            self.assertEqual(s.plan("b").action, "fit")        # a のプロセスが落ちていたら、予算を押さえない
+            self.assertEqual(s.plan("b").action, "fit")        # a のプロセスが落ちていたら、利用枠を押さえない
         self.assertEqual((s.comps["a"].state, s.residents), ("stopped", {}))
 
     async def test_baseline_is_measured_at_startup_and_shrinks_capacity(self):
@@ -346,7 +346,7 @@ class ShareStartTest(ShareBase):
 
 
 class PinnedExternalTest(ShareBase):
-    """止められない外部のエンジン(ACE)は、宣言の予算で数える。収まらないときは今までのルール(実際の空きで同居、無ければ断る)。"""
+    """止められない外部のエンジン(ACE)は、宣言の利用枠で数える。収まらないときは今までのルール(実際の空きで同居、無ければ断る)。"""
 
     def external_ace(self, s):
         ace = s.comps["ace"]
@@ -475,7 +475,7 @@ class ShareRunTest(RunnerBase):
         self.assertEqual(runner.done_counter, 2)
 
     async def test_second_waits_for_busy_first_then_evicts_it(self):
-        s = self.sched(50, a=30, b=30)                   # 予算の合計 60 > 容量 46.5
+        s = self.sched(50, a=30, b=30)                   # 利用枠の合計 60 > 容量 46.5
         runner = self.runner(s, self.handlers("a", "b"))
         j1 = runner.submit("image", "a.go", {"gate": "g1", "name": "j1"})
         await self.status(j1, "running")
@@ -834,7 +834,7 @@ class StopTest(RunnerBase):
 
 
 class StatusPayloadTest(RunnerBase):
-    """/api/status に、GPU の使い方・常駐中のエンジン(予算つき)・レーンごとの状況が載る。"""
+    """/api/status に、GPU の使い方・常駐中のエンジン(利用枠つき)・レーンごとの状況が載る。"""
 
     async def test_payload(self):
         s = self.sched(50, a=30, b=30)

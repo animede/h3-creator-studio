@@ -123,7 +123,7 @@ class ComponentsTest(unittest.TestCase):
         small = ace.budget_env(9 * gib)                                                       # 10GiB 未満は、8GB のカード向けの省メモリ設定も
         self.assertEqual((small["ACESTEP_GPU_PROFILE"], small["ACESTEP_QUANTIZATION"], small["ACESTEP_RESIDENT_COMPONENTS"]),
                          ("12gb", "int8_weight_only", "none"))
-        self.assertEqual(self.spec("aivis").budget_env(8 * gib), {})                          # CPU のエンジンに予算は無い
+        self.assertEqual(self.spec("aivis").budget_env(8 * gib), {})                          # CPU のエンジンに利用枠は無い
 
     def test_budget_override_comes_from_settings(self):
         cfg = Settings({"components": {"h3": {"dir": "x", "vram_budget_gb": 40}, "h3image": {"dir": "y"}}}, self.root)
