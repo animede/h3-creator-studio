@@ -304,6 +304,24 @@
   }
   wirePresets({ tab: "mv", box: mvp("presets"), get: getPresetValues, apply: applyPresetValues });
 
+  // ---- サンプル(samples/<id>/ の入力欄の値と素材。読み込むと、いまの曲・キャラクター画像・説明は、サンプルのものに置き換わる。生成はしない) ----
+
+  // values = プリセットと同じ項目(character / concept を含む)。assets = [{role: song | person, output(ギャラリーの生成物)}]
+  function applySample(values, assets) {
+    song = null;
+    image = null;
+    for (const id of ["char", "concept"]) { mvp(id).dataset.auto = ""; presetSet(mvp(id), ""); }      // 自動で入れた文の印も消す
+    for (const a of assets) {
+      if (a.role === "song") setSong(a.output);
+      else if (a.role === "person") setImage(a.output);
+    }
+    const skipped = applyPresetValues(values);     // 人物の説明・曲の内容は、素材から自動で入った文よりサンプルの文を優先する
+    renderSong();
+    renderImage();
+    showMsg("サンプルを読み込みました。「MV を作る」で同じ条件で作れます" + (skipped.length ? `(選べない値だったので、そのままにした項目: ${skipped.join("、")})` : ""));
+  }
+  wireSamples({ tab: "mv", box: mvp("samples"), apply: applySample });
+
   // ---- 制作の一覧・選択・更新・右側の画面(ショート動画タブと共通。web/project.js) ----
 
   // 自動で入れた説明(画像を見て作った人物の説明・曲を聞いて作った曲の内容など)を、どれが自動かが分かるように出す。書いた説明は出さない

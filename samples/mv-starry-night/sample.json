@@ -1,0 +1,48 @@
+{
+  "id": "mv-starry-night",
+  "tab": "mv",
+  "title": "星降る夜に歌う(リップシンク MV)",
+  "description": "音楽タブで作った J-POP(30 秒)と、キャラクター画像 1 枚から。曲の切れ目で 5 シーン、歌う区間は口を合わせる(Vocal Lock)。",
+  "values": {
+    "character": "肩までの茶髪、茶色の瞳、白い半袖ブラウスと濃い茶色のジャンパードレスの少女。アニメ調",
+    "concept": "星降る夜に歌う\nA J-POP anthem that blends shimmering melodies with ethereal vocals, capturing the quiet longing beneath a vast night sky.\nJ-POP",
+    "lipsync": true,
+    "aspect": "16:9",
+    "quality": "fast",
+    "min_s": 5.0,
+    "max_s": 10.0,
+    "background_text": "none"
+  },
+  "assets": [
+    {
+      "role": "person",
+      "kind": "image",
+      "file": "image_girl.png",
+      "description": "肩までの茶髪、茶色の瞳、白い半袖ブラウスと濃い茶色のジャンパードレスの少女。アニメ調",
+      "params": {
+        "prompt": "肩までの茶髪、茶色の瞳、白い半袖ブラウスと濃い茶色のジャンパードレスの少女。アニメ調"
+      }
+    },
+    {
+      "role": "song",
+      "kind": "audio",
+      "file": "song_e34168a7e934.mp3",
+      "params": {
+        "theme": "星降る夜に歌う",
+        "genre": "J-POP",
+        "language": "Japanese",
+        "lyrics": "[Intro]\n\n[Verse]\n静かな夜の帳が降りていく\n世界は深い藍色に染まるよ\n窓の外には無数の光が瞬く\n僕だけの秘密をそっと抱きしめてる\n\n[Pre-Chorus]\n風に乗せて届けたい言葉があるんだ\n届かなくていいからただ知ってほしいだけ\n\n[Chorus - anthemic]\n星降る夜に歌う この想いを叫ぶ\n切なくも輝く夢を探してる\n遠い空へと届くまで 響かせたいメロディ\n君と出会えた奇跡を信じて\n\n[Verse]\n冷たい空気の中 微かに震える指先\n手のひらには小さな希望が宿るんだ\n迷いや不安さえ今は霞んでいくから\nただこの瞬間を永遠に焼き付けたい\n\n[Pre-Chorus]\n心の奥底で高鳴る鼓動の音を聞くよ\nきっと答えはここにあるはずだから\n\n[Chorus - anthemic]\n星降る夜に歌う この想いを叫ぶ\n切なくも輝く夢を探してる\n遠い空へと届くまで 響かせたいメロディ\n君と出会えた奇跡を信じて\n\n[Bridge - gentle]\n時が止まってもこの景色は変わらないだろう\n静かに願う小さな祈りが巡るように\n\n[Chorus - anthemic]\n星降る夜に歌う この想いを叫ぶ (ああ)\n切なくも輝く夢を探してる (探してる)\n遠い空へと届くまで 響かせたいメロディ\n君と出会えた奇跡を信じて\n\n[Outro]",
+        "caption": "A J-POP anthem that blends shimmering melodies with ethereal vocals, capturing the quiet longing beneath a vast night sky."
+      }
+    }
+  ],
+  "video": "sample.mp4",
+  "thumb": "thumb.jpg",
+  "made": {
+    "gpu": "RTX A4000 16GB(エンジン 1 つずつ)",
+    "quality": "fast 768×448",
+    "per_scene_s": 215,
+    "total_min": 17
+  },
+  "license": "CC0 (このサンプルの動画・画像・曲は自由に使ってよい)"
+}

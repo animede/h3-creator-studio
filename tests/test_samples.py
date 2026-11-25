@@ -1,5 +1,5 @@
 """サンプル(samples/<id>/ の同梱の見本): 一覧・読み込み(素材のギャラリーへの 1 回だけの登録)・不正なサンプルの扱い・画面の配線。
-実物の samples/ の 2 つ(short-harbor-day / short-lighthouse-dawn)を使う。"""
+実物の samples/ の 2 つ(short-harbor-day / mv-starry-night)を使う。"""
 import json
 import re
 import shutil
@@ -15,18 +15,19 @@ from studio.config import REPO_ROOT
 from studio.ledger import Ledger
 
 WEB = REPO_ROOT / "web"
-HARBOR, LIGHTHOUSE = "short-harbor-day", "short-lighthouse-dawn"
+HARBOR, STARRY = "short-harbor-day", "mv-starry-night"
 
 
 class LoadSamplesTest(unittest.TestCase):
     def test_the_two_real_bundles_load(self):
         found = {s["id"]: s for s in samples.load_samples()}
-        self.assertEqual(sorted(found), [HARBOR, LIGHTHOUSE])
-        self.assertEqual({s["tab"] for s in found.values()}, {"short"})
+        self.assertEqual(sorted(found), sorted([HARBOR, STARRY]))
+        self.assertEqual({s["tab"] for s in found.values()}, {"short", "mv"})
         self.assertEqual(found[HARBOR]["assets"], [])
-        self.assertEqual([(a["role"], a["kind"]) for a in found[LIGHTHOUSE]["assets"]], [("scenery", "image"), ("song", "audio")])
+        self.assertEqual([(a["role"], a["kind"]) for a in found[STARRY]["assets"]], [("person", "image"), ("song", "audio")])
+        self.assertTrue(found[HARBOR]["values"]["story"])
+        self.assertTrue(found[STARRY]["values"]["character"] and found[STARRY]["values"]["lipsync"] is True)
         for s in found.values():
-            self.assertTrue(s["values"]["story"])
             self.assertTrue((s["dir"] / s["video"]).is_file() and (s["dir"] / s["thumb"]).is_file())
 
     def test_broken_bundles_are_skipped_with_a_warning(self):
@@ -76,34 +77,36 @@ class SamplesApiTest(unittest.TestCase):
         self.client = TestClient(main.app)
 
     def test_list_shape(self):
-        r = self.client.get("/api/samples?tab=short")
+        r = self.client.get("/api/samples")
         self.assertEqual(r.status_code, 200)
         by_id = {s["id"]: s for s in r.json()}
-        self.assertEqual(sorted(by_id), [HARBOR, LIGHTHOUSE])
-        s = by_id[LIGHTHOUSE]
+        self.assertEqual(sorted(by_id), sorted([HARBOR, STARRY]))
+        s = by_id[STARRY]
         self.assertEqual(sorted(s), ["assets", "description", "id", "license", "made", "tab", "thumb_url", "title", "values", "video_url"])
-        self.assertEqual((s["tab"], s["video_url"], s["thumb_url"]), ("short", f"/samples/{LIGHTHOUSE}/sample.mp4", f"/samples/{LIGHTHOUSE}/thumb.jpg"))
+        self.assertEqual((s["tab"], s["video_url"], s["thumb_url"]), ("mv", f"/samples/{STARRY}/sample.mp4", f"/samples/{STARRY}/thumb.jpg"))
         self.assertEqual(s["values"]["quality"], "fast")
         a = s["assets"][0]
         self.assertEqual(sorted(a), ["description", "file", "kind", "params", "role", "url"])
-        self.assertEqual((a["role"], a["kind"], a["url"]), ("scenery", "image", f"/samples/{LIGHTHOUSE}/image_06065334e62f.png"))
+        self.assertEqual((a["role"], a["kind"], a["url"]), ("person", "image", f"/samples/{STARRY}/image_girl.png"))
         self.assertNotIn("dir", s)
         self.assertEqual(by_id[HARBOR]["assets"], [])
 
     def test_list_filters_by_tab(self):
-        for tab in ("image", "video", "music", "mv"):
+        for tab in ("image", "video", "music"):
             self.assertEqual(self.client.get(f"/api/samples?tab={tab}").json(), [])
+        self.assertEqual([s["id"] for s in self.client.get("/api/samples?tab=short").json()], [HARBOR])
+        self.assertEqual([s["id"] for s in self.client.get("/api/samples?tab=mv").json()], [STARRY])
         self.assertEqual(len(self.client.get("/api/samples").json()), 2)
         r = self.client.get("/api/samples?tab=nope")
         self.assertEqual(r.status_code, 400)
         self.assertIn("tab は", r.json()["detail"])
 
     def test_the_files_are_served_read_only_under_samples(self):
-        for url, kind in ((f"/samples/{LIGHTHOUSE}/thumb.jpg", "image/jpeg"), (f"/samples/{LIGHTHOUSE}/sample.mp4", "video/mp4")):
+        for url, kind in ((f"/samples/{STARRY}/thumb.jpg", "image/jpeg"), (f"/samples/{STARRY}/sample.mp4", "video/mp4")):
             r = self.client.get(url)
             self.assertEqual((r.status_code, r.headers["content-type"]), (200, kind))
         self.assertEqual(self.client.get("/samples/nope/thumb.jpg").status_code, 404)
-        self.assertEqual(self.client.put(f"/samples/{LIGHTHOUSE}/thumb.jpg", content=b"x").status_code, 405)
+        self.assertEqual(self.client.put(f"/samples/{STARRY}/thumb.jpg", content=b"x").status_code, 405)
 
     def test_load_without_assets_returns_only_values(self):
         r = self.client.post(f"/api/samples/{HARBOR}/load")
@@ -113,36 +116,36 @@ class SamplesApiTest(unittest.TestCase):
         self.assertEqual(self.ledger.list_outputs(), [])
 
     def test_load_registers_the_assets_once_and_reuses_them(self):
-        r = self.client.post(f"/api/samples/{LIGHTHOUSE}/load")
+        r = self.client.post(f"/api/samples/{STARRY}/load")
         self.assertEqual(r.status_code, 200)
         js = r.json()
         self.assertEqual(js["values"]["quality"], "fast")
-        self.assertEqual([a["role"] for a in js["assets"]], ["scenery", "song"])
+        self.assertEqual([a["role"] for a in js["assets"]], ["person", "song"])
         image, song = (a["output"] for a in js["assets"])
-        self.assertEqual((image["kind"], image["tab"], image["filename"]), ("image", "short", "image_06065334e62f.png"))
-        self.assertEqual((song["kind"], song["tab"], song["filename"], song["duration_s"]), ("audio", "short", "song_e34168a7e934.mp3", 12.5))
-        self.assertEqual(image["params"]["sample"], LIGHTHOUSE)
-        self.assertEqual(image["params"]["sample_file"], "image_06065334e62f.png")
-        self.assertEqual(image["params"]["prompt"], "a lighthouse at dawn, watercolor")      # asset.params も残る
+        self.assertEqual((image["kind"], image["tab"], image["filename"]), ("image", "mv", "image_girl.png"))
+        self.assertEqual((song["kind"], song["tab"], song["filename"], song["duration_s"]), ("audio", "mv", "song_e34168a7e934.mp3", 12.5))
+        self.assertEqual(image["params"]["sample"], STARRY)
+        self.assertEqual(image["params"]["sample_file"], "image_girl.png")
+        self.assertTrue(image["params"]["prompt"].startswith("肩までの茶髪"))      # asset.params も残る
         self.assertEqual(song["params"]["theme"], "星降る夜に歌う")
         self.assertNotIn("path", image)
         self.assertTrue(image["url"].startswith("/outputs/samples/") and image["thumb_url"])
-        self.assertTrue((self.root / "samples" / LIGHTHOUSE / "image_06065334e62f.png").is_file())
+        self.assertTrue((self.root / "samples" / STARRY / "image_girl.png").is_file())
         self.assertEqual(len(self.ledger.list_outputs()), 2)
 
-        again = self.client.post(f"/api/samples/{LIGHTHOUSE}/load").json()
+        again = self.client.post(f"/api/samples/{STARRY}/load").json()
         self.assertEqual([a["output"]["id"] for a in again["assets"]], [image["id"], song["id"]])       # 同じ生成物を使う
         self.assertEqual(len(self.ledger.list_outputs()), 2)
 
     def test_load_registers_again_if_the_gallery_item_was_deleted(self):
-        first = self.client.post(f"/api/samples/{LIGHTHOUSE}/load").json()["assets"][0]["output"]
+        first = self.client.post(f"/api/samples/{STARRY}/load").json()["assets"][0]["output"]
         self.assertTrue(self.ledger.delete_output(first["id"]))
-        again = self.client.post(f"/api/samples/{LIGHTHOUSE}/load").json()["assets"]
+        again = self.client.post(f"/api/samples/{STARRY}/load").json()["assets"]
         self.assertNotEqual(again[0]["output"]["id"], first["id"])
         self.assertEqual(len(self.ledger.list_outputs()), 2)
 
     def test_sample_derived_items_are_in_the_gallery_and_deletable(self):
-        ids = [a["output"]["id"] for a in self.client.post(f"/api/samples/{LIGHTHOUSE}/load").json()["assets"]]
+        ids = [a["output"]["id"] for a in self.client.post(f"/api/samples/{STARRY}/load").json()["assets"]]
         gallery = self.client.get("/api/gallery").json()
         self.assertEqual({g["id"] for g in gallery}, set(ids))
         with mock.patch.object(main.app.state, "jobs", mock.Mock(jobs={}), create=True):
@@ -158,17 +161,17 @@ class SamplesApiTest(unittest.TestCase):
     def test_a_broken_asset_file_is_a_japanese_400_and_leaves_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp) / "short-bad"
-            shutil.copytree(REPO_ROOT / "samples" / LIGHTHOUSE, base)
-            (base / "image_06065334e62f.png").write_bytes(b"not a png")
+            shutil.copytree(REPO_ROOT / "samples" / STARRY, base)
+            (base / "image_girl.png").write_bytes(b"not a png")
             data = json.loads((base / "sample.json").read_text(encoding="utf-8"))
             data["id"] = "short-bad"
             (base / "sample.json").write_text(json.dumps(data), encoding="utf-8")
             main.app.state.samples = samples.load_samples(Path(tmp))
             r = self.client.post("/api/samples/short-bad/load")
         self.assertEqual(r.status_code, 400)
-        self.assertIn("image_06065334e62f.png を読み込めません", r.json()["detail"])
+        self.assertIn("image_girl.png を読み込めません", r.json()["detail"])
         self.assertEqual(self.ledger.list_outputs(), [])
-        self.assertFalse((self.root / "samples" / "short-bad" / "image_06065334e62f.png").exists())
+        self.assertFalse((self.root / "samples" / "short-bad" / "image_girl.png").exists())
 
 
 class SamplesPageTest(unittest.TestCase):
