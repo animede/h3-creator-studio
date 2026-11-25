@@ -166,6 +166,30 @@ class EditManager:
                         "clips": len(state.get("clips") or []), "thumb_url": "/outputs/" + thumb if thumb else None, "output": output})
         return out
 
+    def extract_frame(self, pid: str, t: float) -> dict:
+        """プレビューの再生位置 t(書き出しの秒)に映っているコマを、元の動画から元の解像度で PNG に抜き出してギャラリー(画像)に載せ、その台帳の行を返す。
+        色調などの効果は掛けない(元のコマ)。静止画のクリップなら、その画像の行をそのまま返す。同期(1 コマなので一瞬)。"""
+        from . import mv_audio
+        proj = self._get(pid)
+        src = editclip.source_at(proj["state"], t)
+        if src is None:
+            raise ValueError("クリップがありません")
+        rec = self.ledger.get_output(src["clip"]["id"])
+        path = self.ledger.abs_path(rec["path"]) if rec is not None else None
+        if path is None or not path.is_file():
+            raise ValueError(f"クリップ {src['index'] + 1} のファイルが見つかりません(ギャラリーから削除されたかもしれません)")
+        if rec["kind"] == "image":
+            return rec
+        dst = Path(self.outputs_dir) / "image" / f"frame_{pid}_{uuid.uuid4().hex[:8]}.png"
+        try:
+            exe = mv_audio._ffmpeg()
+            mv_audio._run_ffmpeg([exe, "-y", "-v", "error", "-ss", f"{src['source_s']:.3f}", "-i", str(path), "-frames:v", "1", "-f", "image2",
+                                  str(mv_audio._part(dst))], dst, "コマの抜き出し")
+        except mv_audio.MvAudioError as e:
+            raise ValueError(e.message) from e
+        name = f"{Path(rec.get('filename') or 'clip').stem}_{src['source_s']:.2f}s.png"
+        return self.ledger.add_output("image", dst, "edit", None, name, {"source_id": rec["id"], "source_s": src["source_s"], "project_id": pid, "frame": True})
+
     def _get(self, pid: str) -> dict:
         proj = self.ledger.get_edit_project(pid)
         if proj is None:

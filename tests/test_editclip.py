@@ -53,10 +53,40 @@ class ValidateTest(unittest.TestCase):
         graph = E.build_graph(looks, PATHS)[0]
         for k, flt in E.LOOKS.items():
             self.assertIn(f"{flt}:enable='between(t,1,2)'", graph, k)                              # 固定のフィルタに区間の enable
+        rng = E.validate_state({"clips": [clip()], "effects": [{"type": "fade_from_black", "start": 0, "end": 1}, {"type": "black", "start": 1, "end": 2},
+                                                               {"type": "fade_to_white", "start": 2, "end": 3}, {"type": "zoom_in", "start": 0, "end": 4},
+                                                               {"type": "zoom_out", "value": 1.5, "start": 1, "end": 3}]}, SOURCES)
+        self.assertEqual([e["value"] for e in rng["effects"]], [None, None, None, 1.3, 1.5])            # ズームだけ値(既定 1.3)
+        g = E.build_graph(rng, PATHS)[0]
+        self.assertIn("fade=t=in:st=0:d=1:enable='between(t,0,1)'", g)
+        self.assertIn("drawbox=c=black:t=fill:enable='between(t,1,2)'", g)
+        self.assertIn("fade=t=out:st=2:d=1:c=white:enable='between(t,2,3)'", g)
+        self.assertIn("scale=w='trunc(iw*(if(between(t,0,4),1+(1.3-1)*clip((t-0)/4,0,1),1))/2)*2':h='trunc(ih*(if(between(t,0,4),1+(1.3-1)*clip((t-0)/4,0,1),1))/2)*2'"
+                      ":eval=frame,crop=", g)
+        self.assertIn("if(between(t,1,3),1.5-(1.5-1)*clip((t-1)/2,0,1),1)", g)
+
         self.assertEqual(st["effects"][1]["value"], 1.5)
         self.assertEqual(st["audio"], {"mode": "original", "song_id": None, "song_db": -14.0})
         self.assertEqual((st["width"], st["height"], st["fps"]), (1280, 720, 24))   # 先頭の動画から
         self.assertEqual((st["fade_in"], st["fade_out"]), (0.0, 0.0))
+
+    def test_source_at_maps_export_time_to_the_clip_and_its_source_seconds(self):
+        st = state(clips=[clip("a", 2, 6), clip("b", 1, 5)], transitions=[xfade(0, 1)])     # export: a 0〜4、b 3〜7(1 秒重なる)
+        self.assertEqual(E.source_at(st, 1.0), {"index": 0, "clip": st["clips"][0], "source_s": 3.0})
+        self.assertEqual(E.source_at(st, 3.5)["index"], 1)                                     # 重なりは後ろのクリップ
+        self.assertEqual(E.source_at(st, 3.5)["source_s"], 1.5)
+        self.assertEqual(E.source_at(st, 99)["source_s"], 5.0)                                 # 末尾に丸める
+        self.assertIsNone(E.source_at({**E.empty_state()}, 1))
+        pans = E.validate_state({"clips": [clip()], "effects": [{"type": k, "start": 0, "end": 2} for k in E.PANS]}, SOURCES)
+        self.assertEqual([e["value"] for e in pans["effects"]], [1.2, 1.2, 1.2, 1.2, 1.3, 1.3])
+        g = E.build_graph(pans, PATHS)[0]
+        W, H = pans["width"], pans["height"]
+        self.assertIn(f"if(between(t,0,2),1.2,1)", g)                                                       # パンは一定の拡大
+        self.assertIn(f"crop={W}:{H}:x='(iw-{W})*clip((t-0)/2,0,1)':y='(ih-{H})/2'", g)                    # 右へ
+        self.assertIn(f"crop={W}:{H}:x='(iw-{W})*(1-clip((t-0)/2,0,1))':y='(ih-{H})/2'", g)                # 左へ
+        self.assertIn(f"crop={W}:{H}:x='(iw-{W})/2':y='(ih-{H})*clip((t-0)/2,0,1)'", g)                    # 下へ
+        self.assertIn(f"crop={W}:{H}:x='(iw-{W})/2':y='(ih-{H})*(1-clip((t-0)/2,0,1))'", g)                # 上へ
+        self.assertIn(f"if(between(t,0,2),1+(1.3-1)*clip((t-0)/2,0,1),1)", g)                               # ズームしながら
 
     def test_empty_and_image_only(self):
         self.assertEqual(E.validate_state({}, SOURCES), E.empty_state())
@@ -97,6 +127,9 @@ class ValidateTest(unittest.TestCase):
 
     def test_effect_errors(self):
         self.bad("効果 1の種類", {"clips": [clip()], "effects": [{"type": "glow"}]})
+        self.bad("効果 1(zoom_in)は区間", {"clips": [clip()], "effects": [{"type": "zoom_in"}]})
+        self.bad("効果 1(black)は区間", {"clips": [clip()], "effects": [{"type": "black", "start": 1}]})
+        self.bad("効果 1の値(3)は 1.05〜2", {"clips": [clip()], "effects": [{"type": "zoom_out", "value": 3, "start": 0, "end": 2}]})
         self.bad("効果 1の値(3.5)は 0〜3", {"clips": [clip()], "effects": [{"type": "saturation", "value": 3.5}]})
         self.bad("効果 1の値(-0.1)は 0〜3", {"clips": [clip()], "effects": [{"type": "contrast", "value": -0.1}]})
         self.bad("効果 1の値(1.5)は -1〜1", {"clips": [clip()], "effects": [{"type": "brightness", "value": 1.5}]})
@@ -306,7 +339,7 @@ class RenderArgsTest(unittest.TestCase):
         self.assertIn("eq=contrast=1.5:enable='between(t,6.5,9.5)'", g)         # 3 つ目のクリップだけ: 1.5 秒を引く(全体は 9.5 秒)
         self.assertIn("eq=brightness=-0.2,", g)                                 # 全体は enable なし
         self.assertNotIn("brightness=-0.2:enable", g)
-        self.assertIn("fade=t=out:st=4:d=1", g)                                 # 黒へ(5〜6 秒 → export 4〜5 秒)
+        self.assertIn("fade=t=out:st=4:d=1:enable='between(t,4,5)'", g)        # 黒へ(5〜6 秒 → export 4〜5 秒。区間の外は元のまま)
         order = [g.index(x) for x in ("eq=saturation", "eq=contrast", "eq=brightness", "fade=t=out:st=4")]
         self.assertEqual(order, sorted(order))                                  # 並びは state の順
 

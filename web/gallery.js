@@ -182,7 +182,7 @@ function renderGallery() {
   for (const it of list) {
     grid.append(thumbNode(it, (x) => {      // クリック: その生成物を、いまのタブの生成物ビューアで開く(MV タブは、その MV を作った制作を開く)
       const own = studio.own[studio.tab];
-      if (own) { if (own.open) own.open(x); setGalleryView(false); return; }
+      if (own) { const keep = own.open ? own.open(x) : false; if (!keep) setGalleryView(false); return; }      // open が true を返したら、ギャラリーは開いたまま(編集タブ: 続けてクリップを選べる)
       studio.viewing[studio.tab] = x.id;
       setGalleryView(false);
       renderHistory();

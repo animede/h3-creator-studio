@@ -27,9 +27,16 @@ LOOKS = {
     "negate": "negate",                                                                   # 色を反転
     "blur": "gblur=sigma=6",                                                              # ぼかし
 }
-EFFECT_TYPES = ("mono", "saturation", "contrast", "brightness", "fade_to_black", *LOOKS)
+# 選択区間の効果(区間が必須。フェード・黒・白と、静止画に効くズーム)
+RANGE_EFFECTS = ("fade_to_black", "fade_from_black", "black", "fade_to_white", "fade_from_white", "zoom_in", "zoom_out",
+                 "pan_right", "pan_left", "pan_down", "pan_up", "zoom_in_right", "zoom_in_left")
+PANS = ("pan_right", "pan_left", "pan_down", "pan_up", "zoom_in_right", "zoom_in_left")      # 少し拡大して、切り出す位置を動かす(静止画のケン・バーンズ)
+EFFECT_TYPES = ("mono", "saturation", "contrast", "brightness", *RANGE_EFFECTS, *LOOKS)
 AUDIO_MODES = ("original", "music", "mix", "none")
-EFFECT_RANGE = {"saturation": (0.0, 3.0, 1.0), "contrast": (0.0, 3.0, 1.0), "brightness": (-1.0, 1.0, 0.0)}   # (最小, 最大, 既定 = そのまま)
+EFFECT_RANGE = {"saturation": (0.0, 3.0, 1.0), "contrast": (0.0, 3.0, 1.0), "brightness": (-1.0, 1.0, 0.0),   # (最小, 最大, 既定 = そのまま)
+                "zoom_in": (1.05, 2.0, 1.3), "zoom_out": (1.05, 2.0, 1.3),                                        # ズームの倍率
+                "pan_right": (1.05, 2.0, 1.2), "pan_left": (1.05, 2.0, 1.2), "pan_down": (1.05, 2.0, 1.2), "pan_up": (1.05, 2.0, 1.2),
+                "zoom_in_right": (1.05, 2.0, 1.3), "zoom_in_left": (1.05, 2.0, 1.3)}                              # パンの拡大(動かす余白を作る)
 IMAGE_DEFAULT_S, IMAGE_MAX_S = 3.0, 600.0
 MIN_CLIP_S = 0.1                 # クリップの最短(これより短い切れ端は作らない)
 TRANSITION_MIN_S, TRANSITION_MAX_S = 0.5, 2.0
@@ -137,6 +144,18 @@ def export_timeline(state: dict) -> list:
         out.append({"index": i, "start": _r3(pos), "end": _r3(pos + length)})
         pos += length - (over[i] if i < len(over) else 0.0)
     return out
+
+
+def source_at(state: dict, t: float) -> Optional[dict]:
+    """書き出し(export)の時刻 t に映っているクリップと、その元の動画の中の秒: {"index", "clip", "source_s"}。クリップが無ければ None。
+    クロスフェードで重なる時間は、後ろのクリップとして数える(プレビューの再生位置から静止画を抜く用)。"""
+    tl = export_timeline(state)
+    if not tl:
+        return None
+    t = min(max(float(t), 0.0), tl[-1]["end"])
+    k = max(it["index"] for it in tl if it["start"] <= t + EPS)
+    clip = state["clips"][k]
+    return {"index": k, "clip": clip, "source_s": _r3(float(clip["in"]) + max(0.0, t - tl[k]["start"]))}
 
 
 def plain_to_export(state: dict, t: float, side: str = "start") -> float:
@@ -250,6 +269,8 @@ def _check_effects(raw, plain: float) -> list:
             value = _r3(value)
         start = None if e.get("start") in (None, "") else _num(e.get("start"), f"{no}の開始")
         end = None if e.get("end") in (None, "") else _num(e.get("end"), f"{no}の終了")
+        if kind in RANGE_EFFECTS and (start is None or end is None):
+            raise ValueError(f"{no}({kind})は区間(開始と終了)を指定してください")
         if start is not None and start < 0:
             raise ValueError(f"{no}の開始は 0 秒以上にしてください")
         if (end is not None and end > plain + EPS) or (start is not None and start >= plain - EPS):
@@ -533,14 +554,37 @@ def _effect_filters(state: dict) -> list:
         if b - a < EPS:
             continue
         gate = "" if whole else f":enable='between(t,{_n(a)},{_n(b)})'"
-        if e["type"] == "fade_to_black":
-            out.append(f"fade=t=out:st={_n(a)}:d={_n(b - a)}")
-        elif e["type"] == "mono":
+        kind = e["type"]
+        if kind in ("fade_to_black", "fade_from_black", "fade_to_white", "fade_from_white"):
+            # 区間の中だけ(enable)で、黒 / 白へ・から。区間の外は元のまま(黒を続けたいときは「黒にする」を重ねる)
+            direction = "out" if kind.endswith("_to_black") or kind.endswith("_to_white") else "in"
+            color = ":c=white" if kind.endswith("white") else ""
+            out.append(f"fade=t={direction}:st={_n(a)}:d={_n(b - a)}{color}{gate}")
+        elif kind == "black":
+            out.append(f"drawbox=c=black:t=fill{gate}")
+        elif kind in ("zoom_in", "zoom_out"):
+            # 中央へ寄るズーム(挿入した静止画に効く)。区間の進み p = 0→1 で倍率を 1→Z(ズームイン)/ Z→1(ズームアウト)にして、コマごとに拡大(scale の
+            # eval=frame。crop の w/h は起動時に 1 回しか計算されず t を使えない)してから、中央を元の寸法で切り出す。区間の外は倍率 1(何もしない)
+            z, w, h = _n(e["value"]), int(state["width"]), int(state["height"])
+            p = f"clip((t-{_n(a)})/{_n(b - a)},0,1)"
+            zexpr = f"if(between(t,{_n(a)},{_n(b)}),{f'1+({z}-1)*{p}' if kind == 'zoom_in' else f'{z}-({z}-1)*{p}'},1)"
+            out.append(f"scale=w='trunc(iw*({zexpr})/2)*2':h='trunc(ih*({zexpr})/2)*2':eval=frame,crop={w}:{h}:(iw-{w})/2:(ih-{h})/2")
+        elif kind in PANS:
+            # パン: 区間の間だけ Z 倍に拡大し(ズームしながらのパンは 1→Z)、切り出す窓を区間の進み p = 0→1 で端から端へ動かす(crop の x / y はコマごとに計算される)。
+            # 区間の外は拡大しない(iw = 幅なので窓は動かない)
+            z, w, h = _n(e["value"]), int(state["width"]), int(state["height"])
+            p = f"clip((t-{_n(a)})/{_n(b - a)},0,1)"
+            zexpr = f"if(between(t,{_n(a)},{_n(b)}),{f'1+({z}-1)*{p}' if kind.startswith('zoom_in_') else z},1)"
+            x = {"pan_right": f"(iw-{w})*{p}", "pan_left": f"(iw-{w})*(1-{p})", "pan_down": f"(iw-{w})/2", "pan_up": f"(iw-{w})/2",
+                 "zoom_in_right": f"(iw-{w})*{p}", "zoom_in_left": f"(iw-{w})*(1-{p})"}[kind]
+            y = {"pan_down": f"(ih-{h})*{p}", "pan_up": f"(ih-{h})*(1-{p})"}.get(kind, f"(ih-{h})/2")
+            out.append(f"scale=w='trunc(iw*({zexpr})/2)*2':h='trunc(ih*({zexpr})/2)*2':eval=frame,crop={w}:{h}:x='{x}':y='{y}'")
+        elif kind == "mono":
             out.append(f"hue=s=0{gate}")
         elif e["type"] in LOOKS:
             out.append(f"{LOOKS[e['type']]}{gate}")
         else:
-            out.append(f"eq={e['type']}={_n(e['value'])}{gate}")
+            out.append(f"eq={kind}={_n(e['value'])}{gate}")
     return out
 
 

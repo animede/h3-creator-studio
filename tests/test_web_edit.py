@@ -122,7 +122,7 @@ for (const t of [0, 3.3, 10.5, 19.9]) assert.strictEqual(L.outToTl(base(), L.tlT
 TAB_BUTTON = '<button class="tab" data-tab="edit" role="tab">編集</button>'
 # 契約(編集タブの API)にある入り口。edit.js はこれ以外の /api/edit を使わない
 API_PATHS = {"/api/edit", "/api/edit/probe", "/api/edit/${id}", "/api/edit/${id}/state", "/api/edit/${id}/undo", "/api/edit/${id}/redo",
-             "/api/edit/${id}/preview", "/api/edit/${id}/export", "/api/edit/${view.id}"}
+             "/api/edit/${id}/preview", "/api/edit/${id}/export", "/api/edit/${view.id}", "/api/edit/${view.id}/frame"}
 
 
 class EditPageTest(unittest.TestCase):

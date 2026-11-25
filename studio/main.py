@@ -733,6 +733,17 @@ async def api_edit_preview(pid: str):
         return _edit_public(await app.state.edit.preview(pid))
 
 
+class EditFrameIn(BaseModel):
+    t: float = 0.0                 # プレビューの再生位置(書き出しの秒)
+
+
+@app.post("/api/edit/{pid}/frame")
+async def api_edit_frame(pid: str, body: EditFrameIn):
+    """再生位置のコマを、元の動画から元の解像度の PNG に抜き出してギャラリーに載せる(同期)。ギャラリーの公開形を返す。"""
+    with _edit_errors():
+        return _public(await asyncio.to_thread(app.state.edit.extract_frame, pid, body.t))
+
+
 @app.post("/api/edit/{pid}/export")
 async def api_edit_export(pid: str):
     """書き出しのジョブを入れる。書き出しが走っていれば 409。"""
@@ -943,6 +954,17 @@ def _save_upload(f: UploadFile) -> dict:
 async def api_uploads(files: list[UploadFile]):
     """OS からドロップされたファイルを outputs/uploads/ に保存し、ギャラリーに登録する。"""
     return [_public(await asyncio.to_thread(_save_upload, f)) for f in files]
+
+
+@app.middleware("http")
+async def _no_stale_web(request, call_next):
+    """画面のファイル(HTML・JS・CSS)はブラウザに古い版を使わせない(更新後に、古い gallery.js が残ってギャラリーの挙動が変わらなかった。
+    2026-11-25)。no-cache = 毎回サーバに確かめる(変わっていなければ 304 で速い)。生成物(/outputs/)と API はそのまま。"""
+    response = await call_next(request)
+    path = request.url.path
+    if request.method == "GET" and not path.startswith(("/api/", "/outputs/")) and (path == "/" or path.endswith((".html", ".js", ".css"))):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")

@@ -182,7 +182,13 @@ const EDIT_LOGIC = (() => {
     saturation: { label: "彩度", min: 0, max: 3, step: 0.1, def: 1.5 },
     contrast: { label: "コントラスト", min: 0, max: 3, step: 0.1, def: 1.3 },
     brightness: { label: "明るさ", min: -1, max: 1, step: 0.05, def: 0.2 },
-    fade_to_black: { label: "黒に落とす" },
+    fade_to_black: { label: "黒へフェード" }, fade_from_black: { label: "黒からフェード" }, black: { label: "黒にする" },
+    fade_to_white: { label: "白へフェード" }, fade_from_white: { label: "白からフェード" },
+    zoom_in: { label: "ズームイン", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" }, zoom_out: { label: "ズームアウト", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" },
+    pan_right: { label: "右へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" }, pan_left: { label: "左へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" },
+    pan_down: { label: "下へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" }, pan_up: { label: "上へパン", min: 1.05, max: 2, step: 0.05, def: 1.2, unit: "倍" },
+    zoom_in_right: { label: "ズームインしながら右へ", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" },
+    zoom_in_left: { label: "ズームインしながら左へ", min: 1.05, max: 2, step: 0.05, def: 1.3, unit: "倍" },
     sepia: { label: "セピア" }, warm: { label: "暖色" }, cool: { label: "寒色" }, vintage: { label: "フィルム風(退色)" },
     vignette: { label: "周辺を暗く" }, negate: { label: "色を反転" }, blur: { label: "ぼかし" },
   };
@@ -396,9 +402,36 @@ const EDIT_LOGIC = (() => {
     ed(field).value = f(L.outToTl(view.state, ed("video").currentTime || 0));
     renderSel();
   }
+  // 1 コマずつ動かす(プロジェクトの fps。止めてから、いまの位置 ± 1/fps へ)
+  function stepFrame(dir) {
+    const v = ed("video");
+    if (!view || !v.getAttribute("src")) return;
+    const fps = (view.state && view.state.fps) || 24;
+    v.pause();
+    const t = Math.round((v.currentTime || 0) * fps + dir) / fps;        // コマの格子に載せてから動かす(端数で同じコマに留まらないように)
+    v.currentTime = Math.max(0, isFinite(v.duration) ? Math.min(t, v.duration) : t);
+  }
+  // いまのコマを画像にしてギャラリーへ(元の動画から元の解像度で。効果は掛からない)
+  ed("grab").onclick = async () => {
+    const v = ed("video");
+    if (!view || !v.getAttribute("src")) { showMsg("プレビューを作ってから、止めた位置で押してください"); return; }
+    ed("grab").disabled = true;
+    try {
+      const rec = await api(`/api/edit/${view.id}/frame`, "POST", { t: v.currentTime || 0 });
+      showMsg(`画像をギャラリーに入れました: ${rec.filename}(${rec.width}×${rec.height})`);
+      if (typeof loadGallery === "function") loadGallery();
+    } catch (e) {
+      showMsg(`コマを抜き出せませんでした: ${errText(e)}`);
+    } finally {
+      ed("grab").disabled = false;
+    }
+  };
+  ed("prev").onclick = () => stepFrame(-1);
+  ed("next").onclick = () => stepFrame(1);
   ed("from").onclick = ed("from2").onclick = () => fromPlayer("start");       // 左の欄と、右のプレビューの下の両方にある
   ed("to").onclick = ed("to2").onclick = () => fromPlayer("end");
   ed("all").onclick = () => { ed("start").value = "0"; ed("end").value = f(totalTl()); renderSel(); };
+  ed("clear").onclick = ed("clear2").onclick = () => { ed("start").value = ""; ed("end").value = ""; renderSel(); };      // 区間を消す(左の欄と、プレビューの下の両方にある)
 
   // ---- 操作 ----
 
@@ -459,29 +492,39 @@ const EDIT_LOGIC = (() => {
     });
   };
 
-  // 色調(fx: 見た目を選ぶ、値なし)と調整(adj: 値を決める)。どちらも同じ effects に積む
-  function renderFxInput() {
-    const type = ed("adj-type").value, d = FX[type];
-    ed("adj-valwrap").hidden = !d.step;
+  // 色調(fx: 見た目を選ぶ、値なし)・調整(adj: 値を決める)・選択区間の効果(rng: 区間が必須)。どれも同じ effects に積む
+  const FX_UI = {
+    fx: { type: () => ed("fx-type") },
+    adj: { type: () => ed("adj-type"), wrap: () => ed("adj-valwrap"), val: () => ed("adj-val"), text: () => ed("adj-valtext") },
+    rng: { type: () => ed("rng-type"), wrap: () => ed("rng-valwrap"), val: () => ed("rng-val"), text: () => ed("rng-valtext") },
+  };
+  const FX_SEL = { fx: FX_UI.fx.type, adj: FX_UI.adj.type, rng: FX_UI.rng.type };
+  function renderSlider(which) {
+    const u = FX_UI[which], type = u.type().value, d = FX[type];
+    u.wrap().hidden = !d.step;
     if (d.step) {
-      const r = ed("adj-val");
+      const r = u.val();
       if (r.dataset.type !== type) { r.min = d.min; r.max = d.max; r.step = d.step; r.value = d.def; r.dataset.type = type; }
-      ed("adj-valtext").textContent = f(num(r));
+      u.text().textContent = f(num(r)) + (d.unit || "");
     }
-    ed("adj-all").disabled = type === "fade_to_black" || !view || working;      // 黒に落とすのは、区間を決めて使う
+  }
+  function renderFxInput() {
+    renderSlider("adj");
+    renderSlider("rng");
+    ed("adj-all").disabled = !view || working;
     ed("fx-all").disabled = !view || working;
   }
-  ed("adj-type").onchange = renderFxInput;
-  ed("adj-val").oninput = renderFxInput;
+  ed("adj-type").onchange = ed("rng-type").onchange = renderFxInput;
+  ed("adj-val").oninput = ed("rng-val").oninput = renderFxInput;
 
   function applyFx(which, whole) {
-    const type = (which === "fx" ? ed("fx-type") : ed("adj-type")).value, d = FX[type];
+    const type = FX_SEL[which]().value, d = FX[type];
     let r = [null, null];
     if (!whole) { try { r = getRange(); } catch (e) { showMsg(errText(e)); return; } }
     mutate((v) => {
       const s = L.clone(v.state);
       s.effects = s.effects || [];
-      s.effects.push({ type, value: d.step ? L.r3(num(ed("adj-val"))) : 1, start: r[0], end: r[1] });
+      s.effects.push({ type, value: d.step ? L.r3(num(FX_UI[which].val())) : 1, start: r[0], end: r[1] });
       return s;
     });
   }
@@ -489,8 +532,20 @@ const EDIT_LOGIC = (() => {
   ed("fx-all").onclick = () => applyFx("fx", true);
   ed("adj-apply").onclick = () => applyFx("adj", false);
   ed("adj-all").onclick = () => applyFx("adj", true);
+  ed("rng-apply").onclick = () => applyFx("rng", false);
 
-  const fxText = (e) => { const d = FX[e.type] || { label: e.type }; return `${d.label}${d.step ? ` ${f(e.value)}` : ""}  ${e.start == null ? "全体" : `${f(e.start)}〜${f(e.end)} 秒`}`; };
+  // 区間の中の境目すべてに、区間の長さ(0.5〜2 秒)で境目の効果を付ける
+  ed("tr-range").onclick = () => {
+    if (!view) return;
+    let r;
+    try { r = getRange(); } catch (e) { showMsg(errText(e)); return; }
+    const inside = view.timeline.slice(0, -1).map((t, i) => [i, t.end]).filter(([, end]) => end > r[0] + 1e-6 && end < r[1] - 1e-6).map(([i]) => i);
+    if (!inside.length) { showMsg("区間の中に境目がありません(境目をまたぐように区間を選んでください)"); return; }
+    const type = ed("tr-type").value, d = Math.min(2, Math.max(0.5, L.r3(r[1] - r[0])));
+    mutate((v) => { let s = v.state; for (const i of inside) s = L.setTransition(s, i, type, d); return s; });
+  };
+
+  const fxText = (e) => { const d = FX[e.type] || { label: e.type }; return `${d.label}${d.step ? ` ${f(e.value)}${d.unit || ""}` : ""}  ${e.start == null ? "全体" : `${f(e.start)}〜${f(e.end)} 秒`}`; };
 
   function renderFxList() {
     const box = ed("fx-list");
@@ -816,7 +871,7 @@ const EDIT_LOGIC = (() => {
     ed("export").disabled = !v || working || !v.state.clips.length || !!(job && job.kind === "edit.export");
     ed("ins-go").disabled = !insItem || !v || working;
     ed("fx-all").disabled = !v || working;
-    ed("adj-all").disabled = ed("adj-type").value === "fade_to_black" || !v || working;
+    ed("adj-all").disabled = !v || working;
     ed("intro").hidden = !!v;
   }
 
@@ -923,9 +978,11 @@ const EDIT_LOGIC = (() => {
 
   studio.own.edit = {
     history: () => renderCards(true),
-    open: (item) => {          // ギャラリーで書き出した動画を選んだら、それを作った編集プロジェクトを開く
-      const pid = item.params && item.params.project_id;
-      if (pid && projects.some((p) => p.id === pid)) selectProject(pid);
+    open: (item) => {          // ギャラリーでクリック: 動画・画像はクリップの末尾に、曲は音声に(ギャラリーは開いたまま。続けて選べる)
+      if (!view) { showMsg("先に編集プロジェクトを選ぶか、新規に作ってください"); return true; }
+      if (isClipKind(item)) addItems([item]);
+      else if (item.kind === "audio") setSong(item);
+      return true;
     },
     ids: () => projects.map((p) => p.id),
     remove: removeProjects,
