@@ -52,6 +52,17 @@ class ShortPageTest(unittest.TestCase):
         self.assertIn("final_audio: ui.audio.value", self.project)
         self.assertIn("A4000 の高速で 1 シーン約 3.5 分", self.short)
 
+    def test_samples_are_wired_into_the_short_tab(self):
+        self.assertIn("sh-samples", self.ids)
+        self.assertIn('wireSamples({ tab: "short", box: sh("samples"), apply: applySample })', self.short)
+        body = re.search(r"^( *)function applySample\([^)]*\) \{\n(.*?)^\1\}$", self.short, re.S | re.M).group(2)
+        for part in ("applyPresetValues(values)", "setSong(a.output)", "addImage(a.output, a.role)", "values.character", "サンプルを読み込みました。「ショート動画を作る」で同じ条件で作れます"):
+            self.assertIn(part, body)
+        for key in ("story", "narration", "character"):
+            self.assertIn(f'"{key}"', body)
+        order = re.findall(r'<script src="([\w.]+)"></script>', self.html)
+        self.assertLess(order.index("samples.js"), order.index("short.js"))
+
 
 if __name__ == "__main__":
     unittest.main()

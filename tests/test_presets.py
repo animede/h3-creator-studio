@@ -175,8 +175,8 @@ class BuiltinFilesTest(unittest.TestCase):
             self.assertIn(f'wirePresets({{ tab: "{tab}"', src)
 
     def test_page_has_a_preset_bar_per_tab_and_loads_the_script_first(self):
-        for box in ("im-presets", "vd-presets", "mu-presets", "mv-presets", "sh-presets"):
-            self.assertIn(f'<div class="presetbar" id="{box}"></div>', self.html)
+        for pre in ("im", "vd", "mu", "mv", "sh"):      # プリセットの欄の中に、サンプルの欄(隠れている)がある
+            self.assertIn(f'<div class="presetbar" id="{pre}-presets"><div class="samplebox" id="{pre}-samples" hidden></div></div>', self.html)
         order = re.findall(r'<script src="([\w.]+)"></script>', self.html)
         self.assertLess(order.index("presets.js"), min(order.index(f) for f in ("image.js", "video.js", "music.js", "mv.js", "short.js")))
         self.assertLess(max(order.index(f) for f in ("app.js", "gallery.js", "jobs.js")), order.index("presets.js"))      # el・studio・createTracker の後

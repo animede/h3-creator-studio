@@ -1,0 +1,43 @@
+{
+  "id": "short-harbor-day",
+  "tab": "short",
+  "title": "港町の一日(曲もセリフも無し)",
+  "description": "物語の文章だけから 60 秒・8 シーン。参照画像なし(T2VA)、H3 の環境音をそのまま残す。",
+  "values": {
+    "story": "小さな港町の一日。夜明けの灯台、漁師たちの帰港、市場の賑わい、夕方の海に沈む太陽。人物は登場しない。波と風とカモメの声。",
+    "aspect": "16:9",
+    "quality": "standard",
+    "min_s": 5.0,
+    "max_s": 10.0,
+    "background_text": "auto",
+    "final_audio": "auto",
+    "length_s": 60.0
+  },
+  "assets": [],
+  "video": "sample.mp4",
+  "thumb": "thumb.jpg",
+  "made": {
+    "gpu": "RTX PRO 6000(共有、H3 利用枠 24GiB)",
+    "quality": "standard 1024×576",
+    "per_scene_s": 55,
+    "total_min": 9
+  },
+  "outline": {
+    "title": "港町の調べ (Port Town's Melody)",
+    "setting": "A small, tranquil coastal town experiencing the full cycle of a single day",
+    "characters": "None. Focus is on natural elements: waves, wind, seagulls",
+    "arc": "The narrative follows the transition from the quiet solitude of dawn to the vibrant energy of midday, settling into the peaceful grandeur of sunset",
+    "places": [
+      "Dawn Lighthouse (灯台)",
+      "Fishing Harbor/Docks (漁港)",
+      "Morning Fish Market (魚市場)",
+      "Evening Sea/Horizon (夕暮れの海)"
+    ],
+    "continuity_rules": [
+      "The color palette must transition smoothly from cool blues and greys at dawn to warm oranges and deep purples by sunset",
+      "Sound design is paramount: the soundscape should evolve from gentle, rhythmic lapping waves to bustling activity (though no people are shown clearly) and finally back to vast silence punctuated by wind and gulls",
+      "The visual texture of water—from misty morning fog to sharp midday sunlight reflecting off wet wood—must remain consistent within each location's sequence"
+    ]
+  },
+  "license": "CC0 (このサンプルの動画・画像・曲は自由に使ってよい)"
+}

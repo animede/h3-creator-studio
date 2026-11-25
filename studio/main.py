@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import editclip, genres, mv_audio, presets, procman
+from . import editclip, genres, mv_audio, presets, procman, samples
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
@@ -31,6 +31,7 @@ from .llm import Llm, LlmError
 from .mv import Director, concept_from_song, pick_image, pick_song, song_has_info
 from .mvdescribe import describe_character, listen_song, propose_concept
 from .presets import PresetError
+from .samples import SampleError
 from .scheduler import Scheduler
 from .short import ShortDirector, propose_narration
 from .handlers import ace as ace_handler
@@ -43,8 +44,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
-              "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
-              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/favicon.ico")
+              "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/presets", "/api/samples", "/outputs/", "/samples/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
+              "/presets.js", "/samples.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -72,6 +73,7 @@ async def lifespan(app: FastAPI):
     director.restore()       # 再起動で途切れた MV の制作は、一時停止にして残す
     app.state.short = short_director = ShortDirector(runner, ledger, OUTPUTS_DIR)
     short_director.restore()       # ショート動画も同じ
+    app.state.samples = samples.load_samples()      # 同梱のサンプル(samples/*/sample.json)。読めないものは警告を出して飛ばす
     app.state.edit = EditManager(runner, ledger, OUTPUTS_DIR)      # 編集タブ(ジョブは再起動で消えるので、復元するものは無い)
     llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
@@ -847,6 +849,41 @@ def api_presets_delete(pid: str):
     return {"ok": True}
 
 
+# ---- サンプル(同梱の「作り方の見本」。入力欄の値と素材と、できあがりの動画) ----
+
+def _samples() -> list:
+    if getattr(app.state, "samples", None) is None:
+        app.state.samples = samples.load_samples()
+    return app.state.samples
+
+
+@contextlib.contextmanager
+def _sample_errors():
+    """サンプルの操作の失敗を HTTP のエラーにする(理由は日本語)。"""
+    try:
+        yield
+    except SampleError as e:
+        raise HTTPException(e.status, e.message)
+
+
+@app.get("/api/samples")
+def api_samples(tab: str = None):
+    """同梱のサンプルの一覧(フォルダ名の順)。tab で絞る。ファイルの URL は /samples/<id>/<ファイル名>。"""
+    with _sample_errors():
+        return samples.list_samples(_samples(), tab)
+
+
+@app.post("/api/samples/{sample_id}/load")
+async def api_samples_load(sample_id: str):
+    """サンプルの素材(画像・曲)をギャラリーに登録して返す(登録済みなら、それを使う)。入力欄の値も返す。画面が入力欄に反映する(生成はしない)。"""
+    sample = next((s for s in _samples() if s["id"] == sample_id), None)
+    if sample is None:
+        raise HTTPException(404, samples.NOT_FOUND)
+    with _sample_errors():
+        added = await asyncio.to_thread(samples.register_assets, app.state.ledger, sample)
+    return {"values": sample["values"], "assets": [{"role": a["role"], "output": _public(a["output"])} for a in added]}
+
+
 # ---- ギャラリーとアップロード ----
 
 def _public(rec: dict) -> dict:
@@ -985,6 +1022,7 @@ async def _no_stale_web(request, call_next):
 
 
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
+app.mount("/samples", StaticFiles(directory=str(samples.SAMPLES_DIR), check_dir=False), name="samples")      # 同梱のサンプル(読み取り専用。配るだけで、書き込む口は無い)
 app.mount("/", StaticFiles(directory=str(REPO_ROOT / "web"), html=True), name="web")
 
 

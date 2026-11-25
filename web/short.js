@@ -157,11 +157,12 @@
     fill(sh("char"), p ? String((p.item.params && p.item.params.prompt) || "").trim().slice(0, CHAR_MAX) : "");
   }
 
-  function addImage(item) {
+  // role は、サンプルなど役割が決まっているときだけ渡す(人物は 1 枚までなので、2 枚目の人物は景色・物にする)
+  function addImage(item, role) {
     if (item.kind !== "image") { showMsg("参照画像には画像を落としてください"); return false; }
     if (images.some((r) => r.item.id === item.id)) { showMsg("その画像はもう入っています"); return false; }
     if (images.length >= IMAGES_MAX) { showMsg(`参照画像は ${IMAGES_MAX} 枚までです`); return false; }
-    images.push({ item, role: person() ? "scenery" : "person" });      // 最初の 1 枚は人物、2 枚目からは景色・物(役割は選び直せる)
+    images.push({ item, role: (role || "person") === "person" && !person() ? "person" : "scenery" });      // 最初の 1 枚は人物、2 枚目からは景色・物(役割は選び直せる)
     showMsg("");
     renderImages();
     changed();
@@ -400,6 +401,30 @@
     return skipped;
   }
   wirePresets({ tab: "short", box: sh("presets"), get: getPresetValues, apply: applyPresetValues });
+
+  // ---- サンプル(samples/<id>/ の入力欄の値と素材。読み込むと、いまの曲・参照画像・物語・セリフ・人物の説明は、サンプルのものに置き換わる。生成はしない) ----
+
+  // values = サンプルの入力欄の値(プリセットと同じ項目 + story / narration / character)。assets = [{role: song | person | scenery, output(ギャラリーの生成物)}]
+  function applySample(values, assets) {
+    song = null;                              // 前の入力を引きずらない(サンプルの条件で作れるように)
+    images = [];
+    charFor = null;
+    for (const [id, key] of [["story", "story"], ["narr", "narration"], ["char", "character"]]) {
+      sh(id).dataset.auto = "";               // 自動で入れた文の印は外す(サンプルの文は、書いた文と同じに扱う)
+      presetSet(sh(id), typeof values[key] === "string" ? values[key] : "");      // input で、時間軸・長さ・ボタンが追従する
+    }
+    const skipped = applyPresetValues(values);
+    for (const a of assets) {
+      if (a.role === "song") setSong(a.output);
+      else addImage(a.output, a.role);        // IMAGES_MAX を超える分は、addImage が断る
+    }
+    if (typeof values.character === "string" && values.character) sh("char").value = values.character;      // 人物の画像のプロンプトより、サンプルの説明を優先する
+    renderSong();
+    renderImages();
+    changed();
+    showMsg("サンプルを読み込みました。「ショート動画を作る」で同じ条件で作れます" + (skipped.length ? `(選べない値だったので、そのままにした項目: ${skipped.join("、")})` : ""));
+  }
+  wireSamples({ tab: "short", box: sh("samples"), apply: applySample });
 
   // ---- 右側: 制作の進み・シーン・最終の動画・履歴(MV タブと共通。web/project.js) ----
 

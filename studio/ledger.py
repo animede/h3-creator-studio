@@ -162,6 +162,17 @@ class Ledger:
             row = self._db.execute("SELECT * FROM outputs WHERE id = ?", (oid,)).fetchone()
         return self._out(row) if row else None
 
+    def find_output_by_params(self, **match) -> Optional[dict]:
+        """params(params_json)の中で、指定した項目が全部一致する生成物(いちばん古いもの)。無ければ None。
+        サンプルの素材を、ギャラリーに 1 回だけ登録するための検索(params の sample と sample_file)。"""
+        if not match:
+            return None
+        where = " AND ".join("json_extract(params_json, ?) = ?" for _ in match)
+        args = [x for k, v in match.items() for x in (f'$."{k}"', v)]
+        with self._lock:
+            row = self._db.execute(f"SELECT * FROM outputs WHERE {where} ORDER BY created_at LIMIT 1", args).fetchone()
+        return self._out(row) if row else None
+
     def delete_output(self, oid: str) -> bool:
         """台帳の行とファイル(本体・サムネイル・隣に置いた字幕)を消す。無ければ False。
         字幕は、ショート動画の結合が最終の動画の隣に置く SRT(params.srt にその名前。同じフォルダのものだけ)。"""
