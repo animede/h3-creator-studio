@@ -45,7 +45,7 @@ class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
               "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/presets", "/api/samples", "/outputs/", "/samples/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
-              "/presets.js", "/samples.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/favicon.ico")
+              "/presets.js", "/samples.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/help.js", "/api/help", "/docs/img/", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -870,6 +870,21 @@ def _sample_errors():
         raise HTTPException(e.status, e.message)
 
 
+HELP_MD = REPO_ROOT / "docs" / "USAGE.md"      # 画面の「使い方」の窓に出す説明(テストは差し替える)
+HELP_IMG_DIR = REPO_ROOT / "docs" / "img"
+
+
+@app.get("/api/help")
+async def api_help():
+    """「使い方」の窓の中身(docs/USAGE.md の Markdown)。毎回読む(説明を直したら、再起動なしで出る)。mtime は、窓が読み直すかの目印。"""
+    try:
+        text = await asyncio.to_thread(HELP_MD.read_text, encoding="utf-8")
+        mtime = HELP_MD.stat().st_mtime
+    except OSError:
+        raise HTTPException(404, "使い方の説明(docs/USAGE.md)が見つかりません")
+    return {"markdown": text, "mtime": mtime}
+
+
 @app.get("/api/samples")
 def api_samples(tab: str = None):
     """同梱のサンプルの一覧(フォルダ名の順)。tab で絞る。ファイルの URL は /samples/<id>/<ファイル名>。"""
@@ -1027,6 +1042,7 @@ async def _no_stale_web(request, call_next):
 
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 app.mount("/samples", StaticFiles(directory=str(samples.SAMPLES_DIR), check_dir=False), name="samples")      # 同梱のサンプル(読み取り専用。配るだけで、書き込む口は無い)
+app.mount("/docs/img", StaticFiles(directory=str(HELP_IMG_DIR), check_dir=False), name="help-img")      # 使い方の画像(読み取り専用)
 app.mount("/", StaticFiles(directory=str(REPO_ROOT / "web"), html=True), name="web")
 
 

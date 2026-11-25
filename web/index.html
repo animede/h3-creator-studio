@@ -14,6 +14,7 @@
       <div class="gauge" id="g-vram"><span class="g-label">VRAM</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
       <div class="gauge" id="g-shared" hidden><span class="g-label">共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
       <div class="gauge" id="g-ram"><span class="g-label">CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
+      <button id="help-btn" class="mini help-btn" type="button" aria-expanded="false" aria-controls="help-win" title="使い方の説明を、動かせる窓で開きます(Esc で閉じる)">使い方</button>
     </div>
     <div class="lanes" id="lanes" aria-label="ジョブの状況と GPU に載っているエンジン"></div>
   </div>
@@ -557,6 +558,21 @@
     <a href="https://github.com/Aivis-Project/AivisSpeech-Engine" target="_blank" rel="noopener">AivisSpeech</a>(Aivis Project)</span>
   <span class="lic">モデルとエンジンは、それぞれのライセンスに従います(README のクレジット)</span>
 </footer>
+<div id="help-win" role="dialog" aria-label="使い方" hidden>
+  <div class="help-head" id="help-head">
+    <b class="help-title">使い方</b>
+    <a id="help-gh" class="help-gh" href="https://github.com/animede/h3-creator-studio/blob/main/docs/USAGE.md" target="_blank" rel="noopener noreferrer" title="GitHub 上の説明を別のタブで開きます">GitHub で開く</a>
+    <button id="help-close" class="mini x" type="button" aria-label="閉じる">×</button>
+  </div>
+  <div class="help-body">
+    <nav class="help-toc" id="help-toc" aria-label="目次"></nav>
+    <div class="help-main">
+      <select id="help-toc-sel" class="help-toc-sel" aria-label="目次"></select>
+      <article class="help-content" id="help-content"></article>
+    </div>
+  </div>
+</div>
+
 <dialog id="proj-del">
   <form method="dialog">
     <div class="dtext" id="proj-del-text"></div>
@@ -579,5 +595,6 @@
 <script src="mv.js"></script>
 <script src="short.js"></script>
 <script src="edit.js"></script>
+<script src="help.js"></script>
 </body>
 </html>
