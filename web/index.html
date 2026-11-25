@@ -32,8 +32,9 @@
   <button class="tab active" data-tab="image" role="tab">画像</button>
   <button class="tab" data-tab="video" role="tab">動画</button>
   <button class="tab" data-tab="music" role="tab">音楽</button>
-  <button class="tab" data-tab="mv" role="tab">MV</button>
+  <button class="tab" data-tab="mv" role="tab">MV(ミュージックビデオ)</button>
   <button class="tab" data-tab="short" role="tab">ショート動画</button>
+  <button class="tab" data-tab="edit" role="tab">編集</button>
 </nav>
 
 <main class="workspace" id="workspace" data-tab="image">
@@ -352,6 +353,106 @@
       <div class="msg" id="sh-msg" hidden></div>
       <div class="actions"><button id="sh-go" class="primary">ショート動画を作る</button></div>
     </div>
+    <div class="tabpanel" id="tab-edit" hidden>
+      <div class="edproj">
+        <select id="ed-proj" aria-label="編集プロジェクト"></select>
+        <div class="preset-btns">
+          <button id="ed-new" type="button" class="mini">新規</button>
+          <button id="ed-rename" type="button" class="mini" disabled>名前の変更</button>
+          <button id="ed-del" type="button" class="mini" disabled>削除</button>
+        </div>
+      </div>
+      <div class="note edintro" id="ed-intro">動画・画像をつないで、切る・色を変える・曲を付ける、簡単な編集です(GPU は使いません。元の動画は変わりません)。まず「新規」で編集プロジェクトを作ってください。</div>
+      <fieldset class="edbody" id="ed-body" disabled>
+        <h3 class="edh">クリップ</h3>
+        <div class="refs edclips-box" id="ed-clips-drop" aria-label="クリップのドロップ欄">
+          <div class="edclips" id="ed-clips"></div>
+          <div class="refs-empty" id="ed-clips-empty">ここに動画・画像をドロップ<br><small>動画タブ・MV・ショート動画の動画、ギャラリー、PC のファイル(末尾に足されます)</small></div>
+          <div class="uploading"><span class="spin"></span>アップロード中…</div>
+        </div>
+
+        <h3 class="edh">区間 <small>(秒。つないだだけの時間で数えます)</small></h3>
+        <div class="fld two edrange">
+          <label><span class="fl">開始</span><input id="ed-start" type="number" min="0" step="0.1" value="0"></label>
+          <label><span class="fl">終了</span><input id="ed-end" type="number" min="0" step="0.1" value="0"></label>
+        </div>
+        <div class="edrow">
+          <button id="ed-from" type="button" class="mini" title="プレビューの再生位置を、開始にします">ここから</button>
+          <button id="ed-to" type="button" class="mini" title="プレビューの再生位置を、終了にします">ここまで</button>
+          <button id="ed-all" type="button" class="mini" title="開始 0 から、最後までにします">全体</button>
+          <span class="note edgrow" id="ed-range-note"></span>
+        </div>
+
+        <h3 class="edh">操作</h3>
+        <div class="edop">
+          <button id="ed-delrange" type="button">区間を削除</button>
+          <span class="note">開始〜終了を切り取って、前後をつなぎます</span>
+        </div>
+        <div class="edop col">
+          <div class="refs frame edmini" id="ed-ins-drop" aria-label="挿入する動画・画像のドロップ欄"><div class="frame-body" id="ed-ins-body"></div></div>
+          <div class="edrow">
+            <button id="ed-ins-go" type="button" disabled>位置に挿入</button>
+            <label class="chk">画像の秒数<input id="ed-ins-sec" type="number" min="0.5" max="60" step="0.5" value="3" class="edsmall"></label>
+            <span class="note">開始の位置に入ります</span>
+          </div>
+        </div>
+
+        <h3 class="edh">色調 <small>(見た目を選ぶ)</small></h3>
+        <div class="edop col">
+          <div class="edrow">
+            <select id="ed-fx-type" aria-label="色調の種類">
+              <option value="mono">モノクロ</option><option value="sepia">セピア</option><option value="warm">暖色</option><option value="cool">寒色</option>
+              <option value="vintage">フィルム風(退色)</option><option value="vignette">周辺を暗く</option><option value="negate">色を反転</option>
+              <option value="blur">ぼかし</option>
+            </select>
+          </div>
+          <div class="edrow">
+            <button id="ed-fx-apply" type="button">区間に適用</button>
+            <button id="ed-fx-all" type="button">全体に適用</button>
+          </div>
+        </div>
+
+        <h3 class="edh">調整 <small>(値を決める)</small></h3>
+        <div class="edop col">
+          <div class="edrow">
+            <select id="ed-adj-type" aria-label="調整の種類">
+              <option value="saturation">彩度</option><option value="contrast">コントラスト</option>
+              <option value="brightness">明るさ</option><option value="fade_to_black">黒に落とす</option>
+            </select>
+          </div>
+          <div class="edrow" id="ed-adj-valwrap"><input id="ed-adj-val" type="range" min="0" max="3" step="0.1" value="1.5" aria-label="値"><span class="edval" id="ed-adj-valtext"></span></div>
+          <div class="edrow">
+            <button id="ed-adj-apply" type="button">区間に適用</button>
+            <button id="ed-adj-all" type="button">全体に適用</button>
+          </div>
+        </div>
+
+        <h3 class="edh">付けた色調・調整</h3>
+        <div class="edop col"><div class="edlist" id="ed-fx-list"></div></div>
+
+        <h3 class="edh">境目の効果</h3>
+        <div class="edlist" id="ed-trans"></div>
+
+        <h3 class="edh">先頭・末尾のフェード</h3>
+        <div class="fld two">
+          <label><span class="fl">先頭フェードイン(秒)</span><input id="ed-fadein" type="number" min="0" step="0.1" value="0"></label>
+          <label><span class="fl">末尾フェードアウト(秒)</span><input id="ed-fadeout" type="number" min="0" step="0.1" value="0"></label>
+        </div>
+
+        <h3 class="edh">音声</h3>
+        <label class="fld"><select id="ed-audio" aria-label="音声">
+          <option value="original">元の音</option><option value="music">曲に差し替え</option><option value="mix">元の音 + 曲</option><option value="none">音なし</option></select></label>
+        <div class="refs frame edmini" id="ed-song" aria-label="曲のドロップ欄"><div class="frame-body" id="ed-song-body"></div><div class="uploading"><span class="spin"></span>アップロード中…</div></div>
+      </fieldset>
+      <div class="edfoot">
+        <div class="msg" id="ed-msg" hidden></div>
+        <div class="actions">
+          <button id="ed-undo" type="button" disabled>元に戻す</button>
+          <button id="ed-redo" type="button" disabled>やり直す</button>
+          <button id="ed-export" type="button" class="primary" disabled>書き出し</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="panel output" id="output" aria-label="生成物">
@@ -369,6 +470,29 @@
     </div>
     <div class="mvproj" id="mv-project"></div>
     <div class="mvproj" id="short-project"></div>
+    <div class="mvproj" id="edit-project">
+      <div class="edstage" id="ed-stage">
+        <video id="ed-video" controls preload="metadata" hidden></video>
+        <div class="edempty" id="ed-empty"><span id="ed-empty-text">編集プロジェクトを選ぶか、新規に作ってください</span></div>
+        <div class="edwait" id="ed-wait" hidden><span class="spin"></span><span id="ed-wait-text"></span><div class="pbar" id="ed-wait-bar"><i></i></div></div>
+        <div class="edstale" id="ed-stale" hidden>プレビューは古い版です <button id="ed-regen" type="button" class="mini">作り直す</button></div>
+      </div>
+      <div class="edruler" id="ed-ruler" title="クリックで、その位置を再生します">
+        <div class="edticks" id="ed-ticks"></div>
+        <div class="edsegs" id="ed-segs"></div>
+        <div class="edfxs" id="ed-fxs"></div>
+        <div class="edsel" id="ed-sel" hidden></div>
+        <div class="edplay" id="ed-play"></div>
+      </div>
+      <div class="edtime edposrow"><span id="ed-time"></span>
+        <button id="ed-from2" type="button" class="mini" title="いまの再生位置を、区間の開始にします">ここから</button>
+        <button id="ed-to2" type="button" class="mini" title="いまの再生位置を、区間の終了にします">ここまで</button>
+        <span id="ed-sel-text" class="edseltext"></span></div>
+      <div class="mvfinal" id="ed-out" hidden>
+        <div class="fbar edouthead"><b>最後に書き出した動画</b><span id="ed-out-name"></span><span id="ed-out-info"></span><a id="ed-out-save" class="btn" download>保存</a></div>
+        <video id="ed-out-video" controls preload="metadata"></video>
+      </div>
+    </div>
   </section>
 
   <section class="panel history" id="history" aria-label="履歴">
@@ -410,5 +534,6 @@
 <script src="project.js"></script>
 <script src="mv.js"></script>
 <script src="short.js"></script>
+<script src="edit.js"></script>
 </body>
 </html>

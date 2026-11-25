@@ -17,9 +17,10 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import genres, mv_audio, presets, procman
+from . import editclip, genres, mv_audio, presets, procman
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
+from .edit import EditManager, ExportBusy
 from .enhance import EnhanceError, enhance_prompt
 from .genres import GenreError
 from .gpu import GpuMonitor
@@ -42,8 +43,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
-              "/api/components/", "/api/mv", "/api/short", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
-              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/dnd.js", "/viz.js", "/favicon.ico")
+              "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/presets", "/outputs/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
+              "/presets.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI):
     director.restore()       # 再起動で途切れた MV の制作は、一時停止にして残す
     app.state.short = short_director = ShortDirector(runner, ledger, OUTPUTS_DIR)
     short_director.restore()       # ショート動画も同じ
+    app.state.edit = EditManager(runner, ledger, OUTPUTS_DIR)      # 編集タブ(ジョブは再起動で消えるので、復元するものは無い)
     llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
     sched.monitor = monitor
@@ -641,6 +643,117 @@ async def api_short_delete(pid: str, with_output: bool = False):
     return {"ok": True, **(await asyncio.to_thread(_delete_outputs, ids) if with_output else {})}
 
 
+# ---- 編集(ffmpeg だけの簡易編集。編集プロジェクトの state と履歴は台帳、プレビュー・書き出しは CPU のジョブ) ----
+
+class EditCreateIn(BaseModel):
+    name: str = ""
+    state: Optional[dict] = None   # 渡せば最初の状態(検証する)。無ければ空
+
+
+class EditStateIn(BaseModel):
+    state: dict
+
+
+class EditRenameIn(BaseModel):
+    name: str = ""
+
+
+class EditProbeIn(BaseModel):
+    id: str = ""
+
+
+@contextlib.contextmanager
+def _edit_errors():
+    """編集の操作の失敗を HTTP のエラーにする(見つからない → 404、書き出し中 → 409、入力や状態が合わない → 400。理由はどれも日本語)。"""
+    try:
+        yield
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ExportBusy as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _edit_public(view: Optional[dict]) -> Optional[dict]:
+    """編集の辞書(view・一覧の行)の、書き出した動画(台帳の行)を、ギャラリーと同じ形(url つき)にする。"""
+    return {**view, "output": _public(view["output"]) if view.get("output") else None} if view else view
+
+
+@app.get("/api/edit")
+def api_edit_list(limit: int = 200):
+    """編集プロジェクトの一覧(更新が新しい順。state の中身は含めない)。"""
+    return [_edit_public(v) for v in app.state.edit.list(max(1, min(limit, 500)))]
+
+
+@app.post("/api/edit")
+async def api_edit_create(body: EditCreateIn):
+    with _edit_errors():
+        return _edit_public(app.state.edit.create(body.name, body.state))
+
+
+@app.post("/api/edit/probe")
+def api_edit_probe(body: EditProbeIn):
+    """生成物の種類・長さ・寸法(画面が、ドロップした素材の長さを知る用)。"""
+    with _edit_errors():
+        return app.state.edit.probe(body.id)
+
+
+@app.get("/api/edit/{pid}")
+def api_edit_get(pid: str):
+    view = app.state.edit.view(pid)
+    if view is None:
+        raise HTTPException(404, "その編集プロジェクトは見つかりません(削除されたかもしれません)")
+    return _edit_public(view)
+
+
+@app.put("/api/edit/{pid}/state")
+async def api_edit_state(pid: str, body: EditStateIn):
+    """state 全体を置き換える(検証して、履歴に 1 段積む)。プレビューは自動では作らない(続けて /preview を呼ぶ)。"""
+    with _edit_errors():
+        return _edit_public(app.state.edit.set_state(pid, body.state))
+
+
+@app.post("/api/edit/{pid}/undo")
+async def api_edit_undo(pid: str):
+    with _edit_errors():
+        return _edit_public(app.state.edit.undo(pid))
+
+
+@app.post("/api/edit/{pid}/redo")
+async def api_edit_redo(pid: str):
+    with _edit_errors():
+        return _edit_public(app.state.edit.redo(pid))
+
+
+@app.post("/api/edit/{pid}/preview")
+async def api_edit_preview(pid: str):
+    """いまの状態のプレビューを作るジョブを入れる(走っている・順番待ちのプレビューは中止して)。"""
+    with _edit_errors():
+        return _edit_public(await app.state.edit.preview(pid))
+
+
+@app.post("/api/edit/{pid}/export")
+async def api_edit_export(pid: str):
+    """書き出しのジョブを入れる。書き出しが走っていれば 409。"""
+    with _edit_errors():
+        return _edit_public(app.state.edit.export(pid))
+
+
+@app.patch("/api/edit/{pid}")
+async def api_edit_rename(pid: str, body: EditRenameIn):
+    with _edit_errors():
+        return _edit_public(app.state.edit.rename(pid, body.name))
+
+
+@app.delete("/api/edit/{pid}")
+async def api_edit_delete(pid: str):
+    """プロジェクトとプレビューを消す(走っているジョブは中止して)。書き出した動画はギャラリーに残る。"""
+    with _edit_errors():
+        await app.state.edit.delete(pid)
+    return {"ok": True}
+
+
 # ---- プリセット(各タブの入力欄の値に名前を付けたもの) ----
 
 class PresetIn(BaseModel):
@@ -732,6 +845,7 @@ def api_gallery(kind: str = "all", tab: str = None, limit: int = 200):
 JOB_IN_USE = "実行中・順番待ちのジョブで使っています"
 MV_IN_USE = "MV の制作(一時停止中など)で使っています。先に制作を削除してください"
 SHORT_IN_USE = "ショート動画の制作(一時停止中など)で使っています。先に制作を削除してください"
+EDIT_IN_USE = "編集プロジェクトで使っています。先にクリップ・曲から外すか、プロジェクトを削除してください"
 DELETE_MAX = 500          # 一度に消せる数(画面のギャラリーが読む数)
 
 
@@ -749,7 +863,7 @@ def _strings(value):
 
 def _in_use(ids) -> dict:
     """ids のうち、まだ要る生成物の ID -> 消せない理由。順番待ち・準備中・実行中のジョブが params で使っているもの(references・first_image・
-    last_image など。入れ子の中も見る)と、続きのある MV の制作(完成・中止以外)が曲・画像に使っているもの。"""
+    last_image など。入れ子の中も見る)と、続きのある MV の制作(完成・中止以外)が曲・画像に使っているもの、編集プロジェクトの state が使っているクリップ・曲。"""
     ids, busy = set(ids), {}
     for job in list(app.state.jobs.jobs.values()):
         if job.status not in TERMINAL:
@@ -762,6 +876,10 @@ def _in_use(ids) -> dict:
             for oid in (params.get("song_id"), params.get("image_id"), *(it.get("id") for it in params.get("images") or [])):       # ショート動画は参照画像(images)
                 if oid in ids:
                     busy.setdefault(oid, SHORT_IN_USE if proj.get("kind") == "short" else MV_IN_USE)
+    for proj in app.state.ledger.list_edit_projects(limit=100000):       # 編集プロジェクトは、いまの state のクリップと曲を使い続ける
+        for oid in editclip.used_ids(proj["state"]):
+            if oid in ids:
+                busy.setdefault(oid, EDIT_IN_USE)
     return busy
 
 

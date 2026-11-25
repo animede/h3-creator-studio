@@ -61,3 +61,16 @@ def video_thumb(src: Path, dst: Path, width: int, at_s: float = 0.5) -> bool:
         if dst.is_file() and dst.stat().st_size > 0:
             return True
     return False
+
+
+def has_audio(path: Path) -> Optional[bool]:
+    """動画に音声ストリームがあるか。ffprobe が無い・読めないときは None(呼び出し側は「ある」として扱う)。"""
+    exe = _tool("ffprobe")
+    if exe is None:
+        return None
+    try:
+        r = subprocess.run([exe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+                           capture_output=True, timeout=TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return bool(r.stdout.strip()) if r.returncode == 0 else None

@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS mv_projects (
     params_json TEXT, scenes_json TEXT, output_id TEXT, error TEXT, message TEXT, kind TEXT NOT NULL DEFAULT 'mv'
 );
 CREATE INDEX IF NOT EXISTS mv_projects_created ON mv_projects(created_at DESC);
+CREATE TABLE IF NOT EXISTS edit_projects (
+    id TEXT PRIMARY KEY, created_at REAL NOT NULL, updated_at REAL NOT NULL, name TEXT NOT NULL,
+    state_json TEXT NOT NULL, history_json TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0, preview TEXT, output_id TEXT
+);
+CREATE INDEX IF NOT EXISTS edit_projects_updated ON edit_projects(updated_at DESC);
 CREATE TABLE IF NOT EXISTS presets (
     id TEXT PRIMARY KEY, tab TEXT NOT NULL, name TEXT NOT NULL, values_json TEXT NOT NULL,
     created_at REAL NOT NULL, updated_at REAL NOT NULL
@@ -40,6 +45,8 @@ CREATE TABLE IF NOT EXISTS genres (
 );
 """
 MV_FIELDS = ("state", "output_id", "error", "message")     # update_mv_project がそのまま置き換える列
+EDIT_HISTORY_MAX = 100                                       # 編集プロジェクトの履歴(元に戻す)の段数
+EDIT_LIST_COLS = "id, created_at, updated_at, name, state_json, cursor, preview, output_id, json_array_length(history_json) AS history_len"
 
 
 def make_thumb(src: Path, dst: Path, width: int = THUMB_WIDTH) -> tuple[int, int]:
@@ -254,6 +261,91 @@ class Ledger:
         """台帳の行だけを消す(作業フォルダと最終の MV は呼び出し側が扱う)。無ければ False。"""
         with self._lock, self._db:
             return self._db.execute("DELETE FROM mv_projects WHERE id = ?", (pid,)).rowcount > 0
+
+    # ---- 編集プロジェクト(編集タブ。state の履歴を持ち、元に戻す・やり直す) ----
+
+    @staticmethod
+    def _edit(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["state"] = json.loads(d.pop("state_json"))
+        d["preview"] = json.loads(d["preview"]) if d.get("preview") else None
+        if "history_json" in d:
+            d["history"] = json.loads(d.pop("history_json"))
+            d["history_len"] = len(d["history"])
+        d["can_undo"], d["can_redo"] = d["cursor"] > 0, d["cursor"] < d["history_len"] - 1
+        return d
+
+    def create_edit_project(self, pid: str, name: str, state: dict) -> dict:
+        """新しい編集プロジェクト(履歴は state 1 つだけ)を作る。"""
+        now = time.time()
+        text = json.dumps(state, ensure_ascii=False)
+        with self._lock, self._db:
+            self._db.execute("INSERT INTO edit_projects (id, created_at, updated_at, name, state_json, history_json, cursor, preview, output_id)"
+                             " VALUES (?,?,?,?,?,?,?,?,?)", (pid, now, now, name, text, json.dumps([state], ensure_ascii=False), 0, None, None))
+        return self.get_edit_project(pid)
+
+    def get_edit_project(self, pid: str, history: bool = False) -> Optional[dict]:
+        """history=True なら履歴(state の配列)も "history" に入れる。無ければ、件数だけ(history_len)。"""
+        cols = EDIT_LIST_COLS + (", history_json" if history else "")
+        with self._lock:
+            row = self._db.execute(f"SELECT {cols} FROM edit_projects WHERE id = ?", (pid,)).fetchone()
+        return self._edit(row) if row else None
+
+    def list_edit_projects(self, limit: int = 200) -> list:
+        """更新が新しい順(履歴は含めない)。"""
+        with self._lock:
+            rows = self._db.execute(f"SELECT {EDIT_LIST_COLS} FROM edit_projects ORDER BY updated_at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
+        return [self._edit(r) for r in rows]
+
+    def push_edit_state(self, pid: str, state: dict) -> Optional[dict]:
+        """操作の結果の state を履歴に積む(やり直しの枝は捨てる。最大 EDIT_HISTORY_MAX 段、古いものから落とす)。
+        いまの state と同じなら積まない(履歴は増えない)。無ければ None。"""
+        with self._lock, self._db:
+            row = self._db.execute("SELECT history_json, cursor FROM edit_projects WHERE id = ?", (pid,)).fetchone()
+            if row is None:
+                return None
+            history, cursor = json.loads(row["history_json"]), row["cursor"]
+            if history[cursor] != state:
+                history = [*history[:cursor + 1], state][-EDIT_HISTORY_MAX:]
+                self._db.execute("UPDATE edit_projects SET state_json = ?, history_json = ?, cursor = ?, updated_at = ? WHERE id = ?",
+                                 (json.dumps(state, ensure_ascii=False), json.dumps(history, ensure_ascii=False), len(history) - 1, time.time(), pid))
+        return self.get_edit_project(pid)
+
+    def move_edit_cursor(self, pid: str, step: int) -> Optional[dict]:
+        """履歴の位置を step(-1 = 元に戻す、+1 = やり直す)動かし、その位置の state にする。端なら ValueError。無ければ None。"""
+        with self._lock, self._db:
+            row = self._db.execute("SELECT history_json, cursor FROM edit_projects WHERE id = ?", (pid,)).fetchone()
+            if row is None:
+                return None
+            history, cursor = json.loads(row["history_json"]), row["cursor"] + step
+            if not 0 <= cursor < len(history):
+                raise ValueError("これ以上戻せません" if step < 0 else "これ以上やり直せません")
+            self._db.execute("UPDATE edit_projects SET state_json = ?, cursor = ?, updated_at = ? WHERE id = ?",
+                             (json.dumps(history[cursor], ensure_ascii=False), cursor, time.time(), pid))
+        return self.get_edit_project(pid)
+
+    def update_edit_project(self, pid: str, **fields) -> Optional[dict]:
+        """name / preview(辞書 or None)/ output_id を置き換える(updated_at は、名前を変えたときだけ進める。プレビュー・書き出しの記録では動かさない)。無ければ None。"""
+        bad = set(fields) - {"name", "preview", "output_id"}
+        if bad:
+            raise ValueError(f"編集プロジェクトに無い項目です: {sorted(bad)}")
+        sets = dict(fields)
+        if "preview" in sets:
+            sets["preview"] = json.dumps(sets["preview"], ensure_ascii=False) if sets["preview"] else None
+        if "name" in sets:
+            sets["updated_at"] = time.time()
+        if not sets:
+            return self.get_edit_project(pid)
+        with self._lock, self._db:
+            cur = self._db.execute(f"UPDATE edit_projects SET {', '.join(k + ' = ?' for k in sets)} WHERE id = ?", (*sets.values(), pid))
+            if cur.rowcount == 0:
+                return None
+        return self.get_edit_project(pid)
+
+    def delete_edit_project(self, pid: str) -> bool:
+        """台帳の行だけを消す(プレビューのファイルは呼び出し側が消す。書き出した動画はギャラリーに残る)。無ければ False。"""
+        with self._lock, self._db:
+            return self._db.execute("DELETE FROM edit_projects WHERE id = ?", (pid,)).rowcount > 0
 
     # ---- プリセット(各タブの入力欄の値に名前を付けたもの。同梱のものは台帳に入れず、リポジトリの presets/*.json にある) ----
 
