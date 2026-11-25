@@ -121,8 +121,9 @@ winget install --id Gyan.FFmpeg -e --source winget
 When they are installed, **close PowerShell and reopen it** (so it picks up what you installed). Then:
 
 ```powershell
+cd C:\
 git clone https://github.com/animede/h3-creator-studio.git
-cd h3-creator-studio
+cd C:\h3-creator-studio
 .\setup.bat
 ```
 
