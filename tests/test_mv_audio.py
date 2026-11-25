@@ -55,7 +55,7 @@ class ToolsPythonTest(unittest.TestCase):
 
     def test_hint_text(self):
         self.assertEqual(mv_audio.MISSING_HINT,
-                         "setup --mv を実行してください(または studio.local.toml の [mv] tools_python に Demucs と librosa の入った Python を指定)")
+                         "MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください(または studio.local.toml の [mv] tools_python に Demucs と librosa の入った Python を指定)")
 
     def test_venv_python_per_platform(self):
         self.assertEqual(mv_audio.venv_python(Path("v"), "win32"), Path("v", "Scripts", "python.exe"))

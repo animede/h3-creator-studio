@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: 2026-11-26 10:00 JST** — setup finds engines you already installed and, after a Y/n confirmation, writes their paths into studio.local.toml. A detailed usage guide (docs/USAGE.en.md) and a **Help** (使い方) button at the top right (opens in a floating window at the section for the current tab). The "destination" setting in Music Video and Short Video is now **aspect** (adds landscape 4:5 and custom size), and quality adds **Low VRAM** (512 on the long side). Each tab has a **Sample** button (loads a bundled example: fills in the inputs and materials and lets you watch the result; one Short Video and one Music Video). The README now has example GIFs and a screenshot. For the change history, see the [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: 2026-11-26 14:00 JST** — On PCs where a pre-installed MiniMax-H3 lacks the reference-mode cache (transformer_ref_int8, ~32GB; Windows and hosts with <48GB RAM), music videos, short videos with reference images/narration and the Video tab's reference modes are refused up front with the build command shown on screen; setup also checks existing engines' caches and offers to build them. The MV audio tools are installed by setup by default (`--no-mv` to skip) or from the 「道具を入れる」 button. [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -75,7 +75,7 @@ The studio runs the following four engines (components) as separate processes. E
 | [ACE-Step](https://github.com/animede/ACE-Step-1.5-fast) | Music (with vocals, instrumental) |
 | [AivisSpeech](https://github.com/Aivis-Project/AivisSpeech-Engine) | Text-to-speech (voice material for videos) |
 
-The **Music Video tab** makes a music video with matching mouth movement (lip-sync MV), or an image MV with no singing, from one character image and one song. It uses MiniMax-H3's Ref2VA per scene (plus Vocal Lock for lip-sync), and Demucs for vocal separation (installed with `setup --mv`).
+The **Music Video tab** makes a music video with matching mouth movement (lip-sync MV), or an image MV with no singing, from one character image and one song. It uses MiniMax-H3's Ref2VA per scene (plus Vocal Lock for lip-sync), and Demucs for vocal separation (installed by setup by default).
 The **Short Video tab** makes a short video with a narrative from a story, a song, narration and reference images (the length depends on the song or text; above 5 minutes it warns you that generation will take a while). It is built on the Music Video tab's machinery and uses only H3.
 The **Edit tab** does simple editing: join, cut, recolor your videos, images and songs, and swap their audio. It runs on ffmpeg alone and never uses the GPU (no engine needs to be running).
 
@@ -99,6 +99,8 @@ If you stop partway, run setup again and it picks up where it left off.
    ```powershell
    cd C:\; git clone https://github.com/animede/h3-creator-studio.git; cd h3-creator-studio; .\setup.bat
    ```
+
+   The audio processing tools used by the Music Video tab and the Short Video tab (when using a song), about 1.3GB, are installed by the same line. To skip them, use `.\setup.bat --no-mv`. You can add them later with the **Install tools** button on the Music Video tab or `.\setup.bat --only mvtools`.
 
    If it tells you to reopen PowerShell and run it again ("PowerShell を開き直してもう一度実行"), reopen it and run `cd C:\h3-creator-studio; .\setup.bat` again.
 
@@ -147,9 +149,9 @@ cd h3-creator-studio
 | `--no-models` | Create the environments only. Models come later (run setup again to download them) |
 | `--only h3,ace` | Only the given engines (`h3` `h3image` `ace` `aivis`) |
 | `--llm` | Also download the bundled LLM (about 5GB) and the projector file that reads images and audio (about 0.56GB; used by "From image" and "From song" in Music Video) up front. Without it, they are downloaded on first use |
-| `--mv` | Install the Music Video tab's audio processing (Demucs, librosa, CPU torch) into `components/mvtools/` (about 0.3–0.4GB download, about 1.3GB on disk). `--only mvtools` installs just this |
+| `--no-mv` | Skip the Music Video tab's audio processing (Demucs, librosa, CPU torch; about 0.3–0.4GB download, about 1.3GB on disk), which is installed into `components/mvtools/` by default. `--only mvtools` installs just this. `--mv` is still accepted but does nothing |
 | `--ace-xl` | Also install the XL models for music (about 45GB; the default is 2B only, about 15GB) |
-| `--no-ref` | Skip the cache (about 32GB) for video reference mode (from references, Vocal Lock). For people who won't use reference mode |
+| `--no-ref` | Skip the cache (about 32GB) for video reference mode (from references, Vocal Lock). For people who won't use reference mode (on Windows and on PCs with less than 48GB of RAM, this also rules out music videos and short videos with reference images or narration; to build it later, see "Troubleshooting") |
 | `--components-dir <path>` | Change where engines are cloned |
 | `--clone-anyway` | Clone again even if the folders described in "Already have minimax-h3 etc." below exist |
 
@@ -180,6 +182,7 @@ dir = "/home/you/ACE-Step-1.5-fast"
 
 - For engines with `dir` set, setup skips both cloning and model downloads. The environment and models in that folder are assumed to be ready.
 - Even without `dir`, setup looks for engines you already installed (your home folder and its `AI`, `Documents`, `github`, `src` subfolders; on Windows also each drive root and `\AI`; aliases such as `Diffusers_minimax-h3` included). When it finds one it asks "Use this? [Y/n]" — **press Enter (yes) and it writes the path into `studio.local.toml` for you**, skipping clone and model download. Answer n to leave the file alone and skip that engine (it never re-clones on its own; use `--clone-anyway` for that).
+- For an existing MiniMax-H3, setup checks its quantized caches (in the engine's `models\prequant`: the main `transformer_int8` and the reference-mode `transformer_ref_int8`). If both are there, it just prints "キャッシュ: 本体 ✓ 参照用 ✓" (caches: main ✓ reference ✓). On Windows and on PCs with less than 48GB of RAM, if any are missing it lists them (main about 60GB, reference mode about 32GB; building takes hours) and asks "いま作りますか? [Y/n]" (build them now?). **Press Enter (yes) and it runs the engine's `scripts\prepare_lowvram.py --ref`** (with `--no-ref`, without `--ref`, and the reference-mode cache isn't counted). If you answer n, or setup runs without a terminal, it only prints the command and moves on. If the engine has no venv, it asks you to run the engine's install first; if the engine is too old to have `prepare_lowvram.py`, it asks you to update it first (see "Updating engines"). On Linux with 48GB of RAM or more, the engine can build the caches itself at startup, so setup doesn't ask; it only prints the command with `--keep-source` (prepare deletes the bf16 weights it has quantized, which such a PC may still use).
 
 ## Starting and using it
 
@@ -247,7 +250,7 @@ While a song plays, a **spectrum** animates on the song card in the output viewe
 
 ### Music Video tab (lip-sync MV / image MV)
 
-Make a music video with matching mouth movement from one character image and one song (`setup --mv` is needed once; without it, the tab shows instructions).
+Make a music video with matching mouth movement from one character image and one song (setup installs the audio tools by default; without them, the tab shows a notice and an **Install tools** button). On Windows and on PCs with less than 48GB of RAM, it also needs MiniMax-H3's reference-mode cache (without it, a notice with the command to build it appears above the form and **Make music video** is disabled; see "Troubleshooting").
 Choosing "no singing (image MV)" under **Vocals** (歌わせ方) makes an image video where the character doesn't sing (a so-called image PV). The song is added at assembly (see "no singing" below).
 
 1. Drop in a **song** (from the Music tab, the gallery, or an audio file on your PC) and a **character image** (from the Image tab, the gallery, or an image on your PC).
@@ -286,7 +289,7 @@ Time estimate: on an RTX A4000 (16GB), landscape Fast, a 30-second song is 5 sce
 
 ### Short Video tab
 
-Make a short video with a narrative from a story. It uses the same machinery as the Music Video tab (analysis → direction → per-scene generation → assembly), with H3 only. A video with only a song uses the same audio separation (Demucs) as Music Video, so only that case needs `setup --mv` (not needed with narration or with neither).
+Make a short video with a narrative from a story. It uses the same machinery as the Music Video tab (analysis → direction → per-scene generation → assembly), with H3 only. A video with only a song uses the same audio separation (Demucs) as Music Video, so only that case needs the audio tools (installed by setup by default; not needed with narration or with neither).
 
 **Inputs** (left)
 
@@ -446,7 +449,7 @@ git pull
 | `gguf` / `llama_server` / `mmproj` in `[llm]` | When set, those files are used instead of downloading (`mmproj` is the projector file that reads images and audio. Empty means search automatically, and if none is found, download it once for "From image" / "From song") |
 | `mode` in `[gpu]` | `auto` (several at once if total VRAM is 40GiB or more, otherwise one engine at a time) / `exclusive` (one engine at a time) / `share` (several at once) |
 | `vram_budget_gb` in `[components.<name>]` | That engine's VRAM allocation (GB) when several are loaded at once |
-| `tools_python` in `[mv]` | Python that runs the Music Video audio processing (Demucs, librosa). Empty means `components/mvtools/.venv` created by `setup --mv` |
+| `tools_python` in `[mv]` | Python that runs the Music Video audio processing (Demucs, librosa). Empty means `components/mvtools/.venv` created by setup |
 | `device` in `[mv]` | Where vocal separation runs. Default `cpu` (runs in parallel with GPU generation) |
 
 Engine names are `h3` / `h3image` / `ace` / `aivis`.
@@ -459,7 +462,13 @@ Engine names are `h3` / `h3image` / `ace` / `aivis`.
 - **"Cancel" doesn't stop right away**: cancel **stops after the current step**. For music, the language model (LM) stage and the final decode may not stop mid-way.
 - **Externally running engines are not stopped**: the supervisor only stops what it started. If a separately started engine is already listening on the port, it is used as-is and never stopped (the screen shows "external"). Image and video engines can be unloaded from the GPU even when external, but ACE-Step has no way to unload and can only be stopped. When an external ACE-Step is on the GPU and a swap is needed, the next engine coexists without stopping it if the GPU has room for it (roughly: video 12GB, image 13.5GB, music 14GB + 1GB); otherwise it refuses with "can't coexist" ("同居できません"). In that case, stop it yourself first, or write a different `port` in `[components.ace]` in `studio.local.toml` so the supervisor starts its own.
 - **Not enough CPU memory**: if it crashes during video preparation (quantization), close other apps. Under 32GB, video and the bundled LLM are tight.
-- **The Music Video tab says "setup --mv を実行してください"** (run setup --mv): install the audio processing tools with `.\setup.bat --mv --only mvtools` (Linux: `./setup.sh --mv --only mvtools`). If you already have a Python with Demucs and librosa, set it in `[mv] tools_python` and skip the install.
+- **The Music Video tab says the MV audio tools were not found** (set up with `--no-mv`, or with an older setup): press **Install tools (about 1.3GB)** on the tab, or install them with `.\setup.bat --only mvtools` (Linux: `./setup.sh --only mvtools`). If you already have a Python with Demucs and librosa, set it in `[mv] tools_python` and skip the install.
+- **"The MiniMax-H3 cache for the reference modes (transformer_ref_int8, about 32GB) is missing" appears** (the same notice also appears above the Music Video and Short Video tabs and on the Video tab for Ref2VA and stills with references; on the Music Video tab, **Make music video** is disabled): on Windows and on PCs with less than 48GB of RAM, the engine streams its weights from the quantized cache files, so the reference modes (music videos, short videos with reference images or narration, and the Video tab's Ref2VA / Ref2I) need this cache. Engines installed by setup have it, but an engine you already had (set in `dir`, or found by setup) may not. If you installed with `--no-ref`, you don't have it either (this cache is exactly what `--no-ref` skips). Build it once:
+  1. Stop the studio (`Ctrl+C` in the `run.bat` window). This frees RAM; building it does not use the GPU.
+  2. In PowerShell, run `cd <h3 folder>; .\venv\Scripts\python.exe scripts\prepare_lowvram.py --ref` (on Linux, `cd <h3 folder> && venv/bin/python scripts/prepare_lowvram.py --ref`). The h3 folder is `dir` under `[components.h3]` in `studio.local.toml`; if it isn't set, it's `components\minimax-h3` in the studio folder (for example `C:\h3-creator-studio\components\minimax-h3`). The on-screen notice and the error show the exact command for this PC.
+  3. It downloads transformer_ref (66GB) one shard at a time, quantizes each shard and deletes it, and writes about 32GB to `models\prequant\transformer_ref_int8`. It needs about 37GB of free disk, takes hours depending on your connection, and works with 16GB of RAM. Caches that already exist (such as the main `transformer_int8`) are skipped. Interrupting it is safe: just run the same command again (the partly built reference-mode cache is then rebuilt from the start).
+  4. When it's done, start the studio with `run.bat` and press **Resume** on the failed project. The song analysis and direction are kept; only the scenes are redone (if it was refused before it started, just make it again).
+  5. Alternatively, run `.\setup.bat --only h3` (`./setup.sh --only h3` on Linux). It checks the caches, asks "いま作りますか?" (build them now?), and runs the same command.
 - **A job says "GPU の空きを待っています"** (waiting for free GPU): another engine is generating and the next one can't load until it finishes. It starts automatically when that's done (you can also cancel).
 - **setup failed partway**: the failed step and a command to redo just that step are shown on screen. Fix the cause and run setup again to continue from there.
 

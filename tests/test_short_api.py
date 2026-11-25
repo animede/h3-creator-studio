@@ -8,10 +8,16 @@ from unittest import mock
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from studio import main, media, mv, short
+from studio import h3cache, main, media, mv, short
 from studio.ledger import Ledger
 from studio.llm import LlmError
 from studio.mvclip import quantize_scene_plan
+
+
+# 参照モード用の H3 のキャッシュ(studio/h3cache.py)。既定は「この PC では要らない」(開発機に左右されない)
+REF_OK = {"needed": False, "ready": True, "dir": "/h3", "cache_dir": "/h3/models/prequant/transformer_ref_int8",
+          "command": "cd /h3 && venv/bin/python scripts/prepare_lowvram.py --ref"}
+REF_MISSING = {**REF_OK, "needed": True, "ready": False}
 
 
 def png_bytes() -> bytes:
@@ -71,6 +77,9 @@ class ShortApiTest(unittest.TestCase):
             p = mock.patch.object(media, name, return_value=ret)
             p.start()
             self.addCleanup(p.stop)
+        p = mock.patch.object(h3cache, "ref_cache_state", return_value=dict(REF_OK))
+        p.start()
+        self.addCleanup(p.stop)
         self.song = self.add("audio", "song.mp3", {"theme": "夜明けの駅", "genre": "Ballad"})
         self.girl = self.add("image", "girl.png", {"prompt": "a girl with silver hair"})
         self.garden = self.add("image", "garden.png", {"prompt": "a quiet garden"})
@@ -160,6 +169,20 @@ class ShortApiTest(unittest.TestCase):
             self.assertIn(word, r.json()["detail"], extra)
         self.assertEqual(self.runner.jobs, {})
         self.assertEqual(self.client.get("/api/short").json(), [])
+
+    def test_reference_images_or_narration_need_the_reference_cache(self):
+        """参照画像かセリフがあるとシーンを Ref2VA で作るので、キャッシュが要るのに無ければ 400(何も作らない)。どちらも無ければ T2VA だけなので作れる。"""
+        message = h3cache.missing_message(REF_MISSING["command"])
+        with mock.patch.object(h3cache, "ref_cache_state", return_value=REF_MISSING):
+            for extra in ({"images": [self.scenery()]}, {"images": [self.person()], "song_id": self.song["id"]},
+                          {"story": "", "narration": "こんにちは。", "speaker_id": 4, "images": [self.person()]}):
+                r = self.client.post("/api/short", json=self.body(**extra))
+                self.assertEqual((r.status_code, r.json()["detail"]), (400, message), extra)
+            self.assertEqual(self.runner.jobs, {})
+            free = self.create()                                               # 物語だけ(free)
+            music = self.create(story="", song_id=self.song["id"])             # 曲だけ(music)
+        self.assertEqual((free["params"]["timeline"], music["params"]["timeline"]), ("free", "music"))
+        self.assertEqual(len(self.runner.jobs), 2)
 
     def test_list_and_view_are_separate_from_mv(self):
         mv_r = self.client.post("/api/mv", json={"song_id": self.song["id"], "image_id": self.girl["id"]})

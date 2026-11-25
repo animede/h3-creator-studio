@@ -323,7 +323,9 @@ While a song plays, a light visualizer moves on the song card in the output area
 
 ## Music Video tab
 
-Makes a music video from one character image and one song. The song is split into 5–10 second scenes, each scene is made as a video with MiniMax-H3, and the original song is attached at the end. The first time only, you need `setup --mv` (the tools for vocal separation). Without them, a notice appears at the top of the tab and **Make music video** is disabled.
+Makes a music video from one character image and one song. The song is split into 5–10 second scenes, each scene is made as a video with MiniMax-H3, and the original song is attached at the end. It needs the vocal separation tools (installed by setup by default). Without them, a notice and an **Install tools (about 1.3GB)** button appear at the top of the tab, and **Make music video** is disabled until they are installed.
+
+On Windows and on PCs with less than 48GB of RAM, it also needs MiniMax-H3's reference-mode cache (transformer_ref_int8, about 32GB), because every music video scene is made with Ref2VA. Without it, a notice with the command to build it on this PC appears at the top of the tab, and **Make music video** is disabled. See "The reference-mode cache is missing" under "[Troubleshooting](#troubleshooting)".
 
 ### Inputs
 
@@ -437,7 +439,7 @@ Time grows in proportion to song length (about 1 hour 40 minutes for a 3-minute 
 
 ## Short Video tab
 
-Makes a short video with a story from story text. It works like the Music Video tab (preparation → direction → per-scene generation → assembly) and uses only MiniMax-H3. Song-only videos use the same vocal separation as music videos, so only in that case you need `setup --mv`.
+Makes a short video with a story from story text. It works like the Music Video tab (preparation → direction → per-scene generation → assembly) and uses only MiniMax-H3. Song-only videos use the same vocal separation as music videos, so only in that case you need the same tools (installed by setup by default; otherwise an **Install tools** button appears).
 
 ### Three kinds of timeline
 
@@ -792,7 +794,13 @@ When VRAM overflows, Windows starts using CPU memory in place of GPU memory. It 
 - **An external ACE-Step is on the GPU and "cannot coexist" (同居できません) appears**: ACE-Step can't be unloaded from the GPU. Stop it yourself first, or set a different `port` under `[components.ace]` in `studio.local.toml` and let the supervisor start it.
 - **The screen is still old after updating**: the browser has old JS cached. Reload with `Ctrl+F5` (`Cmd+Shift+R` on Mac).
 - **ffmpeg isn't found** ("ffmpeg not found (add it to PATH)" (ffmpeg が見つかりません(PATH に入れてください)) in Music Video, Short Video, or Edit): on Windows, run `winget install --id Gyan.FFmpeg -e --source winget`, then reopen PowerShell and `run.bat`. On Linux, `sudo apt install ffmpeg`.
-- **The Music Video tab says "Run setup --mv"** (setup --mv を実行してください): `.\setup.bat --mv --only mvtools` (`./setup.sh --mv --only mvtools` on Linux). If you already have a Python with Demucs and librosa, set it in `[mv] tools_python` and you don't need to install them. The Short Video tab's "song only" mode uses the same tools.
+- **The Music Video tab says the MV audio tools were not found**: press **Install tools (about 1.3GB)** on the tab (progress appears next to the button; the log is logs/mvtools-install.log), or run `.\setup.bat --only mvtools` (`./setup.sh --only mvtools` on Linux). If you already have a Python with Demucs and librosa, set it in `[mv] tools_python` and you don't need to install them. The Short Video tab's "song only" mode uses the same tools.
+- **"The MiniMax-H3 cache for the reference modes (transformer_ref_int8, about 32GB) is missing" appears** (the same notice also appears at the top of the Music Video and Short Video tabs and on the Video tab for Ref2VA and stills with references; on the Music Video tab, **Make music video** is disabled): on Windows and on PCs with less than 48GB of RAM, the engine streams its weights from the quantized cache files, so the reference modes (music videos, short videos with reference images or narration, and the Video tab's Ref2VA / Ref2I) need this cache. Engines installed by setup have it, but an engine you already had (set in `dir`, or found by setup) may not. If you ran setup with `--no-ref`, you don't have it either (this cache is exactly what `--no-ref` skips). T2VA, FL2VA, T2I, and short videos without reference images or narration work without it. Build it once:
+  1. Stop the studio (the supervisor) with `Ctrl+C` in the `run.bat` window. This frees RAM; building it does not use the GPU.
+  2. In PowerShell, run `cd <h3 folder>; .\venv\Scripts\python.exe scripts\prepare_lowvram.py --ref` (on Linux, `cd <h3 folder> && venv/bin/python scripts/prepare_lowvram.py --ref`). The h3 folder is `dir` under `[components.h3]` in `studio.local.toml`; if it isn't set, it's `components\minimax-h3` in the studio folder (for example `C:\h3-creator-studio\components\minimax-h3`). The on-screen notice and the error show the exact command for this PC.
+  3. It downloads transformer_ref (66GB) one shard at a time, quantizes each shard and deletes it, and writes about 32GB to `models\prequant\transformer_ref_int8`. It needs about 37GB of free disk, takes hours depending on your connection, and works with 16GB of RAM. Caches that already exist (such as the main `transformer_int8`) are skipped. Interrupting it is safe: just run the same command again (the partly built reference-mode cache is then rebuilt from the start).
+  4. When it's done, start the studio with `run.bat` and press **Resume** on the failed project. The song analysis and direction are kept; only the scenes are redone (if it was refused before it started, just make it again).
+  5. Alternatively, run `.\setup.bat --only h3` (`./setup.sh --only h3` on Linux). It checks the caches, asks "いま作りますか?" (build them now?), and runs the same command.
 - **No voices appear (AivisSpeech isn't working)**: if "Can't get voices" (話者を取得できません) appears, click the voice field to reload (it starts AivisSpeech if stopped). If that doesn't fix it, check **Log** on the AivisSpeech (speech synthesis) row in the engine panel. If the folder is broken, delete `components\AivisSpeech-Engine` and run setup again.
 - **Captions show tofu (□) or the wrong font (Windows)**: add the following to `studio.local.toml` and restart the supervisor.
 

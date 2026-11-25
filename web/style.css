@@ -116,6 +116,8 @@ input:disabled { opacity: .5; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .msg { margin-bottom: 10px; padding: 6px 10px; border-radius: 4px; background: #3a2d12; color: var(--warn); font-size: 13px; }
 .msg[hidden] { display: none; }
+.refhint { overflow-wrap: anywhere; }      /* 参照モードのキャッシュの案内。作るコマンド(長いパス)を折り返す */
+.msg > div:not([hidden]) + .refhint { margin-top: 6px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 5px 28px; font-weight: 600; }
 button.primary:hover:not(:disabled) { filter: brightness(1.1); }
@@ -521,7 +523,7 @@ fieldset.edbody:disabled { opacity: .55; }
 }
 
 /* 「使い方」の窓(web/help.js): 画面の上に浮かぶ、動かせて大きさを変えられる窓。中の目次と本文は別々にスクロールする */
-.help-btn { margin-left: 4px; padding: 2px 14px; align-self: center; }
+.help-btn { margin-left: 4px; padding: 2px 14px; align-self: center; white-space: nowrap; }
 .help-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .lang-select { margin-left: 4px; width: auto; padding: 2px 6px; align-self: center; font-size: 12px; }
 #help-win { position: fixed; z-index: 50; display: flex; flex-direction: column; min-width: 360px; min-height: 300px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px);

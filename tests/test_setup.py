@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -338,15 +340,15 @@ class StatusTest(unittest.TestCase):
 class ArgsTest(unittest.TestCase):
     def test_defaults_and_flags(self):
         a = S.parse_args([])
-        self.assertFalse(a.no_models or a.llm or a.ace_xl or a.clone_anyway or a.mv)
+        self.assertFalse(a.no_models or a.llm or a.ace_xl or a.clone_anyway or a.mv or a.no_mv)
         a = S.parse_args(["--no-models", "--only", "h3,ace", "--components-dir", "D:/c", "--llm"])
         self.assertTrue(a.no_models and a.llm)
-        self.assertFalse(a.mv)
+        self.assertFalse(a.no_mv)
         self.assertEqual((a.only, a.components_dir), ("h3,ace", "D:/c"))
 
-    def test_mv_flag(self):
-        self.assertTrue(S.parse_args(["--mv"]).mv)
-        a = S.parse_args(["--mv", "--only", "mvtools"])
+    def test_mv_flags(self):
+        self.assertTrue(S.parse_args(["--no-mv"]).no_mv)
+        a = S.parse_args(["--mv", "--only", "mvtools"])          # --mv は以前の名残(受け付けるが、何も変えない)
         self.assertTrue(a.mv)
         self.assertEqual(a.only, "mvtools")
 
@@ -354,9 +356,9 @@ class ArgsTest(unittest.TestCase):
 class ParseOnlyTest(unittest.TestCase):
     ENABLED = ["h3", "h3image", "ace", "aivis"]
 
-    def test_empty_means_every_enabled_component(self):
-        self.assertEqual(S.parse_only("", self.ENABLED), (self.ENABLED, False, []))
-        self.assertEqual(S.parse_only("  ", self.ENABLED, True), (self.ENABLED, True, []))
+    def test_empty_means_every_enabled_component_and_the_mv_tools(self):
+        self.assertEqual(S.parse_only("", self.ENABLED), (self.ENABLED, True, []))
+        self.assertEqual(S.parse_only("  ", self.ENABLED, no_mv=True), (self.ENABLED, False, []))
 
     def test_components_keep_the_setup_order(self):
         self.assertEqual(S.parse_only("ace, h3", self.ENABLED), (["h3", "ace"], False, []))
@@ -364,7 +366,8 @@ class ParseOnlyTest(unittest.TestCase):
     def test_mvtools_is_not_a_component(self):
         self.assertEqual(S.parse_only("mvtools", self.ENABLED), ([], True, []))
         self.assertEqual(S.parse_only("h3,mvtools", self.ENABLED), (["h3"], True, []))
-        self.assertEqual(S.parse_only("h3", self.ENABLED, True), (["h3"], True, []))
+        self.assertEqual(S.parse_only("h3", self.ENABLED), (["h3"], False, []))        # --only では書いた分だけ
+        self.assertEqual(S.parse_only("h3,ace", self.ENABLED, no_mv=True), (["h3", "ace"], False, []))
 
     def test_unknown_and_disabled_names_are_reported(self):
         self.assertEqual(S.parse_only("zzz,mvtools", self.ENABLED), ([], True, ["zzz"]))
@@ -372,7 +375,7 @@ class ParseOnlyTest(unittest.TestCase):
 
 
 class MvToolsTest(unittest.TestCase):
-    """setup --mv: components/mvtools/.venv に CPU 版 torch と Demucs / librosa を入れる。"""
+    """setup(既定)/ --only mvtools: components/mvtools/.venv に CPU 版 torch と Demucs / librosa を入れる。"""
 
     def setUp(self):
         self._t = tempfile.TemporaryDirectory()
@@ -558,6 +561,195 @@ class PrefetchLlmTest(unittest.TestCase):
             self.assertFalse(S.prefetch_llm(self.cfg))
         self.assertTrue(any("同梱 LLM の取得" in line and "network down" in line for line in self.said))
         self.assertTrue(any("最初に使うときにも取得します" in line for line in self.said))
+
+
+class ExistingH3CacheTest(unittest.TestCase):
+    """既に入れてあるエンジン(h3)の量子化キャッシュ: 有無を確かめて知らせ、足りなければ作るか聞く(h3_cache_status / plan_existing_h3 / main)。"""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = Path(self._t.name)
+        self.d = self.root / "minimax-h3"
+        touch(self.d / "scripts" / "prepare_lowvram.py")
+        self.pq = self.d / "models" / "prequant"
+        self.lines = []
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        for k in [k for k in os.environ if k.startswith("H3_")]:
+            del os.environ[k]
+        self.real_ask_yes = S.ask_yes
+        for target, new in (("say", self.lines.append), ("ask_yes", mock.Mock(return_value=True))):
+            p = mock.patch.object(S, target, new)
+            p.start()
+            self.addCleanup(p.stop)
+        self.streaming = mock.patch.object(S.h3cache, "file_streaming", return_value=True)      # Windows か RAM 48GB 未満の PC
+        self.streaming.start()
+        self.addCleanup(self.streaming.stop)
+
+    def cache(self, name: str, base: Path = None) -> None:
+        for f in ("config.json", "meta.json"):
+            touch((base or self.pq) / name / f)
+
+    def venv(self, plat: str = "linux") -> Path:
+        return touch(self.d / "venv" / ("Scripts/python.exe" if plat == "win32" else "bin/python"))
+
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+    def test_status_counts_only_finished_caches(self):
+        st = S.h3_cache_status(self.d, want_ref=True, plat="linux")
+        self.assertEqual((st["base"], st["ref"], st["venv"], st["missing"], st["dir"]), (False, False, None, ["base", "ref"], self.pq))
+        touch(self.pq / "transformer_int8" / "config.json")                 # meta.json の無いもの・作りかけ(.tmp)は数えない
+        self.cache("transformer_ref_int8.tmp")
+        self.assertEqual(S.h3_cache_status(self.d, plat="linux")["missing"], ["base", "ref"])
+        self.cache("transformer_int8")
+        self.assertEqual(S.h3_cache_status(self.d, plat="linux")["missing"], ["ref"])
+        self.assertEqual(S.h3_cache_status(self.d, want_ref=False, plat="linux")["missing"], [])        # --no-ref では参照用を数えない
+        self.cache("transformer_ref_int8")
+        st = S.h3_cache_status(self.d, plat="linux")
+        self.assertEqual((st["base"], st["ref"], st["missing"]), (True, True, []))
+
+    def test_status_follows_the_engine_env_and_finds_the_venv(self):
+        other = self.root / "pq"
+        self.cache("transformer_int8", other)
+        self.assertEqual(S.h3_cache_status(self.d, env={"H3_TE_PREQUANT_DIR": str(other)})["missing"], ["ref"])
+        both = {"H3_TE_PREQUANT_DIR": str(other), "H3_TRANSFORMER_PREQUANT_DIR": str(self.pq)}
+        self.assertEqual(S.h3_cache_status(self.d, env=both)["dir"], self.pq)              # transformer の場所が勝つ(エンジンと同じ)
+        os.environ["H3_TE_PREQUANT_DIR"] = str(other)                                    # env を渡さなければ、このプロセスの環境
+        self.assertEqual(S.h3_cache_status(self.d)["dir"], other)
+        self.assertIsNone(S.h3_cache_status(self.d, plat="linux")["venv"])
+        dot = touch(self.d / ".venv" / "bin" / "python")
+        self.assertEqual(S.h3_cache_status(self.d, plat="linux")["venv"], dot)
+        self.assertEqual(S.h3_venv_python(self.d, "linux"), dot)
+        plain = self.venv("linux")
+        self.assertEqual(S.h3_venv_python(self.d, "linux"), plain)                       # venv が先(studio.components と同じ)
+        self.assertIsNone(S.h3_venv_python(self.d, "win32"))
+
+    def test_nothing_to_do_prints_one_line(self):
+        self.venv()
+        self.cache("transformer_int8")
+        self.cache("transformer_ref_int8")
+        self.assertIsNone(S.plan_existing_h3(self.d, True, {}, "linux"))
+        self.assertIn("  キャッシュ: 本体 ✓ 参照用 ✓", self.lines)
+        S.ask_yes.assert_not_called()
+        self.lines.clear()
+        shutil.rmtree(self.pq / "transformer_ref_int8")
+        self.assertIsNone(S.plan_existing_h3(self.d, False, {}, "linux"))       # --no-ref: 参照用が無くても作らない
+        self.assertIn("  キャッシュ: 本体 ✓ 参照用 未(--no-ref なので作りません)", self.lines)
+        S.ask_yes.assert_not_called()
+
+    def test_missing_asks_and_returns_the_prepare_step(self):
+        py = self.venv()
+        self.cache("transformer_int8")
+        step = S.plan_existing_h3(self.d, True, {}, "linux")
+        S.ask_yes.assert_called_once_with("  いま作りますか?")
+        self.assertEqual((step.argv, step.env, step.cwd), ([str(py), "scripts/prepare_lowvram.py", "--ref"], {}, "."))
+        self.assertIn("参照モード用(transformer_ref_int8、約 32GB。MV・参照画像のショート動画・動画タブの参照モード)", self.text())
+        self.assertNotIn("本体(transformer_int8", self.text())
+        self.assertIn("約 37GB", self.text())
+        self.assertIn("数時間", self.text())
+
+    def test_windows_no_ref_and_a_moved_cache_dir(self):
+        py = self.venv("win32")
+        step = S.plan_existing_h3(self.d, False, {}, "win32")
+        self.assertEqual((step.argv, step.env), ([str(py), "scripts\\prepare_lowvram.py"], {"HF_HUB_DISABLE_SYMLINKS": "1"}))   # --no-ref
+        self.assertIn("本体(transformer_int8、約 60GB", self.text())
+        self.assertNotIn("参照モード用(", self.text())
+        moved = self.root / "pq"
+        step = S.plan_existing_h3(self.d, True, {"H3_TRANSFORMER_PREQUANT_DIR": str(moved)}, "win32")
+        self.assertEqual(step.env, {"HF_HUB_DISABLE_SYMLINKS": "1", "H3_TE_PREQUANT_DIR": str(moved)})      # prepare にも同じ場所を渡す
+        self.assertEqual(step.argv[-1], "--ref")
+
+    def test_without_a_terminal_it_prints_the_command_and_skips(self):
+        self.venv()
+        with mock.patch.object(S, "ask_yes", self.real_ask_yes), mock.patch.object(sys, "stdin", None):     # 自動実行(端末でない)
+            self.assertIsNone(S.plan_existing_h3(self.d, True, {}, "linux"))
+        self.assertIn(f"    cd {self.d} && venv/bin/python scripts/prepare_lowvram.py --ref", self.lines)
+        self.assertIn("作らずに進みます", self.text())
+
+    def test_without_the_venv_it_asks_for_the_engine_install_first(self):
+        self.assertIsNone(S.plan_existing_h3(self.d, True, {}, "linux"))
+        S.ask_yes.assert_not_called()
+        self.assertIn("先にエンジンの install を実行してください", self.text())
+        self.assertIn(f"    cd {self.d}", self.lines)
+        self.assertIn("    bash scripts/install.sh", self.lines)
+        self.lines.clear()
+        self.assertIsNone(S.plan_existing_h3(self.d, True, {}, "win32"))
+        self.assertIn("    cmd /c scripts\\install.bat", self.lines)
+
+    def test_an_old_engine_is_asked_to_update_first(self):
+        self.venv()
+        (self.d / "scripts" / "prepare_lowvram.py").unlink()              # 2026-11-18 より古いエンジン
+        self.assertIsNone(S.plan_existing_h3(self.d, True, {}, "linux"))
+        S.ask_yes.assert_not_called()
+        self.assertIn("エンジンの更新(git pull)", self.text())
+
+    def test_a_big_ram_host_is_only_told_how(self):
+        """Linux で RAM 48GB 以上なら、エンジンが起動時に bf16 から作れる。prepare は bf16 の重みを消すので勧めず、残すコマンドだけを出す。"""
+        self.venv()
+        self.streaming.stop()
+        with mock.patch.object(S.h3cache, "file_streaming", return_value=False):
+            self.assertIsNone(S.plan_existing_h3(self.d, True, {}, "linux"))
+            S.ask_yes.assert_not_called()
+            self.assertIn(f"    cd {self.d} && venv/bin/python scripts/prepare_lowvram.py --ref --keep-source", self.lines)
+            self.lines.clear()
+            self.assertIsNone(S.plan_existing_h3(self.d, True, {"H3_LOWVRAM": "1"}, "linux"))      # group で読まない構成も同じ
+        self.streaming.start()
+        self.assertIn("無くても動きます", self.text())
+        self.assertIsNone(S.plan_existing_h3(self.d, True, {"H3_LOWVRAM": "1"}, "win32"))
+        S.ask_yes.assert_not_called()
+
+    # ---- main の流れ(dir を書いた既存のエンジン = existing) ----
+
+    def run_main(self, *argv):
+        cfg = Settings({"components": {"h3": {"dir": str(self.d)}}}, self.root)
+        run_step = mock.Mock(return_value=True)
+        with mock.patch.object(S, "load_settings", return_value=cfg), mock.patch.object(S, "check_prerequisites", return_value=True), \
+                mock.patch.object(S, "run_step", run_step), mock.patch.object(S, "print_summary"):
+            rc = S.main(["--only", "h3", *argv])
+        return rc, run_step
+
+    def test_main_builds_the_missing_cache_after_asking(self):
+        py = self.venv()
+        rc, run_step = self.run_main()
+        self.assertEqual(rc, 0)
+        S.ask_yes.assert_called_once_with("  いま作りますか?")
+        ((step, comp_dir), _), = run_step.call_args_list
+        self.assertEqual((step.argv, comp_dir), ([str(py), "scripts/prepare_lowvram.py", "--ref"], self.d))
+        self.assertIn("== 環境とモデルの準備 ==", "\n".join(self.lines))
+
+    def test_main_no_ref_drops_the_flag(self):
+        self.venv()
+        rc, run_step = self.run_main("--no-ref")
+        self.assertEqual(run_step.call_args[0][0].argv[-1], "scripts/prepare_lowvram.py")
+
+    def test_main_does_not_run_anything_when_declined_complete_or_no_models(self):
+        self.venv()
+        S.ask_yes.return_value = False                     # 端末でない・「いいえ」
+        rc, run_step = self.run_main()
+        self.assertEqual(rc, 0)
+        run_step.assert_not_called()
+        self.assertIn(f"    cd {self.d} && venv/bin/python scripts/prepare_lowvram.py --ref", self.lines)
+        S.ask_yes.reset_mock()
+        rc, run_step = self.run_main("--no-models")          # モデルを扱わないときは確かめもしない
+        run_step.assert_not_called()
+        S.ask_yes.assert_not_called()
+        self.cache("transformer_int8")
+        self.cache("transformer_ref_int8")
+        rc, run_step = self.run_main()
+        run_step.assert_not_called()
+        S.ask_yes.assert_not_called()
+        self.assertIn("  キャッシュ: 本体 ✓ 参照用 ✓", self.lines)
+
+    def test_main_stops_when_the_build_fails(self):
+        self.venv()
+        cfg = Settings({"components": {"h3": {"dir": str(self.d)}}}, self.root)
+        with mock.patch.object(S, "load_settings", return_value=cfg), mock.patch.object(S, "check_prerequisites", return_value=True), \
+                mock.patch.object(S, "run_step", return_value=False), mock.patch.object(S, "print_summary") as summary:
+            self.assertEqual(S.main(["--only", "h3"]), 1)
+        summary.assert_not_called()
 
 
 if __name__ == "__main__":

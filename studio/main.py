@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import editclip, genres, i18n, mv_audio, presets, procman, samples
+from . import editclip, genres, h3cache, i18n, mv_audio, mvinstall, presets, procman, samples
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI):
     short_director.restore()       # ショート動画も同じ
     app.state.samples = samples.load_samples()      # 同梱のサンプル(samples/*/sample.json)。読めないものは警告を出して飛ばす
     app.state.edit = EditManager(runner, ledger, OUTPUTS_DIR)      # 編集タブ(ジョブは再起動で消えるので、復元するものは無い)
+    app.state.mvinstall = installer = mvinstall.ToolsInstaller()     # MV の音声処理の道具を画面から入れる(同時に 1 つ)
     llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
     sched.monitor = monitor
@@ -83,6 +84,7 @@ async def lifespan(app: FastAPI):
     runner.start()
     await sched.adopt_running()
     yield
+    await asyncio.to_thread(installer.stop)       # 導入の途中なら、子プロセスごと止める
     await runner.stop()
     await llm.stop()
     monitor.stop()
@@ -434,17 +436,51 @@ def _mv_public(view: Optional[dict]) -> Optional[dict]:
     return {**view, "output": _public(view["output"]) if view.get("output") else None} if view else view
 
 
+def _installer() -> mvinstall.ToolsInstaller:
+    inst = getattr(app.state, "mvinstall", None)
+    if inst is None:
+        inst = app.state.mvinstall = mvinstall.ToolsInstaller()
+    return inst
+
+
 @app.get("/api/mv/tools")
 def api_mv_tools():
-    """MV に要る道具(Demucs と librosa の入った Python、ffmpeg)があるか。無ければ、画面に出す案内(hint)つきで知らせる。"""
-    hint = None
+    """MV に要る道具(Demucs と librosa の入った Python、ffmpeg)があるか。無ければ、画面に出す案内(hint)つきで知らせる。
+    画面から導入中なら installing と、最後の出力の行(progress_text)、失敗なら error も付ける。
+    ref_cache は、参照モード(MV・参照画像のショート動画・動画タブの Ref2VA / Ref2I)に要る H3 のキャッシュの様子(_ref_cache_view)。"""
+    return {**_mv_tools_check(), **_installer().status(), "ref_cache": _ref_cache_view()}
+
+
+def _ref_cache_view() -> dict:
+    """{needed: この PC で要るか, ready: あるか, hint: 要るのに無いときの案内(作るコマンドつき)か null}。画面はフォームの上に hint を出す。"""
+    st = h3cache.ref_cache_state()
+    hint = h3cache.missing_message(st["command"]) if st["needed"] and not st["ready"] else None
+    return {"needed": st["needed"], "ready": st["ready"], "hint": hint}
+
+
+@app.post("/api/mv/tools/install")
+def api_mv_tools_install():
+    """MV の音声処理の道具を、setup と同じ手順(scripts/setup.py --only mvtools --no-models)で裏で入れ始める。導入中なら 409。"""
+    inst = _installer()
+    try:
+        inst.start()
+    except mvinstall.InstallBusy as e:
+        raise HTTPException(409, str(e))
+    except OSError as e:
+        raise HTTPException(500, inst.error or str(e))
+    return {**_mv_tools_check(), **inst.status()}
+
+
+def _mv_tools_check() -> dict:
+    """道具の有無。installable: 画面のボタンで入れられる(道具の Python が無く、[mv] tools_python も書いていない)。"""
+    hint, installable = None, False
     try:
         mv_audio.tools_python()
     except mv_audio.MvToolsMissing as e:
-        hint = e.message
+        hint, installable = e.message, not mv_audio.configured_python()
     if hint is None and shutil.which("ffmpeg") is None:
         hint = "ffmpeg が見つかりません(PATH に入れてください)"
-    return {"available": hint is None, "hint": hint}
+    return {"available": hint is None, "hint": hint, "installable": installable}
 
 
 class DescribeImageIn(BaseModel):
@@ -495,6 +531,7 @@ def api_mv_list(limit: int = 100):
 @app.post("/api/mv")
 async def api_mv_create(body: MvIn):
     with _mv_errors():
+        h3cache.check_ref_cache()       # MV のシーンは全部 Ref2VA。キャッシュが要るのに無ければ、曲の分離と演出に数分かける前に断る
         return _mv_public(app.state.mv.create(body.model_dump()))
 
 
@@ -608,6 +645,8 @@ def api_short_list(limit: int = 100):
 @app.post("/api/short")
 async def api_short_create(body: ShortIn):
     with _mv_errors():
+        if body.images or body.narration.strip():       # 参照画像かセリフがあると、シーンを Ref2VA で作る(どちらも無ければ T2VA だけ)
+            h3cache.check_ref_cache()
         return _mv_public(app.state.short.create(body.model_dump()))
 
 

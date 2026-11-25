@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # YUZU Creator Studio のセットアップ(Linux)。uv を用意し、管理役の .venv を作って、scripts/setup.py に渡す。
 #
-#   ./setup.sh                  # エンジンの取り込み + 環境 + モデル(合計 約 160GB、回線次第で数時間)
+#   ./setup.sh                  # エンジンの取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 160GB、回線次第で数時間)
 #   ./setup.sh --no-models      # 環境だけ(モデルは後で)
 #   ./setup.sh --only h3,ace    # 指定したエンジンだけ
 #   ./setup.sh --llm            # 同梱 LLM(約 5GB)も先に取得する
-#   ./setup.sh --mv             # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
+#   ./setup.sh --no-mv          # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB。既定で入れる)を入れない
 #   ./setup.sh --only mvtools   # その道具だけ
 # 何度実行してもよい。済んでいる所は飛ばし、途中で止まっても続きから進む。
 set -e

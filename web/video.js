@@ -31,7 +31,28 @@
   vd("match").onchange = render;
   vd("random").onchange = () => { vd("seed").disabled = vd("random").checked; };
 
+  // ---- 参照モード(Ref2VA / Ref2I)に要る H3 のキャッシュ ----
+  // この PC で要るのに無ければ、作り方の下に案内を出す(/api/mv/tools の ref_cache.hint。タブを開いたときに 1 回だけ読む。読めなければ次に開いたとき)。
+  // T2VA / FL2VA / T2I はキャッシュが要らないので出さない。参照モードの生成はサーバも断る
+  let refHint = "", refHintLoaded = false;
+  async function loadRefHint() {
+    if (refHintLoaded) return;
+    refHintLoaded = true;
+    try {
+      const r = await fetch("/api/mv/tools", { headers: langHeaders() });
+      if (!r.ok) throw new Error(r.statusText);
+      refHint = ((await r.json()).ref_cache || {}).hint || "";
+    } catch (e) {
+      refHintLoaded = false;      // 分からなければ出さない
+    }
+    render();
+  }
+  studio.on.tab.push((tab) => { if (tab === "video") loadRefHint(); });
+
   function render() {
+    const refMode = mode === "ref2va" || (mode === "still" && refs.length > 0);      // still は参照があれば Ref2I
+    vd("refcache").hidden = !(refHint && refMode);
+    vd("refcache").textContent = refHint;
     vd("frames").hidden = mode !== "fl2va";
     vd("refs-fld").hidden = !hasRefs();
     vd("refs-label").textContent = mode === "still" ? t("参照(任意。あれば参照から静止画、なければテキストから)") : t("参照(画像・動画・音声、順番に意味があります)");

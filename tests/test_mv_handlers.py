@@ -395,7 +395,7 @@ class AnalyzeTest(HandlerBase):
         self.audio.error["separate"] = mv_audio.MvToolsMissing(f"MV の音声処理の道具(Demucs と librosa)が見つかりません: x。{mv_audio.MISSING_HINT}")
         with self.assertRaises(JobFailed) as cm:
             await mvh.run_analyze(self.job("mv.analyze"), self.ctx())
-        self.assertIn("setup --mv を実行してください", cm.exception.message)
+        self.assertIn("MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください", cm.exception.message)
         self.assertEqual(self.proj()["scenes"], [])
 
     async def test_song_gone_fails(self):

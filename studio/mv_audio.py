@@ -1,6 +1,6 @@
 """MV の音声処理: 音声をそろえる・切る(ffmpeg)、ボーカルを分ける・曲をシーンに分ける(道具用の Python)。
 
-管理役の venv は軽く保つため、torch や librosa はここに入れない。`setup --mv` が作る components/mvtools/.venv(CPU 版 torch、
+管理役の venv は軽く保つため、torch や librosa はここに入れない。setup(既定)か `setup --only mvtools` が作る components/mvtools/.venv(CPU 版 torch、
 約 1.2GB)の Python で、studio/mvtools/ のスクリプトを子プロセスとして動かす。`[mv] tools_python` で、Demucs と librosa の入った
 別の Python に差し替えることもできる。子プロセスは asyncio.to_thread の中で subprocess を使う(Windows のイベントループの種類に
 左右されないよう、asyncio.create_subprocess_* は使わない)。タスクが取り消されたら、子プロセスも(子孫ごと)止める。
@@ -36,7 +36,7 @@ log = logging.getLogger("studio.mv_audio")
 SCRIPTS_DIR = Path(__file__).resolve().parent / "mvtools"
 SEPARATE_SCRIPT = SCRIPTS_DIR / "separate.py"
 ANALYZE_SCRIPT = SCRIPTS_DIR / "analyze.py"
-MISSING_HINT = "setup --mv を実行してください(または studio.local.toml の [mv] tools_python に Demucs と librosa の入った Python を指定)"
+MISSING_HINT = "MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください(または studio.local.toml の [mv] tools_python に Demucs と librosa の入った Python を指定)"
 SAMPLE_RATE = 44100                 # 道具に渡す音声の標準(44.1kHz ステレオ)
 LOG_TAIL_LINES = 40                 # 失敗したときに付ける stderr の末尾の行数
 FFMPEG_TIMEOUT_S = 600
@@ -75,7 +75,7 @@ def _mv_cfg(settings) -> dict:
 
 
 def tools_dir(settings=None) -> Path:
-    """道具の置き場所: <リポジトリ直下>/<components_dir>/mvtools(setup --mv が venv を作る所)。components_dir は絶対パスでもよい。"""
+    """道具の置き場所: <リポジトリ直下>/<components_dir>/mvtools(setup が venv を作る所)。components_dir は絶対パスでもよい。"""
     s = _settings(settings)
     root = Path(getattr(s, "root", None) or config.REPO_ROOT)
     comp = Path(str(getattr(s, "components_dir", None) or "components")).expanduser()

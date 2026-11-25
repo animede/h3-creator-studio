@@ -425,10 +425,23 @@ EN = {
     "曲の差し替え": "replacing the audio with the song",
     "ギャラリーに登録しています": "Adding to the Gallery",
     "曲が見つかりません(ギャラリーから削除されたかもしれません)": "The song was not found (it may have been deleted from the Gallery)",
-    "setup --mv を実行してください(または studio.local.toml の [mv] tools_python に Demucs と librosa の入った Python を指定)":
-        "Run setup --mv (or set tools_python in [mv] of studio.local.toml to a Python with Demucs and librosa)",
+    "MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください(または studio.local.toml の [mv] tools_python に Demucs と librosa の入った Python を指定)":
+        "Install them with the Music Video tab's Install tools button or setup --only mvtools (or set tools_python in [mv] of studio.local.toml to a Python with Demucs and librosa)",
     "[mv] tools_python の Python が見つかりません: {}。{}": "The [mv] tools_python Python was not found: {0}. {1}",
     "MV の音声処理の道具(Demucs と librosa)が見つかりません: {}。{}": "The MV audio tools (Demucs and librosa) were not found: {0}. {1}",
+    # 画面から道具を入れる(mvinstall.py)
+    "MV の音声処理の道具を入れている最中です。終わるまでお待ちください": "The MV audio tools are being installed. Please wait until it finishes",
+    "MV の音声処理の道具を入れられませんでした(終了コード {})。logs/mvtools-install.log を見てください":
+        "Could not install the MV audio tools (exit code {0}). See logs/mvtools-install.log",
+    "MV の音声処理の道具の導入を始められません: {}": "Cannot start installing the MV audio tools: {0}",
+    # 参照モード用の H3 のキャッシュ(h3cache.py。{} は作るコマンドで、訳さずにそのまま入る)
+    "MiniMax-H3 の参照モード用のキャッシュ(transformer_ref_int8、約 32GB)がありません。MV・参照画像を使うショート動画・"
+    "動画タブの参照モードに要ります。スタジオを止めてから、次を実行して作ってください(数時間。途中で止めると、作りかけの分は"
+    "再実行で最初から作り直します): {}。または setup.bat --only h3(Linux は ./setup.sh --only h3)でも作れます":
+        "The MiniMax-H3 cache for the reference modes (transformer_ref_int8, about 32GB) is missing. Music videos, short videos that use "
+        "reference images and the Video tab's reference modes need it. Stop the studio, then run the following to build it (it takes hours; "
+        "if stopped partway, the unfinished part is rebuilt from scratch on the next run): {0}. You can also build it with "
+        "setup.bat --only h3 (./setup.sh --only h3 on Linux)",
     "{}が {} 分を超えたので止めました(ffmpeg)": "Stopped {0} because it exceeded {1} minutes (ffmpeg)",
     "{}を中止しました": "Cancelled {0}",
     "{}に失敗しました(ffmpeg): {}": "{0} failed (ffmpeg): {1}",
@@ -477,12 +490,12 @@ EN = {
     "ボーカル": "vocal",
     "{}の音声がありません: {}": "The {0} audio is missing: {1}",
     "シーンの長さの範囲が正しくありません: --min {} --max {}": "Invalid scene length range: --min {0} --max {1}",
-    "必要なパッケージがありません({}): この Python には librosa が入っていません。setup --mv を実行してください":
-        "A required package is missing ({0}): this Python has no librosa. Run setup --mv",
+    "必要なパッケージがありません({}): この Python には librosa が入っていません。MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください":
+        "A required package is missing ({0}): this Python has no librosa. Install them with the Music Video tab's Install tools button or setup --only mvtools",
     "音声を読めません(44.1kHz の WAV にしてから渡してください): {}": "Cannot read the audio (pass a 44.1 kHz WAV): {0}",
     "入力の音声がありません: {}": "The input audio is missing: {0}",
-    "必要なパッケージがありません({}): この Python には Demucs / torch が入っていません。setup --mv を実行してください":
-        "A required package is missing ({0}): this Python has no Demucs / torch. Run setup --mv",
+    "必要なパッケージがありません({}): この Python には Demucs / torch が入っていません。MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください":
+        "A required package is missing ({0}): this Python has no Demucs / torch. Install them with the Music Video tab's Install tools button or setup --only mvtools",
     "Demucs のモデル {} を読み込めません(初回はネットワークが要ります): {}":
         "Cannot load the Demucs model {0} (the first run needs the network): {1}",
     "このモデルにはボーカルのステムがありません: {}": "This model has no vocals stem: {0}",

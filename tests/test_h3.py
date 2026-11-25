@@ -12,10 +12,21 @@ from unittest import mock
 import httpx
 from PIL import Image
 
-from studio import media
+from studio import h3cache, media
 from studio.handlers import h3
 from studio.jobs import Ctx, Job, JobCancelled, JobFailed, JobRunner
 from studio.ledger import Ledger
+
+
+# 参照モード用の H3 のキャッシュ(studio/h3cache.py)。既定は「この PC では要らない」(開発機の RAM・OS・エンジンに左右されない)
+REF_OK = {"needed": False, "ready": True, "dir": "/h3", "cache_dir": "/h3/models/prequant/transformer_ref_int8",
+          "command": "cd /h3 && venv/bin/python scripts/prepare_lowvram.py --ref"}
+REF_MISSING = {**REF_OK, "needed": True, "ready": False}
+# エンジンが参照モードを断るときの HTTP の detail(minimax-h3 の app.py が「ref2va generation failed: 」を付ける)
+ENGINE_REFUSAL = ("ref2va generation failed: Ref2VA / Ref2I needs the int8 cache of transformer_ref (C:\\AI\\minimax-h3\\models\\prequant\\"
+                  "transformer_ref_int8), which is missing. On this host (file streaming, RAM below the pinned threshold) it cannot be "
+                  "quantized from bf16 at load time. Build it once with `scripts/prepare_lowvram.py --ref` (downloads transformer_ref 66GB "
+                  "shard by shard, writes ~32GB), then retry.")
 
 
 def png_bytes(size=(64, 48)) -> bytes:
@@ -86,6 +97,9 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
         self.ledger = Ledger(self.root)
         self.addCleanup(self.ledger.close)
         p = mock.patch.object(h3, "POLL_S", 0.01)
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(h3cache, "ref_cache_state", return_value=dict(REF_OK))
         p.start()
         self.addCleanup(p.stop)
         for name, ret in (("probe", {"duration_s": None, "width": None, "height": None}), ("video_thumb", False)):   # ダミーの動画で ffmpeg を呼ばない
@@ -240,6 +254,37 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
             job = self.job("h3.ref2va", {"prompt": "p", "references": [self.media("image", "a.png")], "seconds": 5})
             self.ledger.delete_output(job.params["references"][0])
             await h3.run(job, self.ctx(FakeH3()))
+
+    async def test_engine_refusal_becomes_the_how_to_message(self):
+        """エンジンが「参照モード用のキャッシュが無い」と断ったら(作る前からある制作の再開・やり直しでも)、英文の代わりに作り方を出す。原文は log_tail に。"""
+        job = self.job("h3.ref2va", {"prompt": "p", "references": [self.media("image", "a.png")], "seconds": 5})
+        with mock.patch.object(h3cache, "command_for", return_value="CMD"), self.assertRaises(JobFailed) as cm:
+            await h3.run(job, self.ctx(FakeH3(post_status=500, post_detail=ENGINE_REFUSAL)))
+        self.assertEqual((cm.exception.message, cm.exception.log_tail), (h3cache.missing_message("CMD"), ENGINE_REFUSAL))
+        # MV・ショート動画のシーンも同じ口(_generate)を通る
+        async with h3._client(self.ctx(FakeH3(post_status=500, post_detail=ENGINE_REFUSAL))) as c:
+            with self.assertRaises(JobFailed) as cm:
+                await h3._generate(Job(id="j", tab="mv", kind="mv.scene", params={}), c, "/api/ref2va", {"prompt": "p"}, [], prefix="シーン 1 / 3: ")
+        self.assertIn("scripts/prepare_lowvram.py --ref", cm.exception.message)
+        self.assertNotIn("int8 cache of transformer_ref", cm.exception.message)
+        with self.assertRaises(JobFailed) as cm:                         # ほかの失敗は、これまでどおりエンジンの理由を出す
+            await h3.run(self.job("h3.t2va", {"prompt": "p"}), self.ctx(FakeH3(post_status=500, post_detail="generation failed: CUDA out of memory")))
+        self.assertEqual(cm.exception.message, "H3 が生成に失敗しました: generation failed: CUDA out of memory")
+
+    def test_reference_modes_are_refused_up_front_without_the_cache(self):
+        """この PC で参照モードに要るキャッシュが無ければ、Ref2VA / Ref2I は normalize で断る(画面の /api/jobs は 400)。ほかの作り方は通す。"""
+        img = self.media("image", "a.png")
+        with mock.patch.object(h3cache, "ref_cache_state", return_value=REF_MISSING):
+            for kind, params in (("h3.ref2va", {"prompt": "p", "references": [img], "seconds": 5}), ("h3.ref2i", {"prompt": "p", "references": [img]})):
+                with self.assertRaises(ValueError) as cm:
+                    h3.normalize(kind, params, self.ledger)
+                self.assertEqual(str(cm.exception), h3cache.missing_message(REF_MISSING["command"]), kind)
+            with self.assertRaises(ValueError) as cm:                    # 入力の誤りは、キャッシュより先に知らせる
+                h3.normalize("h3.ref2va", {"prompt": "p", "references": [], "seconds": 5}, self.ledger)
+            self.assertIn("参照を 1 つ以上", str(cm.exception))
+            h3.normalize("h3.t2va", {"prompt": "p"}, self.ledger)
+            h3.normalize("h3.fl2va", {"prompt": "p", "first_image": img}, self.ledger)
+            h3.normalize("h3.t2i", {"prompt": "p"}, self.ledger)
 
     def test_normalize_validation(self):
         n = h3.normalize

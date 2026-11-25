@@ -323,7 +323,9 @@ ACE-Step で曲を作る。先頭の **作り方** で 2 つから選ぶ。
 
 ## MV(ミュージックビデオ)タブ
 
-キャラクター画像 1 枚と曲 1 つから、MV を作る。曲を 5〜10 秒のシーンに分け、シーンごとに MiniMax-H3 で動画を作り、最後に元の曲をつける。初回だけ `setup --mv`(音声の分離の道具)が要る。無ければタブの上に案内が出て、**MV を作る** が押せない。
+キャラクター画像 1 枚と曲 1 つから、MV を作る。曲を 5〜10 秒のシーンに分け、シーンごとに MiniMax-H3 で動画を作り、最後に元の曲をつける。音声の分離の道具が要る(setup が既定で入れる)。無ければタブの上に案内と **道具を入れる(約 1.3GB)** ボタンが出て、入れ終わるまで **MV を作る** が押せない。
+
+Windows と RAM 48GB 未満の PC では、MiniMax-H3 の参照モード用のキャッシュ(transformer_ref_int8、約 32GB)も要る(MV のシーンは全部 Ref2VA で作るため)。無ければタブの上に、この PC 用の作るコマンドつきの案内が出て、**MV を作る** が押せない。作り方は「[困ったとき](#困ったとき)」の「参照モード用のキャッシュがありません」。
 
 ### 入力
 
@@ -437,7 +439,7 @@ ACE-Step で曲を作る。先頭の **作り方** で 2 つから選ぶ。
 
 ## ショート動画タブ
 
-物語の文章から、物語のある短い動画を作る。仕組みは MV タブと同じ(準備 → 演出 → シーンごとの生成 → 結合)で、MiniMax-H3 だけを使う。曲だけの動画は MV と同じ音声の分離を使うので、そのときだけ `setup --mv` が要る。
+物語の文章から、物語のある短い動画を作る。仕組みは MV タブと同じ(準備 → 演出 → シーンごとの生成 → 結合)で、MiniMax-H3 だけを使う。曲だけの動画は MV と同じ音声の分離を使うので、そのときだけ同じ道具が要る(setup が既定で入れる。無ければ **道具を入れる** ボタンが出る)。
 
 ### 時間軸は 3 通り
 
@@ -792,7 +794,13 @@ Windows は VRAM があふれると、CPU メモリを GPU のメモリの代わ
 - **外部の ACE-Step が GPU にいて「同居できません」と出る**: ACE-Step は GPU から降ろせない。先に自分で止めるか、`studio.local.toml` の `[components.ace]` に別の `port` を書いて、管理役に起こさせる。
 - **更新したのに画面が古いまま**: ブラウザが古い JS を持っている。`Ctrl+F5`(Mac は `Cmd+Shift+R`)で読み直す。
 - **ffmpeg が見つからない**(MV・ショート動画・編集で「ffmpeg が見つかりません(PATH に入れてください)」): Windows は `winget install --id Gyan.FFmpeg -e --source winget` のあと、PowerShell と `run.bat` を開き直す。Linux は `sudo apt install ffmpeg`。
-- **MV タブに「setup --mv を実行してください」と出る**: `.\setup.bat --mv --only mvtools`(Linux は `./setup.sh --mv --only mvtools`)。Demucs と librosa の入った Python がすでにあれば、`[mv] tools_python` に書けば入れなくてよい。ショート動画の「曲だけ」も同じ道具を使う。
+- **MV タブに「MV の音声処理の道具…が見つかりません」と出る**: タブの **道具を入れる(約 1.3GB)** ボタンを押す(進み具合がボタンの横に出る。記録は logs/mvtools-install.log)か、`.\setup.bat --only mvtools`(Linux は `./setup.sh --only mvtools`)。Demucs と librosa の入った Python がすでにあれば、`[mv] tools_python` に書けば入れなくてよい。ショート動画の「曲だけ」も同じ道具を使う。
+- **「MiniMax-H3 の参照モード用のキャッシュ(transformer_ref_int8、約 32GB)がありません」と出る**(MV タブ・ショート動画タブの上と、動画タブの Ref2VA / 静止画(参照あり)にも同じ案内が出る。MV タブでは **MV を作る** が押せない): Windows と RAM 48GB 未満の PC では、エンジンが重みを量子化キャッシュのファイルから流すので、参照モード(MV、参照画像・セリフを使うショート動画、動画タブの Ref2VA / Ref2I)にこのキャッシュが要る。setup で入れたエンジンには作ってあるが、既に入れてあったエンジン(`dir` を書いた、または setup が見つけた)には無いことがある。setup を `--no-ref` で実行した人も無い(`--no-ref` が省くのが、まさにこのキャッシュ)。T2VA・FL2VA・T2I と、参照画像もセリフも無いショート動画は、無くても作れる。1 回だけ、次の手順で作る。
+  1. スタジオ(管理役)を止める(`run.bat` の画面で `Ctrl+C`)。RAM を空けるため。作るのに GPU は使わない。
+  2. PowerShell で `cd <h3 のフォルダ>; .\venv\Scripts\python.exe scripts\prepare_lowvram.py --ref` を実行する(Linux は `cd <h3 のフォルダ> && venv/bin/python scripts/prepare_lowvram.py --ref`)。h3 のフォルダは、`studio.local.toml` の `[components.h3]` の `dir`。書いていなければ、スタジオのフォルダの `components\minimax-h3`(例: `C:\h3-creator-studio\components\minimax-h3`)。画面の案内とエラーには、この PC 用のコマンドがそのまま出る。
+  3. これは transformer_ref(66GB)をシャード 1 つずつ取得して量子化し、取得した分は消しながら、`models\prequant\transformer_ref_int8` に約 32GB を書く。ディスクの空きが約 37GB 要る。回線次第で数時間。RAM 16GB でも作れる。できているキャッシュ(本体の `transformer_int8` など)は飛ばす。途中で止めても壊れない。同じコマンドをもう一度実行すればよい(ただし、作りかけの参照モード用は最初から作り直す)。
+  4. 終わったら `run.bat` でスタジオを起動し、失敗した制作の **再開** を押す。曲の分析と演出はそのまま使い、シーンだけを作り直す(作る前に断られたときは、もう一度作ればよい)。
+  5. 代わりに `.\setup.bat --only h3`(Linux は `./setup.sh --only h3`)でもよい。キャッシュを確かめて「いま作りますか?」と聞き、同じコマンドを流す。
 - **話者が出ない(AivisSpeech が動かない)**: 「話者を取得できません」と出たら、話者の欄を押すと読み直す(止まっていれば起動する)。直らなければ、エンジンの欄の AivisSpeech(音声合成)の行の **ログ** を見る。フォルダが壊れていれば、`components\AivisSpeech-Engine` を消して setup をもう一度。
 - **テロップの字が豆腐(□)や別の字体になる(Windows)**: `studio.local.toml` に次を書いて、管理役を起動し直す。
 

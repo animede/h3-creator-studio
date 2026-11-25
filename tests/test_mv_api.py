@@ -9,7 +9,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from studio import main, media, mv, mv_audio
+from studio import h3cache, main, media, mv, mv_audio
 from studio.ledger import Ledger
 from studio.llm import LlmError
 from studio.mvclip import quantize_scene_plan
@@ -18,6 +18,10 @@ VISION_JA = "長い銀髪、青い瞳、青いセーラー服の少女。アニ�
 VISION_REPLY = json.dumps({"subject": "a young anime-style girl", "face": "blue eyes", "hair": "long silver hair", "outfit": "blue sailor uniform",
                            "style": "anime cel shading", "identity_anchor": "A young anime girl", "description_ja": VISION_JA}, ensure_ascii=False)
 CONCEPT_TEXT = "切ないピアノバラード。雨の窓辺で過去を想う。"
+# 参照モード用の H3 のキャッシュ(studio/h3cache.py)。既定は「この PC では要らない」にして、開発機の RAM・OS・エンジンに左右されないようにする
+REF_OK = {"needed": False, "ready": True, "dir": "/h3", "cache_dir": "/h3/models/prequant/transformer_ref_int8",
+          "command": "cd /h3 && venv/bin/python scripts/prepare_lowvram.py --ref"}
+REF_MISSING = {**REF_OK, "needed": True, "ready": False}
 
 
 def png_bytes() -> bytes:
@@ -99,10 +103,13 @@ class MvApiTest(unittest.TestCase):
             p = mock.patch.object(media, name, return_value=ret)
             p.start()
             self.addCleanup(p.stop)
+        p = mock.patch.object(h3cache, "ref_cache_state", return_value=dict(REF_OK))
+        p.start()
+        self.addCleanup(p.stop)
         self.song = self.add("audio", "song.mp3", {"theme": "夜明けの駅", "genre": "Ballad"})
         self.image = self.add("image", "girl.png", {"prompt": "a girl with silver hair"})
         self.runner = StubRunner()
-        self.saved = {k: getattr(main.app.state, k, None) for k in ("mv", "ledger", "jobs", "llm")}
+        self.saved = {k: getattr(main.app.state, k, None) for k in ("mv", "ledger", "jobs", "llm", "mvinstall")}
         self.addCleanup(lambda: [setattr(main.app.state, k, v) for k, v in self.saved.items()])
         main.app.state.mv, main.app.state.ledger, main.app.state.jobs = mv.Director(self.runner, self.ledger, self.root), self.ledger, self.runner
         self.llm = main.app.state.llm = FakeLlm()
@@ -142,15 +149,40 @@ class MvApiTest(unittest.TestCase):
 
     def test_tools(self):
         with mock.patch.object(mv_audio, "tools_python", return_value=Path("/x/python")), mock.patch.object(main.shutil, "which", return_value="/usr/bin/ffmpeg"):
-            self.assertEqual(self.client.get("/api/mv/tools").json(), {"available": True, "hint": None})
+            self.assertEqual(self.client.get("/api/mv/tools").json(), {"available": True, "hint": None, "installable": False, "installing": False,
+                                                                       "ref_cache": {"needed": False, "ready": True, "hint": None}})
         missing = mv_audio.MvToolsMissing(f"MV の音声処理の道具(Demucs と librosa)が見つかりません: /x。{mv_audio.MISSING_HINT}")
         with mock.patch.object(mv_audio, "tools_python", side_effect=missing):
             js = self.client.get("/api/mv/tools").json()
         self.assertFalse(js["available"])
-        self.assertIn("setup --mv を実行してください", js["hint"])
+        self.assertTrue(js["installable"])
+        self.assertIn("MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください", js["hint"])
         with mock.patch.object(mv_audio, "tools_python", return_value=Path("/x/python")), mock.patch.object(main.shutil, "which", return_value=None):
             js = self.client.get("/api/mv/tools").json()
         self.assertEqual((js["available"], js["hint"]), (False, "ffmpeg が見つかりません(PATH に入れてください)"))
+
+    def test_tools_tell_when_the_reference_cache_is_missing(self):
+        """参照モード用の H3 のキャッシュがこの PC で要るのに無ければ、作るコマンドつきの案内(hint)を返す。画面はフォームの上に出す。"""
+        with mock.patch.object(h3cache, "ref_cache_state", return_value=REF_MISSING):
+            js = self.client.get("/api/mv/tools").json()
+            en = self.client.get("/api/mv/tools", headers={"Accept-Language": "en"}).json()
+        self.assertEqual(js["ref_cache"], {"needed": True, "ready": False, "hint": h3cache.missing_message(REF_MISSING["command"])})
+        self.assertIn(REF_MISSING["command"], en["ref_cache"]["hint"])
+        self.assertTrue(en["ref_cache"]["hint"].startswith("The MiniMax-H3 cache for the reference modes"), en["ref_cache"]["hint"])
+        with mock.patch.object(h3cache, "ref_cache_state", return_value={**REF_MISSING, "ready": True}):
+            self.assertEqual(self.client.get("/api/mv/tools").json()["ref_cache"], {"needed": True, "ready": True, "hint": None})
+
+    def test_create_is_refused_up_front_without_the_reference_cache(self):
+        """MV のシーンは全部 Ref2VA。キャッシュが要るのに無ければ、曲の分離と演出(数分)を始める前に 400 で断り、何も作らない。"""
+        with mock.patch.object(h3cache, "ref_cache_state", return_value=REF_MISSING):
+            r = self.client.post("/api/mv", json=self.body())
+            en = self.client.post("/api/mv", json=self.body(), headers={"Accept-Language": "en"})
+        self.assertEqual((r.status_code, r.json()["detail"]), (400, h3cache.missing_message(REF_MISSING["command"])))
+        self.assertEqual(en.status_code, 400)
+        self.assertIn(REF_MISSING["command"], en.json()["detail"])
+        self.assertEqual(self.runner.jobs, {})
+        self.assertEqual(self.client.get("/api/mv").json(), [])
+        self.assertEqual(self.create()["state"], "analyzing")                 # 作り終えれば(要らない構成でも)作れる
 
     # ---- 作る・見る ----
 
@@ -529,7 +561,7 @@ class LifespanTest(unittest.IsolatedAsyncioTestCase):
 
         async def no_adopt(self):
             pass
-        keys = ("sched", "ledger", "tts", "llm", "jobs", "mv", "monitor")          # lifespan が差し込む app.state は、終わったら元に戻す(他のテストに残さない)
+        keys = ("sched", "ledger", "tts", "llm", "jobs", "mv", "monitor", "mvinstall")          # lifespan が差し込む app.state は、終わったら元に戻す(他のテストに残さない)
         missing = object()
         saved = {k: getattr(main.app.state, k, missing) for k in keys}
 

@@ -5,12 +5,13 @@
 それぞれ自分のセットアップスクリプトで環境とモデルを用意する。何度実行してもよく、済んでいる所は飛ばし、
 途中で止まっても再実行で続きから進む。
 
-  python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 160GB)
+  python scripts/setup.py                 # 取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 160GB)
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
   python scripts/setup.py --only h3,ace   # 指定したエンジンだけ
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
-  python scripts/setup.py --mv            # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
-  python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける)
+  python scripts/setup.py --no-mv         # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB。既定で入れる)を入れない
+  python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける。--only のときは書いた分だけ)
+  (--mv は以前の名残。既定で入れるので、付けても何も変わらない)
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from typing import Callable, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from studio import h3cache  # noqa: E402
 from studio.config import Settings, load_settings  # noqa: E402
 
 AIVIS_VERSION = "1.2.0"
@@ -302,6 +304,81 @@ def python312_env(plat: str = None, which: Callable = shutil.which, run: Callabl
     return {"PYTHON": found[0]} if out.returncode == 0 and found else {}
 
 
+# ---- 既に入れてあるエンジン(h3)の量子化キャッシュ ----
+# setup は既存のエンジンの取り込みもモデルの準備もしないが、Windows と RAM 48GB 未満の PC では、エンジンが重みを量子化キャッシュの
+# ファイルから流すので、キャッシュが無いと動かない(参照モード用が無いと、MV は曲の分離と演出に数分かけた後に最初のシーンで断られる。
+# 2026-11-26、Windows の実機の報告)。そこで有無を確かめ、足りなければ作るか聞く。判定と場所は studio/h3cache.py(管理役と同じ)。
+
+H3_CACHE_LABEL = {"base": "本体(transformer_int8、約 60GB。T2VA・FL2VA・T2I)",
+                  "ref": "参照モード用(transformer_ref_int8、約 32GB。MV・参照画像のショート動画・動画タブの参照モード)"}
+H3_CACHE_DISK_GB = {"base": 60, "ref": 37}      # 作るのに要るディスクの空き(参照モード用は書く 32GB + 取得中のシャード 1 つ分)
+
+
+def h3_venv_python(h3_dir: Path, plat: str = None) -> Optional[Path]:
+    """エンジン(h3)の venv の python(studio.components と同じく venv → .venv の順)。無ければ None。"""
+    sub = "Scripts/python.exe" if is_win(plat) else "bin/python"
+    return next((p for p in (Path(h3_dir) / v / sub for v in ("venv", ".venv")) if p.is_file()), None)
+
+
+def h3_cache_status(h3_dir: Path, want_ref: bool = True, env: dict = None, plat: str = None) -> dict:
+    """既に入れてあるエンジン(h3)の量子化キャッシュ: {"base": 本体があるか, "ref": 参照モード用があるか, "venv": エンジンの venv の python か None,
+    "missing": 作るもの(want_ref が False なら参照モード用は数えない), "dir": キャッシュの置き場所}。置き場所はエンジンと同じく、環境変数
+    H3_TRANSFORMER_PREQUANT_DIR / H3_TE_PREQUANT_DIR があればそこ(env を渡さなければこのプロセスの環境)、無ければ <エンジン>/models/prequant。
+    できあがりの印は、フォルダの config.json と meta.json(作りかけは <名前>.tmp にあるので数えない)。"""
+    st = h3cache.cache_status(h3_dir, env)
+    missing = [k for k in ("base", "ref") if not st[k] and (k == "base" or want_ref)]
+    return {"base": st["base"], "ref": st["ref"], "venv": h3_venv_python(h3_dir, plat), "missing": missing, "dir": st["dir"]}
+
+
+def h3_cache_step(h3_dir: Path, venv: Path, want_ref: bool = True, env: dict = None, plat: str = None) -> Step:
+    """足りないキャッシュを作る手順: エンジンの venv の python で scripts/prepare_lowvram.py(+ --ref)。できているキャッシュは prepare が飛ばす。
+    環境は component_steps の h3 のモデルの準備と同じ(Windows は HF_HUB_DISABLE_SYMLINKS。python312_env は install.sh 用なので要らない)。
+    キャッシュの置き場所を環境変数で変えているときは、prepare にも同じ場所を H3_TE_PREQUANT_DIR で渡す(prepare はそれだけを見る)。"""
+    win = is_win(plat)
+    step_env = {"HF_HUB_DISABLE_SYMLINKS": "1"} if win else {}
+    moved = h3cache.moved_prequant_dir(h3_dir, env)
+    if moved:
+        step_env["H3_TE_PREQUANT_DIR"] = str(moved)
+    script = "scripts\\prepare_lowvram.py" if win else "scripts/prepare_lowvram.py"
+    return Step("h3: 量子化キャッシュの準備(scripts/prepare_lowvram.py)", [str(venv), script] + (["--ref"] if want_ref else []), env=step_env)
+
+
+def plan_existing_h3(h3_dir: Path, want_ref: bool = True, env: dict = None, plat: str = None) -> Optional[Step]:
+    """既に入れてあるエンジン(h3)の量子化キャッシュを確かめて知らせ、足りなければ作るか聞く(既定は「はい」)。作るなら、その手順を返す
+    (走らせるのは、ほかのエンジンの準備と同じ段で)。聞かないで None を返すのは: 足りている / エンジンの venv が無い(先に install)/
+    この PC ではエンジンが起動時に bf16 から作れる(Linux で RAM 48GB 以上。ここで prepare を走らせると、エンジンが使う bf16 の重みを
+    消してしまうので勧めない)/ 端末でない・「いいえ」(作るコマンドを出す)。env はエンジンが受け取る環境(既定はこのプロセスの環境)。"""
+    env = os.environ if env is None else env
+    st = h3_cache_status(h3_dir, want_ref, env, plat)
+    if not st["missing"]:
+        say(f"  キャッシュ: 本体 {'✓' if st['base'] else '未'} 参照用 " + ("✓" if st["ref"] else "未(--no-ref なので作りません)"))
+        return None
+    say(f"  量子化キャッシュがありません(場所: {st['dir']}):")
+    for k in st["missing"]:
+        say(f"    - {H3_CACHE_LABEL[k]}")
+    if st["venv"] is None:
+        say("  先にエンジンの install を実行してください(venv がありません)。終わってから setup をもう一度実行すると、キャッシュを作るか聞きます:")
+        say(f"    cd {h3_dir}")
+        say("    " + format_command(component_steps("h3", models=False, plat=plat)[0].argv, plat))
+        return None
+    if not h3cache.has_prepare_script(h3_dir):
+        say("  このエンジンは古く、キャッシュを作る scripts/prepare_lowvram.py がありません。README の「エンジンの更新(git pull)」で"
+            "更新してから、setup をもう一度実行してください")
+        return None
+    if not (h3cache.group_offload(env) and h3cache.file_streaming(env, plat)):
+        say("  この PC では、エンジンが起動時に bf16 の重みから作れるので、無くても動きます。先に作っておくなら(bf16 の重みは消さずに残します):")
+        say("    " + h3cache.prepare_command(h3_dir, env, plat, ref=want_ref, keep_source=True))
+        return None
+    say("  この PC(Windows、または RAM 48GB 未満)では、エンジンは重みをこのキャッシュのファイルから流すので、無いと使えません")
+    say(f"  作るには数時間かかります(重みをシャード 1 つずつ取得して量子化し、取得した分は消す。ディスクの空き 約 "
+        f"{sum(H3_CACHE_DISK_GB[k] for k in st['missing'])}GB、RAM 16GB で作れます。GPU は使いません)")
+    if not ask_yes("  いま作りますか?"):
+        say("  作らずに進みます。後で作るなら(スタジオを止めてから):")
+        say("    " + h3cache.prepare_command(h3_dir, env, plat, ref=want_ref))
+        return None
+    return h3_cache_step(h3_dir, st["venv"], want_ref, env, plat)
+
+
 # ---- 状態の確認(まとめの表) ----
 
 def component_status(name: str, d: Path, plat: str = None) -> tuple:
@@ -539,14 +616,14 @@ def _py312_on_windows() -> bool:
     return False
 
 
-def parse_only(only: str, enabled: list, mv: bool = False) -> tuple:
-    """--only の値 → (対象のエンジン, MV の音声処理の道具も対象か, 使えない名前)。空なら全部のエンジン。
-    mvtools はエンジンではなく、--mv と同じ(--only mvtools だけならエンジンは何も触らない)。"""
+def parse_only(only: str, enabled: list, no_mv: bool = False) -> tuple:
+    """--only の値 → (対象のエンジン, MV の音声処理の道具も対象か, 使えない名前)。空なら全部のエンジンと道具(--no-mv なら道具は除く)。
+    --only があるときは書いた分だけ(--no-mv は見ない)。mvtools はエンジンではなく道具を指す(--only mvtools だけならエンジンは何も触らない)。"""
     if not only.strip():
-        return list(enabled), mv, []
+        return list(enabled), not no_mv, []
     want = [x.strip() for x in only.split(",") if x.strip()]
     bad = [x for x in want if x != MV_NAME and x not in enabled]
-    return [n for n in ORDER if n in want and n in enabled], mv or MV_NAME in want, bad
+    return [n for n in ORDER if n in want and n in enabled], MV_NAME in want, bad
 
 
 def mv_notice(plat: str = None) -> str:
@@ -610,7 +687,7 @@ def setup_mv(cfg: Settings, models: bool = True) -> bool:
             return False
         if not mv_ready(py):
             say(f"失敗しました: [mv] tools_python の Python({py})に Demucs / librosa などが入っていません。"
-                "入れるか、tools_python の行を消して setup --mv をやり直してください")
+                "入れるか、tools_python の行を消して setup --only mvtools をやり直してください")
             show_mv_import_error(py)
             return False
         say(f"  既存を使います: {py}([mv] tools_python。導入も重みの取得も飛ばします)")
@@ -690,7 +767,8 @@ def parse_args(argv: list = None) -> argparse.Namespace:
     p.add_argument("--ace-xl", action="store_true", help="音楽に XL モデルも入れる(約 45GB。既定は 2B のみで約 15GB)")
     p.add_argument("--no-ref", action="store_true", help="h3 の参照モード用キャッシュ(transformer_ref、+約 32GB)を作らない")
     p.add_argument("--llm", action="store_true", help="同梱 LLM(llama-server と GGUF、約 5GB。画像・音声を読む投影ファイル 約 0.56GB を含む)も先に取得する")
-    p.add_argument("--mv", action="store_true", help="MV の音声処理の道具(Demucs + librosa + CPU 版 torch、約 1.3GB)も用意する")
+    p.add_argument("--no-mv", action="store_true", help="MV の音声処理の道具(Demucs + librosa + CPU 版 torch、約 1.3GB。既定で入れる)を入れない")
+    p.add_argument("--mv", action="store_true", help="以前の名残(道具は既定で入れるので、何も変わらない)")
     return p.parse_args(argv)
 
 
@@ -706,7 +784,7 @@ def main(argv: list = None) -> int:
         cfg.components_dir = args.components_dir
         say(f"エンジンの取り込み先: {cfg.component_dir('h3').parent}(この場所を使い続けるなら studio.local.toml に components_dir = '...' を書いてください)")
     enabled = [n for n in ORDER if n in cfg.component_names()]
-    selected, want_mv, bad = parse_only(args.only, enabled, args.mv)
+    selected, want_mv, bad = parse_only(args.only, enabled, args.no_mv)
     if bad:
         say(f"--only に使えない名前があります: {', '.join(bad)}(使えるのは {', '.join(enabled + [MV_NAME])})")
         return 2
@@ -725,6 +803,7 @@ def main(argv: list = None) -> int:
         if selected:
             say("\n== エンジンの取り込み ==")
         sources = {}
+        h3_build = None          # 既に入れてあるエンジン(h3)で、足りない量子化キャッシュを作る手順(作ると答えたときだけ。走らせるのは 2. で)
         for name in selected:
             src = decide_source(name, cfg, Path.home(), args.clone_anyway)
             if src.action == "home":
@@ -734,6 +813,8 @@ def main(argv: list = None) -> int:
                     src = Source("existing", src.path, f"既存を使います: {src.path}(studio.local.toml に書きました)", False)
             sources[name] = src
             say(f"[{name}] {src.message}")
+            if name == "h3" and src.action == "existing" and models:
+                h3_build = plan_existing_h3(src.path, want_ref=not args.no_ref, env=h3cache.engine_env(cfg))
             if src.action == "clone":
                 if not git_clone(COMPS[name].url, src.path):
                     return 1
@@ -747,7 +828,7 @@ def main(argv: list = None) -> int:
 
         # 2. 環境とモデル
         todo = [n for n in selected if sources[n].run_setup and COMPS[n].url]
-        if todo:
+        if todo or h3_build is not None:
             say("\n== 環境とモデルの準備 ==")
             if any(n in ("h3image", "ace") for n in todo):
                 if not ensure_uv_on_path():
@@ -765,6 +846,11 @@ def main(argv: list = None) -> int:
                 step.env.update(extra_env)
                 if not run_step(step, d):
                     return 1
+        if h3_build is not None:
+            say(f"\n[h3] {COMPS['h3'].label}(既存のエンジン: {sources['h3'].path})")
+            say("  ※ 量子化キャッシュを作ります。数時間かかります(止めても、できあがったキャッシュは次に飛ばします。作りかけの分は最初から作り直します)")
+            if not run_step(h3_build, sources["h3"].path):
+                return 1
 
         if args.llm and not prefetch_llm(cfg):
             return 1

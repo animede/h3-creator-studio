@@ -335,8 +335,7 @@
   function updateGo() {
     const need = timeline() === "music" && !tools.available;
     sh("go").disabled = creating || need;
-    $("sh-tools").hidden = !need;
-    $("sh-tools").textContent = need ? (tools.hint || t("曲の分析に必要な道具が見つかりません")) : "";
+    renderToolsBox("sh", tools, need, t("曲の分析に必要な道具が見つかりません"), loadTools);
   }
 
   async function loadTools() {

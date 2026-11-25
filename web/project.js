@@ -44,6 +44,36 @@ async function apiJson(url, method = "GET", body) {
 //   subtitles            : true なら、「結合し直す」の横にテロップ(字幕)の印を出して(セリフの制作だけ)、結合し直しに渡す。最終の動画に SRT があればリンクを出す
 //   onOpen()             : タブを開いたとき(制作の一覧を読む前)
 // 戻り値: { select(id) } — 作った制作を開く
+// MV の音声処理の道具の案内と「道具を入れる」ボタン(MV タブと、曲を使うときのショート動画タブ)。
+// prefix: 要素の ID の頭(mv / sh)。need: 道具の案内を出すか。tools: /api/mv/tools の答え。reload(): 道具の様子を読み直す
+// (導入中は 2 秒おきに呼ぶ)。ボタンは POST /api/mv/tools/install で、setup と同じ導入を裏で始める。
+// 2 行目(<prefix>-tools-ref)は、参照モードに要る H3 のキャッシュがこの PC で無いときの案内(refCacheHint。作るコマンドは文の中。ボタンは無い)。
+const toolsPollTimers = {};
+const refCacheHint = (tools) => (tools && tools.ref_cache && tools.ref_cache.hint) || "";
+function renderToolsBox(prefix, tools, need, fallback, reload) {
+  const el = (id) => document.getElementById(prefix + "-tools" + id);
+  const box = el(""), btn = el("-install"), prog = el("-progress"), ref = refCacheHint(tools);
+  clearTimeout(toolsPollTimers[prefix]);
+  if (tools.installing) toolsPollTimers[prefix] = setTimeout(reload, 2000);
+  box.hidden = !need && !ref;
+  el("-ref").hidden = !ref;
+  el("-ref").textContent = ref;
+  el("-main").hidden = !need;
+  if (!need) return;
+  el("-text").textContent = tools.error || tools.hint || fallback;
+  btn.hidden = !tools.installable && !tools.installing;
+  btn.disabled = !!tools.installing;
+  prog.textContent = tools.installing ? t("入れています…") + (tools.progress_text ? " " + tools.progress_text : "") : "";
+  if (!btn.dataset.bound) {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try { await apiJson("/api/mv/tools/install", "POST"); } catch (e) { el("-text").textContent = e.message; btn.disabled = false; return; }
+      reload();
+    });
+  }
+}
+
 function makeProjectPanel(cfg) {
   const STATE_LABEL = { analyzing: t("分析中"), scripting: t("演出を作成中"), generating: t("シーンを生成中"), assembling: t("結合中"), paused: t("一時停止"),
     completed: t("完成"), failed: t("失敗"), cancelled: t("中止") };

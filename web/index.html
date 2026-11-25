@@ -86,6 +86,7 @@
         <button data-mode="t2va" class="active"><b>T2VA</b><small data-i18n>テキストから</small></button><button data-mode="fl2va"><b>FL2VA</b><small data-i18n>最初・最後のフレームから</small></button>
         <button data-mode="ref2va"><b>Ref2VA</b><small data-i18n>参照から</small></button><button data-mode="still"><b>T2I / Ref2I</b><small data-i18n>静止画</small></button>
       </div>
+      <div class="msg refhint" id="vd-refcache" hidden></div>
       <label class="fld"><span class="fl"><span data-i18n>プロンプト</span> <span id="vd-mode-tag" class="modetag"></span></span>
         <textarea id="vd-prompt" rows="5" maxlength="8000" placeholder="作りたい動画の場面・動き・セリフ・音を、日本語や英語で書きます" data-i18n-placeholder></textarea></label>
       <div class="enh"><button id="vd-enh" type="button" title="MiniMax 公式のプロンプトの書き方に沿って書き直します(管理役の LLM を使います)" data-i18n-title data-i18n>プロンプト強化</button>
@@ -246,7 +247,7 @@
     </div>
     <div class="tabpanel" id="tab-mv" role="tabpanel" hidden>
       <div class="presetbar" id="mv-presets"><div class="samplebox" id="mv-samples" hidden></div></div>
-      <div class="msg" id="mv-tools" hidden></div>
+      <div class="msg" id="mv-tools" hidden><div id="mv-tools-main"><span id="mv-tools-text"></span> <button id="mv-tools-install" class="mini" type="button" hidden title="MV の音声処理の道具(Demucs・librosa)を、setup と同じ手順で入れます" data-i18n-title data-i18n>道具を入れる(約 1.3GB)</button> <span id="mv-tools-progress"></span></div><div class="refhint" id="mv-tools-ref" hidden></div></div>
       <div class="fld" id="mv-song-fld"><span class="fl"><span data-i18n>曲</span> <span class="note inl" id="mv-song-note" data-i18n>音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
         <div class="refs frame" id="mv-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div></div>
       <div class="fld" id="mv-image-fld"><span class="fl"><span data-i18n>キャラクター画像</span> <span class="note inl" id="mv-image-note" data-i18n>画像タブの画像・ギャラリー・PC の画像ファイル</span></span>
@@ -302,7 +303,7 @@
     </div>
     <div class="tabpanel" id="tab-short" role="tabpanel" hidden>
       <div class="presetbar" id="sh-presets"><div class="samplebox" id="sh-samples" hidden></div></div>
-      <div class="msg" id="sh-tools" hidden></div>
+      <div class="msg" id="sh-tools" hidden><div id="sh-tools-main"><span id="sh-tools-text"></span> <button id="sh-tools-install" class="mini" type="button" hidden title="MV の音声処理の道具(Demucs・librosa)を、setup と同じ手順で入れます" data-i18n-title data-i18n>道具を入れる(約 1.3GB)</button> <span id="sh-tools-progress"></span></div><div class="refhint" id="sh-tools-ref" hidden></div></div>
       <div class="fld"><label class="fl" for="sh-story"><span data-i18n>物語・映像のイメージ</span> <small id="sh-story-req" data-i18n>(曲もセリフも無いときは必須)</small></label>
         <textarea id="sh-story" rows="5" maxlength="4000" placeholder="例: 雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る" data-i18n-placeholder></textarea></div>
       <div class="fld" id="sh-song-fld"><span class="fl"><span data-i18n>曲</span> <small data-i18n>(任意)</small> <span class="note inl" id="sh-song-note" data-i18n>音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>

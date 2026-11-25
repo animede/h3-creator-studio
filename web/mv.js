@@ -247,14 +247,14 @@
     renderSize();
   }
 
+  // 道具が無いか、参照モードに要る H3 のキャッシュが無い(MV のシーンは全部 Ref2VA)ときは作れない。どちらも案内はフォームの上(renderToolsBox)
   function updateGo() {
-    mvp("go").disabled = creating || !tools.available;
+    mvp("go").disabled = creating || !tools.available || !!refCacheHint(tools);
   }
 
   async function loadTools() {
     try { tools = await api("/api/mv/tools"); } catch (e) { return; }
-    mvp("tools").hidden = tools.available;
-    mvp("tools").textContent = tools.available ? "" : (tools.hint || t("MV に必要な道具が見つかりません"));
+    renderToolsBox("mv", tools, !tools.available, t("MV に必要な道具が見つかりません"), loadTools);
     updateGo();
   }
 

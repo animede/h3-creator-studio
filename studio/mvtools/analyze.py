@@ -328,7 +328,7 @@ def analyze(song: Path, vocals: Path, min_s: float = 5.0, max_s: float = 10.0, t
         analysis = analyze_boundaries(Path(song), Path(vocals))
     except ImportError as e:
         raise AnalyzeError(f"必要なパッケージがありません({e.name}): この Python には librosa が入っていません。"
-                           "setup --mv を実行してください") from e
+                           "MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください") from e
     if dump:
         Path(dump).write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
     scenes = plan_scenes(analysis, min_seconds=min_s, target_seconds=target_s, max_seconds=max_s)

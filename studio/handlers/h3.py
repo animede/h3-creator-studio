@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from .. import h3cache
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from .common import download, error_text
 
@@ -125,6 +126,8 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
         out["references"] = refs
         # Vocal Lock は音声の参照があるときだけ意味がある(ref2va のみ)
         out["vocal_lock"] = mode == "ref2va" and bool(params.get("vocal_lock")) and (ledger is None or counts["audio"] > 0)
+        # この PC で参照モードに要るキャッシュ(transformer_ref_int8)が無ければ受けない(エンジンが断る前に、作り方を出す)
+        h3cache.check_ref_cache()
     return out
 
 
@@ -255,7 +258,13 @@ async def _generate(job: Job, c: httpx.AsyncClient, endpoint: str, data: dict, f
         raise JobCancelled()
     if r.status_code == 409:
         raise JobFailed("H3 は別の生成を実行中です。終わってからもう一度試してください")
-    raise JobFailed(f"H3 が生成に失敗しました: {error_text(r)}")
+    detail = error_text(r)
+    if h3cache.is_engine_refusal(detail):
+        # 参照モード用のキャッシュが無いのでエンジンが断った(作る前からある制作の再開・やり直しでも、ここに来る)。
+        # エンジンの英文の代わりに作り方を出し、原文は log_tail に残す
+        log.warning("H3 が参照モードを断りました(参照モード用のキャッシュがありません): %s", detail)
+        raise JobFailed(h3cache.missing_message(h3cache.command_for()), detail)
+    raise JobFailed(f"H3 が生成に失敗しました: {detail}")
 
 
 async def run(job: Job, ctx: Ctx) -> None:

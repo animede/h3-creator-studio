@@ -124,7 +124,7 @@ def separate(src: Path, out_dir: Path, device: str = "auto", model_name: str = D
         from demucs.apply import apply_model
     except ImportError as e:
         raise UserError(f"必要なパッケージがありません({e.name}): この Python には Demucs / torch が入っていません。"
-                        "setup --mv を実行してください") from e
+                        "MV タブの「道具を入れる」ボタンか setup --only mvtools で入れてください") from e
     dev = pick_device(device, torch)
     log(f"device: {dev}")
     log(f"model: {model_name} を読み込んでいます(初回は重みを取得します)")
