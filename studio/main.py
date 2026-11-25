@@ -93,7 +93,7 @@ app = FastAPI(title="YUZU Creator Studio", lifespan=lifespan)
 def _comp(name: str):
     c = app.state.sched.comps.get(name)
     if c is None:
-        raise HTTPException(404, f"未知の部品です: {name}")
+        raise HTTPException(404, f"未知のエンジンです: {name}")
     return c
 
 
@@ -114,8 +114,8 @@ async def api_component_action(name: str, action: str):
     comp = _comp(name)
     if comp.spec.uses_gpu and action == "ensure":
         plan = app.state.sched.plan(name)
-        if plan.action == "wait":      # 仕事中の部品を降ろさないと載らない: 待たせずに断る(画面の操作が、生成の終わりまで固まらないように)
-            busy = "、".join(app.state.sched.comps[n].spec.label for n in plan.blockers) or "別の部品"
+        if plan.action == "wait":      # 仕事中のエンジンを降ろさないと載らない: 待たせずに断る(画面の操作が、生成の終わりまで固まらないように)
+            busy = "、".join(app.state.sched.comps[n].spec.label for n in plan.blockers) or "別のエンジン"
             raise HTTPException(409, f"{comp.spec.label} を GPU に載せられません({busy} が生成中のため)。生成が終わってからもう一度押してください")
     if comp.spec.uses_gpu and action in ("start", "ensure"):
         await app.state.llm.release_before_gpu()      # 管理役の LLM が VRAM を持っていたら返す
@@ -159,7 +159,7 @@ class JobIn(BaseModel):
     params: dict = {}
 
 
-# /api/jobs から入れられるジョブの種類(画像・動画・音楽の部品のジョブだけ)。MV・ショート動画のジョブは Director、編集のジョブは EditManager だけが入れる
+# /api/jobs から入れられるジョブの種類(画像・動画・音楽のエンジンのジョブだけ)。MV・ショート動画のジョブは Director、編集のジョブは EditManager だけが入れる
 # (tab を絞っても kind は自由に書けたので、制作の外から mv.assemble や、検証していない state の edit.export を入れられた)
 PUBLIC_JOB_PREFIXES = ("h3image.", "h3.", "ace.")
 
@@ -218,7 +218,7 @@ class EnhanceIn(BaseModel):
 
 @app.post("/api/enhance")
 async def api_enhance(body: EnhanceIn):
-    """プロンプトを、その部品が持つ強化の仕組み(管理役の LLM を使う)で書き直す。"""
+    """プロンプトを、そのエンジンが持つ強化の仕組み(管理役の LLM を使う)で書き直す。"""
     try:
         return await enhance_prompt(app.state.jobs, **body.model_dump())
     except EnhanceError as e:
@@ -313,7 +313,7 @@ async def api_music_caption(body: MusicIn):
 async def api_music_models():
     """ACE の DiT モデル一覧(読込済み・VRAM に載るか・既定)。ACE は起こさず、動いていなければ空の一覧を返す。"""
     if "ace" not in app.state.sched.comps:          # studio.toml で ACE を無効にしている: 画面が落ちないよう、空の一覧で答える
-        return {"models": [], "default_model": None, "note": "音楽の部品(ACE-Step)は無効になっています"}
+        return {"models": [], "default_model": None, "note": "音楽のエンジン(ACE-Step)は無効になっています"}
     spec = _comp("ace").spec
     return await ace_handler.list_models(spec.base_url, app.state.jobs.ctx.transport)
 

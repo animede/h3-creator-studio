@@ -1,7 +1,7 @@
 """管理役が持つ LLM: llama.cpp の llama-server(CUDA 版)で Gemma 4 E4B を動かす。プロンプト強化と作詞に使う。
 
 考え方は ACE-Step-1.5-fast の easy-music(services/local_llm_service.py)を引き継ぐ:
-- 最初に使うときに起こす(lazy)。`--fit on --fit-target 1536` で、いま GPU に載っている部品の隣の空き VRAM に
+- 最初に使うときに起こす(lazy)。`--fit on --fit-target 1536` で、いま GPU に載っているエンジンの隣の空き VRAM に
   入る分だけ GPU に載せ、残りは CPU で動かす。
 - GPU で生成する直前に、GPU を使っている子を止めて VRAM を返す(release_before_gpu)。
 - GPU の仕事が走っている(順番を待っている)間は、chat を待たせず、CUDA を隠した CPU 専用の子で動かす(遅くはなる)。
@@ -195,7 +195,7 @@ def tools_dir_of(cfg: Settings) -> Path:
 
 
 def find_gguf(cfg: Settings) -> Optional[Path]:
-    """[llm] gguf → tools_dir → 他の部品がすでに持っているコピー(ACE の easy-music、h3 の models/llm)の順。無ければ None。"""
+    """[llm] gguf → tools_dir → 他のエンジンがすでに持っているコピー(ACE の easy-music、h3 の models/llm)の順。無ければ None。"""
     override = str(cfg.llm["gguf"]).strip()
     if override:
         p = Path(override).expanduser()
@@ -285,7 +285,7 @@ def build_command(exe: Path, gguf: Path, port: int, gpu: bool, mode, cpu_only: b
     if gpu and cpu_only:
         cmd += ["-ngl", "0", "--fit", "off"]
     elif gpu:
-        if mode == "auto":     # 空き VRAM に入る層数だけ GPU へ(他の部品が載っていても共存できる)
+        if mode == "auto":     # 空き VRAM に入る層数だけ GPU へ(他のエンジンが載っていても共存できる)
             cmd += ["--fit", "on", "--fit-target", str(FIT_TARGET_MIB)]
         else:
             cmd += ["-ngl", str(mode), "--fit", "off"]
@@ -457,7 +457,7 @@ class Llm:
         return True
 
     async def release_before_gpu(self) -> bool:
-        """GPU 部品を載せる直前に呼ぶ。GPU を使っている子プロセスが居れば止めて VRAM を返す(次の chat で、CPU 専用の子として起こし直す)。
+        """GPU エンジンを載せる直前に呼ぶ。GPU を使っている子プロセスが居れば止めて VRAM を返す(次の chat で、CPU 専用の子として起こし直す)。
 
         chat / 強化の最中なら、その終わりを待ってから止める。CPU だけで動いている子は VRAM を持たないので、待たず、止めない。
         """

@@ -87,7 +87,7 @@ class SchedulerTest(unittest.IsolatedAsyncioTestCase):
         await s.ensure("h3image")
         with self.assertRaises(Busy) as cm:
             await s.ensure("h3")
-        self.assertEqual(cm.exception.message, "生成中の部品があるので切り替えられません")
+        self.assertEqual(cm.exception.message, "生成中のエンジンがあるので切り替えられません")
         self.assertEqual(s.gpu_resident, "h3image")
 
     async def test_aivis_never_touches_resident(self):
@@ -122,7 +122,7 @@ if __name__ == "__main__":
 
 
 class ExternalCoexistTest(unittest.IsolatedAsyncioTestCase):
-    """止められない外部の部品(ACE)が GPU にいるとき: 空きがあれば同居、無ければ分かる言葉で断る。"""
+    """止められない外部のエンジン(ACE)が GPU にいるとき: 空きがあれば同居、無ければ分かる言葉で断る。"""
 
     def make(self, fake, free_mib):
         specs = {"h3": spec("h3", port=11), "ace": spec("ace", can_unload=False, port=13)}
@@ -169,7 +169,7 @@ class ExternalCoexistTest(unittest.IsolatedAsyncioTestCase):
 
 
 class DeadPorts(Fake):
-    """指定したポートの部品は、もう動いていない(接続できない)。"""
+    """指定したポートのエンジンは、もう動いていない(接続できない)。"""
 
     def __init__(self, dead: set, unload_code=200):
         super().__init__(unload_code)
@@ -184,7 +184,7 @@ class DeadPorts(Fake):
 
 
 class ClosedExternalTest(unittest.IsolatedAsyncioTestCase):
-    """外部で動いていた部品(取り込んで常駐の記録にあるもの)が閉じられたとき、unload が届かないまま他の部品の仕事を失敗させ続けない。"""
+    """外部で動いていたエンジン(取り込んで常駐の記録にあるもの)が閉じられたとき、unload が届かないまま他のエンジンの仕事を失敗させ続けない。"""
 
     def make(self, fake, mode="exclusive"):
         specs = {"h3": spec("h3", port=11), "h3image": spec("h3image", port=12)}

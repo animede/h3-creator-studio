@@ -1,6 +1,6 @@
 """MiniMax-H3(動画・静止画)のハンドラ: T2VA / FL2VA / Ref2VA / T2I / Ref2I。
 
-部品の生成 API は、動画ができあがるまで返らない(数分〜最長 20 分ほど)同期の POST。
+エンジンの生成 API は、動画ができあがるまで返らない(数分〜最長 20 分ほど)同期の POST。
 そこで POST を 1 本のタスクで待ち、もう 1 本のタスクが /api/progress を 1 秒おきに読んで進捗を写す。
 """
 import asyncio
@@ -20,7 +20,7 @@ COMPONENT = "h3"
 POLL_S = 1.0
 POST_TIMEOUT_S = 3600.0        # 6GB のカードで最長 20 分ほどかかる。余裕を見て 1 時間
 MAX_POLL_ERRORS = 60
-MIN_SECONDS, MAX_SECONDS = 5, 15    # 部品の既定の下限は 5 秒(H3_MIN_SECONDS)。それ未満は部品が 400 で断る
+MIN_SECONDS, MAX_SECONDS = 5, 15    # エンジンの既定の下限は 5 秒(H3_MIN_SECONDS)。それ未満はエンジンが 400 で断る
 MAX_IMAGES, MAX_VIDEOS, MAX_AUDIOS = 9, 3, 3
 MIN_SIZE, MAX_SIZE, SNAP = 256, 2048, 32
 DEFAULT_RESOLUTION = "768x768"
@@ -29,7 +29,7 @@ ENDPOINTS = {"t2va": "/api/t2va", "fl2va": "/api/fl2va", "ref2va": "/api/ref2va"
 STILL_MODES = ("t2i", "ref2i")
 REF_MODES = ("ref2va", "ref2i")
 
-# 部品の /api/progress の phase -> 画面に出す文言
+# エンジンの /api/progress の phase -> 画面に出す文言
 PHASE_LABEL = {
     "starting": "生成を始めています", "loading_text_encoder": "テキストエンコーダを読み込んでいます",
     "encoding": "プロンプトと参照をエンコードしています", "loading_transformer": "モデルを読み込んでいます",
@@ -81,9 +81,9 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
         elif params.get("resolution"):
             out["width"], out["height"] = _parse_resolution(params["resolution"])
         else:
-            out["width"] = out["height"] = None    # 未指定なら部品が参照から決める
+            out["width"] = out["height"] = None    # 未指定ならエンジンが参照から決める
     else:
-        # 部品の resolution は 768x768 / 768x1344 / 1344x768 の名前だけを受けるので、
+        # エンジンの resolution は 768x768 / 768x1344 / 1344x768 の名前だけを受けるので、
         # 512x512 などは width / height で渡す(明示指定はプリセットより優先され、32 の倍数に丸められる)
         out["width"], out["height"] = _parse_resolution(params.get("resolution"))
         out["resolution"] = "%dx%d" % (out["width"], out["height"])
@@ -128,7 +128,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     return out
 
 
-# ---- 部品への送信 ----
+# ---- エンジンへの送信 ----
 
 def _client(ctx: Ctx, timeout: float = 15.0) -> httpx.AsyncClient:
     spec = ctx.sched.comps[COMPONENT].spec
@@ -136,7 +136,7 @@ def _client(ctx: Ctx, timeout: float = 15.0) -> httpx.AsyncClient:
 
 
 def _file_part(field: str, path: Path, filename: str = None) -> tuple:
-    """ファイル 1 つを multipart の部品にする(MV が、台帳に載せない作業用の音声を渡すのにも使う)。"""
+    """ファイル 1 つを multipart のエンジンにする(MV が、台帳に載せない作業用の音声を渡すのにも使う)。"""
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return field, (filename or path.name, path.read_bytes(), mime)
 
@@ -160,7 +160,7 @@ def _build_request(job: Job, ctx: Ctx) -> tuple[str, dict, list]:
     if p.get("width") and mode not in REF_MODES:
         data["width"], data["height"] = str(p["width"]), str(p["height"])
     if mode in ("t2va", "fl2va", "ref2va") and p["seconds"] > 0:
-        data["seconds"] = str(p["seconds"])        # ref2va で秒数を送らない = 音声の長さに合わせる(部品の仕様)
+        data["seconds"] = str(p["seconds"])        # ref2va で秒数を送らない = 音声の長さに合わせる(エンジンの仕様)
     if mode == "fl2va":
         if p.get("first_image"):
             files.append(_load_file(ctx, "image", p["first_image"], "先頭フレーム"))
@@ -179,7 +179,7 @@ def _build_request(job: Job, ctx: Ctx) -> tuple[str, dict, list]:
 
 
 async def _progress_job_id(c: httpx.AsyncClient):
-    """いま部品が持っている(前回の)ジョブ ID。今回のジョブの進捗と取り違えないための目印。"""
+    """いまエンジンが持っている(前回の)ジョブ ID。今回のジョブの進捗と取り違えないための目印。"""
     try:
         return (await c.get("/api/progress")).json().get("job_id")
     except (httpx.HTTPError, ValueError, AttributeError):
@@ -187,7 +187,7 @@ async def _progress_job_id(c: httpx.AsyncClient):
 
 
 async def _watch_progress(job: Job, c: httpx.AsyncClient, stale_id, prefix: str = "") -> None:
-    """生成の POST を待つ間、/api/progress を読んでジョブの進捗・文言・部品側 ID を更新し続ける(キャンセルされるまで)。
+    """生成の POST を待つ間、/api/progress を読んでジョブの進捗・文言・エンジン側 ID を更新し続ける(キャンセルされるまで)。
     prefix は文言の頭に付ける(MV が「シーン 3 / 12: 」を付ける)。"""
     errors, interrupt_sent = 0, False
     while True:
@@ -287,7 +287,7 @@ async def run(job: Job, ctx: Ctx) -> None:
 
 
 async def cancel(job: Job, ctx: Ctx) -> None:
-    """実行中の生成へ中止を要求する(反応はステップの区切りまで遅れる)。部品側 ID がまだ無ければ、見張りが分かった時点で送る。"""
+    """実行中の生成へ中止を要求する(反応はステップの区切りまで遅れる)。エンジン側 ID がまだ無ければ、見張りが分かった時点で送る。"""
     if not job.remote_id:
         return
     async with _client(ctx) as c:

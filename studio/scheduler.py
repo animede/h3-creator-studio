@@ -1,9 +1,9 @@
-"""GPU 部品の載せ替えと同居の状態機械。
+"""GPU エンジンの載せ替えと同居の状態機械。
 
-exclusive: 今 GPU にいる部品を空けてから、次の部品を載せる(常駐は 1 つ)。
-share: 総 VRAM に余裕があるとき、複数の部品を常駐させる。部品ごとに VRAM の「予算」を割り当て、予算の合計が収まるかぎり
-       他を降ろさずに載せる。足りなければ仕事中でない部品を、最後に使った時刻の古い順に降ろす。それでも足りなければ、
-       仕事中の部品が空くまで待つ(部品の予算は、起動時に環境変数で部品へ渡す)。
+exclusive: 今 GPU にいるエンジンを空けてから、次のエンジンを載せる(常駐は 1 つ)。
+share: 総 VRAM に余裕があるとき、複数のエンジンを常駐させる。エンジンごとに VRAM の「予算」を割り当て、予算の合計が収まるかぎり
+       他を降ろさずに載せる。足りなければ仕事中でないエンジンを、最後に使った時刻の古い順に降ろす。それでも足りなければ、
+       仕事中のエンジンが空くまで待つ(エンジンの予算は、起動時に環境変数でエンジンへ渡す)。
 """
 import asyncio
 import logging
@@ -27,7 +27,7 @@ SHARE_MIN_TOTAL_MIB = 40 * 1024     # auto: 総 VRAM がこれ以上なら share
 
 
 class SwitchError(Exception):
-    """載せ替え・起動の失敗。log_tail は部品のログ末尾(画面に出す)。"""
+    """載せ替え・起動の失敗。log_tail はエンジンのログ末尾(画面に出す)。"""
 
     def __init__(self, message: str, log_tail: str = ""):
         super().__init__(message)
@@ -101,24 +101,24 @@ class Component:
         self.proc = None
         self.external = False
         self.last_error: Optional[str] = None
-        self.budget_mib: Optional[int] = None    # share で起動したときの予算。止めるまで変えない(部品は起動時の予算のまま動く)
+        self.budget_mib: Optional[int] = None    # share で起動したときの予算。止めるまで変えない(エンジンは起動時の予算のまま動く)
         self.since = time.time()
 
 
 @dataclass
 class Resident:
-    """GPU に載っている部品 1 つぶんの記録。"""
+    """GPU に載っているエンジン 1 つぶんの記録。"""
     budget_mib: Optional[int] = None             # share のときの VRAM の予算(exclusive では None)
     last_used: float = field(default_factory=time.time)    # 降ろす順(古い方から)を決める
 
 
 @dataclass
 class Plan:
-    """部品を ready にするときの見通し(何も変えずに調べた結果)。"""
-    action: str                                  # ready: 載っている / fit: 降ろさずに載る / evict: 古い順に降ろせば載る / wait: 仕事中の部品が空くまで待つ / refuse: 載せられない
-    victims: list = field(default_factory=list)  # evict: 先に降ろす部品(古い順)
-    blockers: list = field(default_factory=list)   # wait: 終わるのを待つ仕事中の部品
-    needs: set = field(default_factory=set)        # 降ろしたい部品(待っている仕事より後の仕事を、これらに入れないための目印)
+    """エンジンを ready にするときの見通し(何も変えずに調べた結果)。"""
+    action: str                                  # ready: 載っている / fit: 降ろさずに載る / evict: 古い順に降ろせば載る / wait: 仕事中のエンジンが空くまで待つ / refuse: 載せられない
+    victims: list = field(default_factory=list)  # evict: 先に降ろすエンジン(古い順)
+    blockers: list = field(default_factory=list)   # wait: 終わるのを待つ仕事中のエンジン
+    needs: set = field(default_factory=set)        # 降ろしたいエンジン(待っている仕事より後の仕事を、これらに入れないための目印)
     reason: str = ""                             # wait / refuse のときの、利用者向けの文
 
 
@@ -127,13 +127,13 @@ class Scheduler:
         self.comps = {n: Component(s) for n, s in (specs if specs is not None else all_specs()).items()}
         self.monitor = monitor
         self.poll_s = poll_s
-        self.mode = mode                         # exclusive: GPU の常駐は 1 部品 / share: 予算が収まるかぎり複数(configure_gpu で決める)
+        self.mode = mode                         # exclusive: GPU の常駐は 1 エンジン / share: 予算が収まるかぎり複数(configure_gpu で決める)
         self.total_mib = total_mib               # 総 VRAM(share の予算の既定と、載せる判定に使う)
         self.gpu_wait_s = GPU_FREE_WAIT_S
-        self.residents: dict = {}                # GPU に載っている部品の名前 -> Resident(exclusive では高々 1 つ)
+        self.residents: dict = {}                # GPU に載っているエンジンの名前 -> Resident(exclusive では高々 1 つ)
         self.baseline_mib: Optional[int] = None
         self.operations: dict = {}
-        self._busy: dict = {}                    # 仕事を割り当てた部品 -> 件数(JobRunner が付け外しする。仕事中の部品は降ろさない)
+        self._busy: dict = {}                    # 仕事を割り当てたエンジン -> 件数(JobRunner が付け外しする。仕事中のエンジンは降ろさない)
         self._listeners: list = []
         self._gpu_lock = asyncio.Lock()
         self._cpu_lock = asyncio.Lock()
@@ -141,7 +141,7 @@ class Scheduler:
 
     @property
     def gpu_resident(self) -> Optional[str]:
-        """互換用: 常駐中の部品の名前(exclusive では唯一の常駐者、share では最初の常駐者)。いなければ None。"""
+        """互換用: 常駐中のエンジンの名前(exclusive では唯一の常駐者、share では最初の常駐者)。いなければ None。"""
         return next(iter(self.residents), None)
 
     @gpu_resident.setter
@@ -165,7 +165,7 @@ class Scheduler:
         self._notify()
 
     def watch(self, callback) -> None:
-        """部品の状態や仕事中の印が変わったときに呼ばれる関数を登録する(JobRunner が、待っているジョブを見直すのに使う)。"""
+        """エンジンの状態や仕事中の印が変わったときに呼ばれる関数を登録する(JobRunner が、待っているジョブを見直すのに使う)。"""
         self._listeners.append(callback)
 
     def _notify(self) -> None:
@@ -193,7 +193,7 @@ class Scheduler:
         return any(not o.done for o in self.operations.values())
 
     def gpu_switching(self) -> bool:
-        """GPU 部品の起動・載せ替え・停止の操作が進行中か(管理役の LLM を CPU 専用で動かす目安)。"""
+        """GPU エンジンの起動・載せ替え・停止の操作が進行中か(管理役の LLM を CPU 専用で動かす目安)。"""
         return any(not o.done and o.name in self.comps and self.comps[o.name].spec.uses_gpu for o in list(self.operations.values()))
 
     def _lock_for(self, c: Component) -> asyncio.Lock:
@@ -215,14 +215,14 @@ class Scheduler:
         return out
 
     def resident_status(self) -> list:
-        """常駐中の部品(予算つき)。画面の状態バーに出す。"""
+        """常駐中のエンジン(予算つき)。画面の状態バーに出す。"""
         return [{"name": n, "label": self.comps[n].spec.label, "budget_mib": r.budget_mib, "busy": n in self._busy}
                 for n, r in list(self.residents.items()) if n in self.comps]
 
     # ---- 仕事中の印(JobRunner が、仕事を割り当てるときに付け、終わったら外す) ----
 
     def mark_busy(self, name: str) -> None:
-        """部品に仕事を割り当てた。外すまで、この部品は降ろさず、予算も押さえたままにする。"""
+        """エンジンに仕事を割り当てた。外すまで、このエンジンは降ろさず、予算も押さえたままにする。"""
         self._busy[name] = self._busy.get(name, 0) + 1
         self._touch(name)
 
@@ -240,7 +240,7 @@ class Scheduler:
         if r is not None:
             r.last_used = time.time()
 
-    # ---- 起動時: すでに動いている部品を取り込む ----
+    # ---- 起動時: すでに動いているエンジンを取り込む ----
 
     async def adopt_running(self) -> None:
         for n, c in self.comps.items():
@@ -252,11 +252,11 @@ class Scheduler:
             self._set(c, "ready" if status == 200 and c.spec.health_ok(js) else "starting")
             if c.spec.uses_gpu:
                 if self.mode == "share":
-                    self.residents[n] = Resident(budget_mib=self._budget_of(c))      # 外部の部品も、宣言の予算で数える
+                    self.residents[n] = Resident(budget_mib=self._budget_of(c))      # 外部のエンジンも、宣言の予算で数える
                 elif self.gpu_resident is None:
                     self.gpu_resident = n
                 else:
-                    log.warning("GPU 部品が複数動いています(%s と %s)。VRAM が足りなくなるかもしれません", self.gpu_resident, n)
+                    log.warning("GPU エンジンが複数動いています(%s と %s)。VRAM が足りなくなるかもしれません", self.gpu_resident, n)
         if self.mode == "share":
             self._note_baseline()      # 何も載っていなければ、起動時に他のアプリが使っていた量を覚える
 
@@ -287,7 +287,7 @@ class Scheduler:
     # ---- 入口 ----
 
     async def ensure(self, name: str, op: Operation = None) -> None:
-        """生成の前に必ず呼ぶ。この部品を使える状態にする。GPU 部品は、exclusive なら唯一の常駐者に、share なら予算の収まる範囲で載せる。"""
+        """生成の前に必ず呼ぶ。このエンジンを使える状態にする。GPU エンジンは、exclusive なら唯一の常駐者に、share なら予算の収まる範囲で載せる。"""
         own = op is None
         op = op or self.new_operation("ensure", name)
         c = self.comps[name]
@@ -320,11 +320,11 @@ class Scheduler:
             op.add("準備完了")
 
     async def _ensure_share(self, c: Component, op: Operation) -> None:
-        """share: 載っていれば何もしない。予算が収まれば他を降ろさずに載せ、足りなければ仕事中でない部品を古い順に降ろす。
-        仕事中の部品を降ろさないと足りないときは、その仕事が終わるまでロックを持たずに待つ。"""
+        """share: 載っていれば何もしない。予算が収まれば他を降ろさずに載せ、足りなければ仕事中でないエンジンを古い順に降ろす。
+        仕事中のエンジンを降ろさないと足りないときは、その仕事が終わるまでロックを持たずに待つ。"""
         name, waited = c.spec.name, None
         while True:
-            if self._ready_resident(c):          # 載っていれば何も要らない(別の部品を載せている最中でも待たない)
+            if self._ready_resident(c):          # 載っていれば何も要らない(別のエンジンを載せている最中でも待たない)
                 self._touch(name)
                 op.wait_reason = None
                 op.add("準備完了")
@@ -347,13 +347,13 @@ class Scheduler:
                     await self._admit(c, op)
                     op.add("準備完了")
                     return
-            if plan.reason != waited:            # 待つ間にロックは離す(常駐中の部品の仕事を止めない)
+            if plan.reason != waited:            # 待つ間にロックは離す(常駐中のエンジンの仕事を止めない)
                 waited = op.wait_reason = plan.reason
                 op.add(plan.reason)
             await asyncio.sleep(self.poll_s)
 
     async def start(self, name: str, op: Operation = None) -> None:
-        """部品を起動するだけ(常駐者は変えない)。GPU を使用中の別部品がいれば断る。"""
+        """エンジンを起動するだけ(常駐者は変えない)。GPU を使用中の別エンジンがいれば断る。"""
         own = op is None
         op = op or self.new_operation("start", name)
         c = self.comps[name]
@@ -419,7 +419,7 @@ class Scheduler:
         return int(gb * 1024) if gb else spec.vram_need_mib
 
     def _budget_of(self, c: Component) -> int:
-        """この部品の予算(MiB)。share で起動した部品は、止めるまで起動時の予算のまま(reload でも変わらない)。"""
+        """このエンジンの予算(MiB)。share で起動したエンジンは、止めるまで起動時の予算のまま(reload でも変わらない)。"""
         if c.budget_mib and c.proc is not None and not c.external:
             return c.budget_mib
         return self._default_budget_mib(c)
@@ -434,13 +434,13 @@ class Scheduler:
         return max(0, gpu["used_mib"] - sum(self._budget_of(self.comps[n]) for n in self.residents if n in self.comps))
 
     def capacity_mib(self) -> Optional[int]:
-        """share で、部品の予算の合計が収まるべき上限: 総 VRAM - 他のアプリの使用量 - 余白 1.5GiB。総 VRAM が分からなければ None。"""
+        """share で、エンジンの予算の合計が収まるべき上限: 総 VRAM - 他のアプリの使用量 - 余白 1.5GiB。総 VRAM が分からなければ None。"""
         if not self.total_mib:
             return None
         return max(0, self.total_mib - self._baseline() - GPU_FREE_MARGIN_MIB)
 
     def _pinned(self, c: Component) -> bool:
-        """降ろせない部品(止められない外部の ACE など)。"""
+        """降ろせないエンジン(止められない外部の ACE など)。"""
         return c.external and not c.spec.can_unload
 
     def _last_used(self, name: str) -> float:
@@ -458,12 +458,12 @@ class Scheduler:
         return c.spec.name in self.residents and c.state == "ready"
 
     def plan(self, name: str, admitting: bool = False) -> Plan:
-        """部品 name を ready にするときの見通し(何も変えない)。JobRunner が仕事を始めてよいかの判断と、強化 API が載せてよいかの判断に使う。
-        admitting は、ロックを持って実際に載せる直前の判定(share の _ensure_share)。仕事を割り当てただけでまだ載っていない部品の予算は数えない。"""
+        """エンジン name を ready にするときの見通し(何も変えない)。JobRunner が仕事を始めてよいかの判断と、強化 API が載せてよいかの判断に使う。
+        admitting は、ロックを持って実際に載せる直前の判定(share の _ensure_share)。仕事を割り当てただけでまだ載っていないエンジンの予算は数えない。"""
         c = self.comps[name]
         if not c.spec.uses_gpu:
             return Plan("ready")
-        for n in list(self.residents):           # 落ちた部品の予算を押さえたままにしない
+        for n in list(self.residents):           # 落ちたエンジンの予算を押さえたままにしない
             if n in self.comps:
                 self._check_alive(self.comps[n])
         return self._plan_share(c, admitting) if self.mode == "share" else self._plan_exclusive(c)
@@ -471,7 +471,7 @@ class Scheduler:
     def _plan_exclusive(self, c: Component) -> Plan:
         name = c.spec.name
         busy = [n for n in self._busy if n != name and n in self.comps and self.comps[n].spec.uses_gpu]
-        if busy:          # 別の GPU 部品に仕事が付いている間は載せ替えない(受け付けた順に 1 つずつ)
+        if busy:          # 別の GPU エンジンに仕事が付いている間は載せ替えない(受け付けた順に 1 つずつ)
             return Plan("wait", blockers=busy, needs=set(busy), reason=self._wait_text(busy))
         res = self.gpu_resident
         if res == name and c.state == "ready":
@@ -486,8 +486,8 @@ class Scheduler:
             return Plan("ready")
         cap, need = self.capacity_mib(), self._budget_of(c)
         held = {n: self._budget_of(self.comps[n]) for n in self.residents if n != name and n in self.comps}
-        # 仕事を割り当てた(まだ載っていない)部品も、載るつもりで予算を押さえる(後から来た仕事を割り当てすぎないように)。ただし載せる直前の判定
-        # (admitting)では数えない: 載せるのはロックで 1 つずつなので、まだ載っていない部品は自分の番に、載った部品を見て判定する。数えると、割り当てた後に
+        # 仕事を割り当てた(まだ載っていない)エンジンも、載るつもりで予算を押さえる(後から来た仕事を割り当てすぎないように)。ただし載せる直前の判定
+        # (admitting)では数えない: 載せるのはロックで 1 つずつなので、まだ載っていないエンジンは自分の番に、載ったエンジンを見て判定する。数えると、割り当てた後に
         # 容量が縮んだとき(他のアプリが VRAM を使った)、まだ載っていない 2 つの仕事が互いを「生成中」と見て、どちらも載らずに待ち続けていた
         for n in (() if admitting else self._busy):
             if n != name and n not in held and n in self.comps and self.comps[n].spec.uses_gpu:
@@ -508,7 +508,7 @@ class Scheduler:
                 return Plan("evict", victims=victims, needs=set(victims))
         if not fits(pinned):
             return self._plan_pinned(c, pinned)
-        # 動かせる部品を全部降ろせば収まるが、仕事中の部品が居る: 降ろしたい部品(使った時刻の古い順に、収まるまで)を控えて、仕事の終わりを待つ
+        # 動かせるエンジンを全部降ろせば収まるが、仕事中のエンジンが居る: 降ろしたいエンジン(使った時刻の古い順に、収まるまで)を控えて、仕事の終わりを待つ
         needs, remaining = set(), list(names)
         for n in sorted((n for n in names if n not in pinned), key=self._last_used):
             remaining.remove(n)
@@ -519,7 +519,7 @@ class Scheduler:
         return Plan("wait", blockers=blockers, needs=needs, reason=self._wait_text(blockers))
 
     def _plan_pinned(self, c: Component, pinned: list) -> Plan:
-        """止められない外部の部品が居て、予算では収まらない: 今までどおり、GPU の実際の空きに載せる分があれば同居し、無ければ断る。"""
+        """止められない外部のエンジンが居て、予算では収まらない: 今までどおり、GPU の実際の空きに載せる分があれば同居し、無ければ断る。"""
         free, need = self._free_mib(), c.spec.vram_need_mib + 1024
         if free is not None and need and free >= need:
             return Plan("fit")
@@ -534,13 +534,13 @@ class Scheduler:
     # ---- 内部 ----
 
     def check_alive(self, name: str) -> None:
-        """部品 name(自分で起動したもの)が落ちていたら stopped に戻す。ensure を通らない使い方(TTS が「ready なら ensure を飛ばす」)の前に呼ぶ。"""
+        """エンジン name(自分で起動したもの)が落ちていたら stopped に戻す。ensure を通らない使い方(TTS が「ready なら ensure を飛ばす」)の前に呼ぶ。"""
         c = self.comps.get(name)
         if c is not None:
             self._check_alive(c)
 
     def _check_alive(self, c: Component) -> None:
-        """自分で起動した部品が落ちていたら stopped に戻す。"""
+        """自分で起動したエンジンが落ちていたら stopped に戻す。"""
         if c.proc is not None and not c.external and not procman.is_alive(c.proc):
             c.proc = None
             self.residents.pop(c.spec.name, None)
@@ -548,7 +548,7 @@ class Scheduler:
                 self._set(c, "stopped")
 
     def _note_baseline(self, target: str = None) -> None:
-        """どの GPU 部品も載っていない今の VRAM 使用量を、空き確認の基準として覚える。target(いま載せようとしている部品)以外の GPU 部品に
+        """どの GPU エンジンも載っていない今の VRAM 使用量を、空き確認の基準として覚える。target(いま載せようとしているエンジン)以外の GPU エンジンに
         仕事を割り当ててある間は測り直さない(その仕事は今の基準の容量で割り当てたので、ここで容量が縮むと、その仕事が載れなくなる)。"""
         gpu = self.monitor.snapshot().get("gpu") if self.monitor else None
         if any(n != target and n in self.comps and self.comps[n].spec.uses_gpu for n in self._busy):
@@ -562,15 +562,15 @@ class Scheduler:
         return (gpu["total_mib"] - gpu["used_mib"]) if gpu else None
 
     def _held_mib(self) -> int:
-        """いま常駐している部品の予算の合計(share。exclusive は 0)。"""
+        """いま常駐しているエンジンの予算の合計(share。exclusive は 0)。"""
         if self.mode != "share":
             return 0
         return sum(self._budget_of(self.comps[n]) for n in self.residents if n in self.comps)
 
     async def _release(self, c: Component, op: Operation, target: Component = None) -> None:
-        """今 GPU にいる部品 c を空ける。unload できればプロセスは残し、できなければ止める。
+        """今 GPU にいるエンジン c を空ける。unload できればプロセスは残し、できなければ止める。
 
-        止められない外部の部品でも、GPU に target の分の空きがあれば止めずに同居する(大きな GPU の開発機向け)。
+        止められない外部のエンジンでも、GPU に target の分の空きがあれば止めずに同居する(大きな GPU の開発機向け)。
         """
         spec = c.spec
         if c.external and not spec.can_unload and target is not None:
@@ -582,7 +582,7 @@ class Scheduler:
             op.add(f"{spec.label} を GPU から降ろしています")
             code = await http_post(spec.base_url + spec.unload_path, timeout=120)
             if code == 409:
-                raise Busy("生成中の部品があるので切り替えられません")
+                raise Busy("生成中のエンジンがあるので切り替えられません")
             if code is None and await self._gone(c):
                 self._forget(c, op)
             elif code is None or code >= 300:
@@ -599,15 +599,15 @@ class Scheduler:
         await self._wait_gpu_free(op, keep_mib=self._held_mib())
 
     async def _gone(self, c: Component) -> bool:
-        """部品のプロセスがもう無いか: 準備確認の URL が応答せず、自分で起動したものならプロセスも終わっている(外部のものはプロセスを見られない)。
-        外部で動いていた部品が閉じられると、常駐の記録が残ったまま unload が届かず、他の部品の仕事がすべて失敗し続けていた。"""
+        """エンジンのプロセスがもう無いか: 準備確認の URL が応答せず、自分で起動したものならプロセスも終わっている(外部のものはプロセスを見られない)。
+        外部で動いていたエンジンが閉じられると、常駐の記録が残ったまま unload が届かず、他のエンジンの仕事がすべて失敗し続けていた。"""
         if not c.external and procman.is_alive(c.proc):
             return False          # 応答しなくても、生きているプロセスは VRAM を持っているかもしれない(今までどおり失敗にする)
         status, _ = await http_get_json(c.spec.health_url)
         return status is None
 
     def _forget(self, c: Component, op: Operation) -> None:
-        """もう動いていない部品を、止まったものとして扱う(常駐から外し、外部の印も外す。次に使うときは管理役が起動し直す)。"""
+        """もう動いていないエンジンを、止まったものとして扱う(常駐から外し、外部の印も外す。次に使うときは管理役が起動し直す)。"""
         op.add(f"{c.spec.label} はもう動いていないので、止まったものとして扱います")
         c.proc, c.external, c.budget_mib = None, False, None
         self.residents.pop(c.spec.name, None)
@@ -624,7 +624,7 @@ class Scheduler:
         self._set(c, "stopped")
 
     async def _wait_gpu_free(self, op: Operation, keep_mib: int = 0) -> None:
-        """降ろした分の VRAM が空くのを待つ。share では、残っている部品が予算まで使っていてもよいものとして数える(keep_mib)。"""
+        """降ろした分の VRAM が空くのを待つ。share では、残っているエンジンが予算まで使っていてもよいものとして数える(keep_mib)。"""
         gpu = self.monitor.snapshot().get("gpu") if self.monitor else None
         if not gpu or self.baseline_mib is None:
             return     # 計れないときは待たない
@@ -660,7 +660,7 @@ class Scheduler:
             op.add(f"{spec.label} を GPU に戻しています(モデルの読み込みに数分かかります)")
             code = await http_post(spec.base_url + spec.reload_path, timeout=spec.startup_timeout_s)
             if code == 409:
-                raise Busy("生成中の部品があるので切り替えられません")
+                raise Busy("生成中のエンジンがあるので切り替えられません")
             if code is None or code >= 300:
                 self._set(c, "error", f"reload に失敗(HTTP {code})")
                 raise SwitchError(f"{spec.label} の reload に失敗しました(HTTP {code})", procman.log_tail(spec.name, 20))
@@ -671,7 +671,7 @@ class Scheduler:
                 op.add(f"{spec.label} は既に動いているので、そのまま使います")
             else:
                 budget_env, note = {}, ""
-                if self.mode == "share" and spec.uses_gpu:      # share: 予算を環境変数で部品へ渡す(部品はその範囲に収まるよう自分で選ぶ)
+                if self.mode == "share" and spec.uses_gpu:      # share: 予算を環境変数でエンジンへ渡す(エンジンはその範囲に収まるよう自分で選ぶ)
                     c.budget_mib = self._budget_of(c)
                     budget_env, note = spec.budget_env(c.budget_mib), f"VRAM の予算 {c.budget_mib / 1024:.1f}GiB。"
                 try:

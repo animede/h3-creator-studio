@@ -1,5 +1,5 @@
 // 制作(MV タブ・ショート動画タブ共通)の右側の画面と操作: 制作の進み・シーンの行・最終の動画・やり直し・結合し直し・履歴・削除。
-// 2 つのタブは同じ台帳の制作(kind = mv / short)を、同じ形の API(/api/mv と /api/short)で操作するので、画面の部品は 1 つにして、
+// 2 つのタブは同じ台帳の制作(kind = mv / short)を、同じ形の API(/api/mv と /api/short)で操作するので、画面の仕組みは 1 つにして、
 // 違い(API の入口・タブ名・メタ行・シーンの行の補足・結合し直しの設定)だけを makeProjectPanel の設定で渡す。
 // 入力欄(左側)は各タブの js(mv.js / short.js)が持つ。ここは「作った後」だけ。
 
@@ -163,7 +163,7 @@ function makeProjectPanel(cfg) {
 
   // ---- 右上: いまの制作 ----
 
-  const ui = { id: null, rows: new Map() };      // 組み立て済みの画面の部品(同じ制作は、組み立て直さず中身だけ更新する。動画の再生が途切れないように)
+  const ui = { id: null, rows: new Map() };      // 組み立て済みの画面の要素(同じ制作は、組み立て直さず中身だけ更新する。動画の再生が途切れないように)
 
   function button(text, onclick, title) {
     const b = el("button", "", text);

@@ -498,7 +498,7 @@ class MvApiTest(unittest.TestCase):
 
 
 class LifespanTest(unittest.IsolatedAsyncioTestCase):
-    """管理役の起動(lifespan)で、Director が JobRunner につながり、途切れた制作が一時停止になる。部品の取り込みと GPU の監視は偽に差し替える。"""
+    """管理役の起動(lifespan)で、Director が JobRunner につながり、途切れた制作が一時停止になる。エンジンの取り込みと GPU の監視は偽に差し替える。"""
 
     async def test_director_is_wired_and_unfinished_projects_are_paused(self):
         tmp = tempfile.TemporaryDirectory()

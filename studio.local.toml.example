@@ -1,8 +1,8 @@
 # この PC 用の上書き。このファイルを studio.local.toml という名前でコピーして、必要な所だけ残します
 # (studio.local.toml は git の管理外です)。studio.toml と同じ形式で、書いた項目だけが上書きされます。
 #
-# 既に minimax-h3 などを別の場所に入れているときは、その部品の dir を書きます。
-# 書いた部品は、setup が取り込みもモデル取得も飛ばします(その場所をそのまま使います)。
+# 既に minimax-h3 などを別の場所に入れているときは、そのエンジンの dir を書きます。
+# 書いたエンジンは、setup が取り込みもモデル取得も飛ばします(その場所をそのまま使います)。
 # パスは '...'(シングルクォート)で囲むと、Windows の \ をそのまま書けます。
 
 # --- Windows の例 ---
@@ -27,17 +27,17 @@
 
 # --- そのほかの上書き ---
 # port = 8700                    # 管理役のポート
-# components_dir = "D:/studio-components"   # 部品を取り込む場所を変える
+# components_dir = "D:/studio-components"   # エンジンを取り込む場所を変える
 #
 # [components.h3]
-# enabled = false                # この部品を使わない
-# port = 8612                    # 部品のポートを変える(競合したとき)
+# enabled = false                # このエンジンを使わない
+# port = 8612                    # エンジンのポートを変える(競合したとき)
 # vram_budget_gb = 40            # share のときの VRAM の予算(GiB)を決め打ちする
 # [components.h3.env]
-# H3_VRAM_LIMIT_GB = "8"         # 部品に渡す環境変数
+# H3_VRAM_LIMIT_GB = "8"         # エンジンに渡す環境変数
 #
 # [gpu]
-# mode = "share"                 # "auto"(既定。総 VRAM 40GiB 以上で share)/ "exclusive"(1 部品ずつ)/ "share"(複数を同時に載せる)
+# mode = "share"                 # "auto"(既定。総 VRAM 40GiB 以上で share)/ "exclusive"(エンジン 1 つずつ)/ "share"(複数を同時に載せる)
 #
 # [llm]
 # gpu = "off"                    # 同梱 LLM を CPU だけで動かす("auto" / "off" / "all" / 層数)

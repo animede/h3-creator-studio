@@ -1,5 +1,5 @@
 """ショート動画タブの画面(web/short.js・web/project.js)と web/index.html の整合: スクリプトが使う要素がページにあり、読み込みの順が合っている。
-MV タブ(web/mv.js)と共通の部品(makeProjectPanel)を使っていることも確かめる。"""
+MV タブ(web/mv.js)と共通のエンジン(makeProjectPanel)を使っていることも確かめる。"""
 import re
 import unittest
 

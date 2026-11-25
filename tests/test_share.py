@@ -1,6 +1,6 @@
 """ジョブの同時実行: share の予算と載せる判定、レーンと公平さ、CPU のレーン。
 
-scheduler は本物(HTTP と procman だけ差し替え)、部品の仕事は run が gate を待つだけの偽物。
+scheduler は本物(HTTP と procman だけ差し替え)、エンジンの仕事は run が gate を待つだけの偽物。
 """
 import asyncio
 import contextlib
@@ -77,7 +77,7 @@ class ShareBase(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(p.stop)
 
     def sched(self, total_gib, mode="share", used_mib=2048, **budgets):
-        """budgets: 部品名 -> 予算(GiB)。ポートは 11, 12, ... を順に振る。"""
+        """budgets: エンジン名 -> 予算(GiB)。ポートは 11, 12, ... を順に振る。"""
         self.backend = Backend()
         self.patch(self.backend)
         specs = {n: spec(n, gb, port=11 + i) for i, (n, gb) in enumerate(budgets.items())}
@@ -117,7 +117,7 @@ class BudgetTest(ShareBase):
         self.assertEqual({n: r.budget_mib for n, r in s.residents.items()}, {"h3": 30 * GIB, "h3image": 20 * GIB})
         s = self.sched(70, mode="exclusive", h3=30, h3image=20)
         await s.ensure("h3")
-        self.assertIsNone(self.backend.envs["h3"])          # exclusive は何も足さない(部品が自分で全体を見て選ぶ)
+        self.assertIsNone(self.backend.envs["h3"])          # exclusive は何も足さない(エンジンが自分で全体を見て選ぶ)
         self.assertIsNone(s.residents["h3"].budget_mib)
 
     async def test_default_budgets_follow_total_vram(self):
@@ -126,7 +126,7 @@ class BudgetTest(ShareBase):
         for total_gib, want in ((96, (48, 31, 14)), (80, (40, 28, 14)), (48, (24, 16.8, 14))):
             s = Scheduler(specs, monitor=FakeMonitor(total_gib), mode="share", total_mib=total_gib * GIB)
             self.assertEqual([s._default_budget_mib(s.comps[n]) for n in ("h3", "h3image", "ace")], [int(g * GIB) for g in want])
-            self.assertEqual(s._default_budget_mib(s.comps["other"]), 7000)      # 既定の無い部品は、生成に要る量の目安
+            self.assertEqual(s._default_budget_mib(s.comps["other"]), 7000)      # 既定の無いエンジンは、生成に要る量の目安
 
     async def test_vram_budget_override_wins(self):
         cfg = Settings({"components": {"h3": {"vram_budget_gb": 20}, "ace": {"vram_budget_gb": "bad"}}}, Path("."))
@@ -142,7 +142,7 @@ class BudgetTest(ShareBase):
         await s.ensure("h3")
         await s.ensure("h3image")                     # h3 を降ろす(unload)
         self.assertEqual((s.comps["h3"].state, "h3" in s.residents), ("unloaded", False))
-        s.comps["h3"].spec.vram_budget_gb = 10        # 設定を変えても、起動済みの部品の予算は変わらない
+        s.comps["h3"].spec.vram_budget_gb = 10        # 設定を変えても、起動済みのエンジンの予算は変わらない
         self.backend.calls.clear()
         await s.ensure("h3")                          # h3image を降ろして h3 を reload
         self.assertEqual(self.backend.calls, [("post", "unload", "12"), ("post", "reload", "11")])
@@ -172,7 +172,7 @@ class ShareAdmissionTest(ShareBase):
         s = self.sched(70, a=30, b=30)
         await s.ensure("a")
         self.backend.calls.clear()
-        async with s._gpu_lock:                        # 別の部品を載せている最中でも、載っている部品の ensure は待たない
+        async with s._gpu_lock:                        # 別のエンジンを載せている最中でも、載っているエンジンの ensure は待たない
             await asyncio.wait_for(s.ensure("a"), 1)
         self.assertEqual(self.backend.calls, [])
 
@@ -239,7 +239,7 @@ class ShareAdmissionTest(ShareBase):
         self.assertEqual(s.baseline_mib, 2 * GIB)                # 仕事を割り当ててある間は測り直さない
 
     async def test_admission_does_not_count_claims_that_are_not_loaded_yet(self):
-        # 基準が測れていない(起動時に外部の部品があった)とき、容量は今の使用量から見積もる。割り当ての後に縮んでも、載せる直前は載っている部品だけで判定する
+        # 基準が測れていない(起動時に外部のエンジンがあった)とき、容量は今の使用量から見積もる。割り当ての後に縮んでも、載せる直前は載っているエンジンだけで判定する
         s = self.sched(48, a=24, b=17)
         s.mark_busy("a")
         s.mark_busy("b")
@@ -251,7 +251,7 @@ class ShareAdmissionTest(ShareBase):
 
     async def test_baseline_is_still_measured_when_only_the_target_is_claimed(self):
         s = self.sched(48, used_mib=3 * GIB, a=24)
-        s.mark_busy("a")                                         # その部品自身の仕事だけなら、今までどおり測る
+        s.mark_busy("a")                                         # そのエンジン自身の仕事だけなら、今までどおり測る
         await s.ensure("a")
         self.assertEqual(s.baseline_mib, 3 * GIB)
 
@@ -322,7 +322,7 @@ class ShareAdmissionTest(ShareBase):
 
 
 class ShareStartTest(ShareBase):
-    """部品を起動するだけの start(常駐者は変えない): share では、降ろさずに載るときだけ起動し、載らなければ「準備」を案内する。"""
+    """エンジンを起動するだけの start(常駐者は変えない): share では、降ろさずに載るときだけ起動し、載らなければ「準備」を案内する。"""
 
     async def test_start_alongside_when_it_fits_and_refuses_when_it_would_evict(self):
         s = self.sched(50, a=20, b=20, c=20)           # 容量 46.5: 2 つまで
@@ -346,7 +346,7 @@ class ShareStartTest(ShareBase):
 
 
 class PinnedExternalTest(ShareBase):
-    """止められない外部の部品(ACE)は、宣言の予算で数える。収まらないときは今までのルール(実際の空きで同居、無ければ断る)。"""
+    """止められない外部のエンジン(ACE)は、宣言の予算で数える。収まらないときは今までのルール(実際の空きで同居、無ければ断る)。"""
 
     def external_ace(self, s):
         ace = s.comps["ace"]
@@ -404,7 +404,7 @@ class RunnerBase(ShareBase):
     def setUp(self):
         self.gates = {}
         self.started, self.active, self.max_active = [], 0, 0
-        p = mock.patch.object(jobs_mod, "DISPATCH_POLL_S", 30.0)      # 定期の見直しには頼らない: 通知(投入・終了・部品の状態)だけで進むこと
+        p = mock.patch.object(jobs_mod, "DISPATCH_POLL_S", 30.0)      # 定期の見直しには頼らない: 通知(投入・終了・エンジンの状態)だけで進むこと
         p.start()
         self.addCleanup(p.stop)
 
@@ -537,7 +537,7 @@ class ShareRunTest(RunnerBase):
 
 
 class FairnessTest(RunnerBase):
-    """先頭で GPU の空き待ちになったジョブが降ろしたい部品には、後から来た仕事を入れない。関係の無い常駐の部品の仕事は始めてよい。"""
+    """先頭で GPU の空き待ちになったジョブが降ろしたいエンジンには、後から来た仕事を入れない。関係の無い常駐のエンジンの仕事は始めてよい。"""
 
     async def test_waiting_job_blocks_its_victims_but_not_unrelated_residents(self):
         s = self.sched(40, a=20, b=8, c=8, d=20)          # 容量 36.5。a + b + c = 36 は載る。d(20)を載せるには a を空ける必要がある
@@ -555,7 +555,7 @@ class FairnessTest(RunnerBase):
         await self.status(nc, "completed")
         self.assertEqual((w.status, nb.status), ("queued", "queued"))
         self.assertIn("a が生成中", w.wait_reason)
-        self.assertEqual(nb.wait_reason, "順番を待っています")                            # w より後ろの仕事は、w が降ろしたい部品に入れない
+        self.assertEqual(nb.wait_reason, "順番を待っています")                            # w より後ろの仕事は、w が降ろしたいエンジンに入れない
         self.assertEqual(self.started[-1], "nc")
         self.assertEqual(self.backend.unloads(), [])
 
@@ -636,7 +636,7 @@ class CpuLaneTest(RunnerBase):
         await asyncio.sleep(0.1)
         self.assertEqual((c3.status, c3.wait_reason), ("queued", "順番を待っています"))    # 3 本目は待つ
         self.assertEqual(self.max_active, 3)
-        self.assertEqual(sched.ensured, ["a"])                                           # CPU の仕事は部品を ensure しない
+        self.assertEqual(sched.ensured, ["a"])                                           # CPU の仕事はエンジンを ensure しない
         self.assertEqual(runner.lane_status()[CPU_LANE]["queued"], 1)
         self.gate("c1").set()
         await self.status(c3, "running")
@@ -683,7 +683,7 @@ class WaitReasonTest(RunnerBase):
         job = runner.submit("music", "a.go", {})
         self.assertEqual((job.status, job.wait_reason), ("queued", "順番を待っています"))
         await self.status(job, "preparing")
-        self.assertEqual((job.wait_reason, job.message), ("部品を準備しています", "部品を準備しています"))
+        self.assertEqual((job.wait_reason, job.message), ("エンジンを準備しています", "エンジンを準備しています"))
         gate.set()
         await self.status(job, "completed")
         self.assertIsNone(job.wait_reason)
@@ -718,7 +718,7 @@ class WaitReasonTest(RunnerBase):
 
 
 class ComponentActionTest(ShareBase):
-    """画面の「準備」(ensure)は、仕事中の部品を降ろさないと載らないとき、待たせずに 409 で断る。"""
+    """画面の「準備」(ensure)は、仕事中のエンジンを降ろさないと載らないとき、待たせずに 409 で断る。"""
 
     def client(self, s):
         from fastapi.testclient import TestClient
@@ -834,7 +834,7 @@ class StopTest(RunnerBase):
 
 
 class StatusPayloadTest(RunnerBase):
-    """/api/status に、GPU の使い方・常駐中の部品(予算つき)・レーンごとの状況が載る。"""
+    """/api/status に、GPU の使い方・常駐中のエンジン(予算つき)・レーンごとの状況が載る。"""
 
     async def test_payload(self):
         s = self.sched(50, a=30, b=30)

@@ -15,9 +15,9 @@ log = logging.getLogger("studio.h3image")
 COMPONENT = "h3image"
 POLL_S = 1.0
 TOTAL_TIMEOUT_S = 30 * 60
-MAX_POLL_ERRORS = 30           # 部品へ連続して届かなかった回数(1 秒おき)がこれを超えたら失敗にする
+MAX_POLL_ERRORS = 30           # エンジンへ連続して届かなかった回数(1 秒おき)がこれを超えたら失敗にする
 MAX_REFS = 16
-# 部品自体は 8192 まで受けるが、このアプリでは 4096 までにする(6〜12GB の GPU では
+# エンジン自体は 8192 まで受けるが、このアプリでは 4096 までにする(6〜12GB の GPU では
 # それ以上は実用にならず、VRAM あふれで極端に遅くなるため)。
 MIN_SIZE, MAX_SIZE, SNAP = 256, 4096, 32
 STEPS_CHOICES = (2, 3, 6)
@@ -129,7 +129,7 @@ async def run(job: Job, ctx: Ctx) -> None:
 
 
 async def _poll(job: Job, c: httpx.AsyncClient) -> dict:
-    """部品のジョブが終わるまで 1 秒おきに見る。完了なら JobResponse を返す。"""
+    """エンジンのジョブが終わるまで 1 秒おきに見る。完了なら JobResponse を返す。"""
     t0, errors, interrupt_sent = time.monotonic(), 0, False
     while True:
         if job.cancel_requested and not interrupt_sent:
@@ -163,7 +163,7 @@ async def _poll(job: Job, c: httpx.AsyncClient) -> dict:
 
 async def _send_interrupt(job: Job, c: httpx.AsyncClient) -> bool:
     if not job.remote_id:
-        return False   # まだ部品に投げていない(run が cancel_requested を見て止まる)か、次の周で送る
+        return False   # まだエンジンに投げていない(run が cancel_requested を見て止まる)か、次の周で送る
     try:
         r = await c.post("/api/interrupt", json={"job_id": job.remote_id}, timeout=15.0)
         return r.status_code < 300
@@ -172,7 +172,7 @@ async def _send_interrupt(job: Job, c: httpx.AsyncClient) -> bool:
 
 
 async def cancel(job: Job, ctx: Ctx) -> None:
-    """実行中のジョブの中止要求を部品へ送る(状態が interrupted になったら run が JobCancelled を投げる)。"""
+    """実行中のジョブの中止要求をエンジンへ送る(状態が interrupted になったら run が JobCancelled を投げる)。"""
     if not job.remote_id:
         return
     async with _client(ctx, timeout=15.0) as c:

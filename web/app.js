@@ -1,10 +1,10 @@
-// 管理役の画面: メモリ計・部品の状態表示(折りたたみ可)。タブ・生成物・ギャラリーは gallery.js / image.js。
+// 管理役の画面: メモリ計・エンジンの状態表示(折りたたみ可)。タブ・生成物・ギャラリーは gallery.js / image.js。
 const STATE_LABEL = { stopped: "停止", starting: "起動中", ready: "準備完了", unloaded: "退避中", stopping: "停止中", error: "エラー" };
-const LANE_LABEL = { h3: "H3", h3image: "H3-Image", ace: "ACE", cpu: "CPU" };      // レーン(部品)の短い名前
-const rows = {};          // 部品名 -> {el, parts}
+const LANE_LABEL = { h3: "H3", h3image: "H3-Image", ace: "ACE", cpu: "CPU" };      // レーン(エンジン)の短い名前
+const rows = {};          // エンジン名 -> {el, parts}
 const openLogs = new Set();
 let timer = null;
-let partsCollapsed = false;       // 部品パネルの折りたたみ(利用者が触るまでは自動)
+let partsCollapsed = false;       // エンジンパネルの折りたたみ(利用者が触るまでは自動)
 let partsTouched = false;
 let lastStatus = null;
 let doneCounter = null;           // 終わったジョブの数。変わったら、自分が追っていないジョブ(API や別のブラウザ)も含めて一覧を読み直す
@@ -78,10 +78,10 @@ function showOp(op) {
   if (op.error && op.log_tail) line.append(el("pre", "", op.log_tail));
 }
 
-// 状態バーの 2 行目: レーンごとの実行中のジョブ(種類と進み)と順番待ちの数。share のときは、GPU に載っている部品と予算も出す
+// 状態バーの 2 行目: レーンごとの実行中のジョブ(種類と進み)と順番待ちの数。share のときは、GPU に載っているエンジンと予算も出す
 function renderLanes(s) {
   const share = s.gpu_mode === "share";
-  const items = [el("span", "lane", share ? "GPU: 共有(複数の部品を同時に載せる)" : "GPU: 1 部品ずつ")];
+  const items = [el("span", "lane", share ? "GPU: 共有(複数のエンジンを同時に載せる)" : "GPU: エンジン 1 つずつ")];
   for (const [name, l] of Object.entries(s.lanes || {})) {
     const jobs = l.running_jobs || [];
     if (!jobs.length && !l.queued) continue;
@@ -121,7 +121,7 @@ function render(s) {
     r.rss.title = c.error || "";
     const running = ["starting", "ready", "unloaded"].includes(c.state);
     r.bStart.disabled = s.busy || running;
-    r.bStop.disabled = s.busy || c.state === "stopped" || c.external || c.busy;       // 仕事中の部品は止めない
+    r.bStop.disabled = s.busy || c.state === "stopped" || c.external || c.busy;       // 仕事中のエンジンは止めない
     r.bEnsure.disabled = s.busy;
     if (openLogs.has(name)) refreshLog(name);
   }
@@ -129,7 +129,7 @@ function render(s) {
   updateParts(s);
 }
 
-// 部品パネル: 準備が整ったら自動で畳み、見出しに 1 行で状況を出す(利用者が開閉したら以後は自動にしない)
+// エンジンパネル: 準備が整ったら自動で畳み、見出しに 1 行で状況を出す(利用者が開閉したら以後は自動にしない)
 function summarize(s) {
   const comps = Object.values(s.components);
   const res = comps.filter((c) => c.gpu_resident);       // share では複数載っている

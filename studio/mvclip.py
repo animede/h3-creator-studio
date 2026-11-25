@@ -3,7 +3,7 @@
 # concatenate_and_mux(つないで元の曲に差し替える ffmpeg)。modified: ffmpeg は呼ばず引数を組み立てるだけにした(実行は
 # studio/handlers/mv.py)。H3 は長さを自分の格子に丸めるので、短いクリップは最後のコマを複製して足し(tpad)、-frames:v で正確な枚数に切る。
 # SPDX-License-Identifier: Apache-2.0
-"""MV のクリップ作りの部品: シーン計画のフレーム格子への量子化、シーンごとの seed、ffmpeg の引数(クリップの整形・結合・曲の差し替え)。
+"""MV のクリップ作りのエンジン: シーン計画のフレーム格子への量子化、シーンごとの seed、ffmpeg の引数(クリップの整形・結合・曲の差し替え)。
 
 ffmpeg は呼ばない。出力先(tmp)は呼び出し側が「<目的のファイル>.part」にして走らせ、成功したら置き換える
 (mv_audio._run_ffmpeg の流儀)ので、どの引数にも -f mp4 を付けてある(拡張子が .part でも形式が決まるように)。

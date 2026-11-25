@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # YUZU Creator Studio のセットアップ(Linux)。uv を用意し、管理役の .venv を作って、scripts/setup.py に渡す。
 #
-#   ./setup.sh                  # 部品の取り込み + 環境 + モデル(合計 約 150GB、回線次第で数時間)
+#   ./setup.sh                  # エンジンの取り込み + 環境 + モデル(合計 約 150GB、回線次第で数時間)
 #   ./setup.sh --no-models      # 環境だけ(モデルは後で)
-#   ./setup.sh --only h3,ace    # 指定した部品だけ
+#   ./setup.sh --only h3,ace    # 指定したエンジンだけ
 #   ./setup.sh --llm            # 同梱 LLM(約 5GB)も先に取得する
 #   ./setup.sh --mv             # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
 #   ./setup.sh --only mvtools   # その道具だけ
@@ -38,7 +38,7 @@ if [ ! -x .venv/bin/python ]; then
 fi
 uv pip install --python .venv/bin/python -r requirements.txt
 
-echo "[3/3] 部品の取り込みと準備"
+echo "[3/3] エンジンの取り込みと準備"
 rc=0
 .venv/bin/python scripts/setup.py "$@" || rc=$?
 

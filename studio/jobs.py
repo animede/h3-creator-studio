@@ -1,8 +1,8 @@
 """スタジオ共通のジョブ実行: レーンごとの順番と、仕事を割り当てる dispatcher。
 
-ジョブは「部品を ensure(必要なら載せ替え)→ 種類ごとのハンドラが部品の API を呼ぶ」の順に流れる。
-レーンは部品ごとに 1 本(同じ部品の仕事は 1 つずつ)。GPU を使わない仕事(component=None)は CPU のレーンで、2 本まで同時に走る。
-別のレーンの仕事は並行に走るが、GPU に同時に載るかは scheduler の判定による(exclusive なら 1 部品ずつ、share なら予算が収まるかぎり)。
+ジョブは「エンジンを ensure(必要なら載せ替え)→ 種類ごとのハンドラがエンジンの API を呼ぶ」の順に流れる。
+レーンはエンジンごとに 1 本(同じエンジンの仕事は 1 つずつ)。GPU を使わない仕事(component=None)は CPU のレーンで、2 本まで同時に走る。
+別のレーンの仕事は並行に走るが、GPU に同時に載るかは scheduler の判定による(exclusive なら エンジン 1 つずつ、share なら予算が収まるかぎり)。
 """
 import asyncio
 import logging
@@ -23,8 +23,8 @@ TERMINAL = ("completed", "failed", "cancelled")
 CPU_LANE = "cpu"
 CPU_SLOTS = 2                         # CPU のレーンで同時に走らせる数
 WAIT_ORDER = "順番を待っています"
-WAIT_PREPARE = "部品を準備しています"
-DISPATCH_POLL_S = 2.0                 # 状態の通知が無くても、この間隔で割り当てを見直す(外部の部品が止まって VRAM が空いた、など)
+WAIT_PREPARE = "エンジンを準備しています"
+DISPATCH_POLL_S = 2.0                 # 状態の通知が無くても、この間隔で割り当てを見直す(外部のエンジンが止まって VRAM が空いた、など)
 
 
 class JobFailed(Exception):
@@ -36,7 +36,7 @@ class JobFailed(Exception):
 
 
 class JobCancelled(Exception):
-    """部品が中断(interrupted)を報告した。"""
+    """エンジンが中断(interrupted)を報告した。"""
 
 
 @dataclass
@@ -48,8 +48,8 @@ class Job:
     status: str = "queued"        # queued / preparing / running / completed / failed / cancelled
     progress: float = 0.0
     message: str = WAIT_ORDER
-    lane: str = ""                # 部品の名前(h3 など)か "cpu"。同じレーンの仕事は 1 つずつ走る
-    wait_reason: Optional[str] = WAIT_ORDER    # 待っている理由: 順番 / GPU の空き(xx が生成中)/ 部品の準備(走り出したら None)
+    lane: str = ""                # エンジンの名前(h3 など)か "cpu"。同じレーンの仕事は 1 つずつ走る
+    wait_reason: Optional[str] = WAIT_ORDER    # 待っている理由: 順番 / GPU の空き(xx が生成中)/ エンジンの準備(走り出したら None)
     error: Optional[str] = None
     log_tail: str = ""
     created: float = field(default_factory=time.time)
@@ -57,8 +57,8 @@ class Job:
     finished: Optional[float] = None
     outputs: list = field(default_factory=list)   # 生成物の ID
     steps: list = field(default_factory=list)     # 載せ替えの経過(scheduler の Operation の文言)
-    result: dict = field(default_factory=dict)    # 部品が返した実測(秒数・VRAM など)
-    remote_id: Optional[str] = None               # 部品側のジョブ ID(中止に使う)
+    result: dict = field(default_factory=dict)    # エンジンが返した実測(秒数・VRAM など)
+    remote_id: Optional[str] = None               # エンジン側のジョブ ID(中止に使う)
     cancel_requested: bool = False
 
     def to_dict(self) -> dict:
@@ -78,11 +78,11 @@ class Ctx:
 
 @dataclass
 class Handler:
-    component: Optional[str]                                  # ensure する部品名(レーンもこれ)。GPU を使わない CPU の仕事は None(gpu も False に)
+    component: Optional[str]                                  # ensure するエンジン名(レーンもこれ)。GPU を使わない CPU の仕事は None(gpu も False に)
     normalize: Callable                                       # (kind, params, ledger) -> params(検証・整形済み)。不正なら ValueError
     run: Callable[[Job, Ctx], Awaitable[None]]
     cancel: Callable[[Job, Ctx], Awaitable[None]]
-    prepare: Optional[Callable[[Job, Ctx], Awaitable[None]]] = None   # 部品を ensure する前の下ごしらえ(LLM の仕事など)
+    prepare: Optional[Callable[[Job, Ctx], Awaitable[None]]] = None   # エンジンを ensure する前の下ごしらえ(LLM の仕事など)
     gpu: bool = True                                                    # GPU を使う(LLM を止めてから ensure する)
     record: Optional[Callable[[dict], dict]] = None                     # 台帳(jobs 表)に残す params を作る。無ければ params そのまま
                                                                         # (編集のジョブは state の写しを持つので、指紋だけを残す。写しはメモリのジョブにだけ)
@@ -99,7 +99,7 @@ class JobRunner:
         self.done_counter = 0                  # 終わったジョブの数(画面が、自分の知らないジョブの完了に気づく目印)
         self._gpu_claimed: set = set()         # GPU を占めているジョブの ID(LLM を止めてから終わるまで)
         self._tasks: dict = {}                 # 割り当て済み(準備中・実行中)のジョブの ID -> タスク。始めた順
-        self._reserved: dict = {}              # ジョブの ID -> 載せるために降ろす部品(載せ終わるまで、後の仕事をそこに入れない)
+        self._reserved: dict = {}              # ジョブの ID -> 載せるために降ろすエンジン(載せ終わるまで、後の仕事をそこに入れない)
         self._finished_hooks: list = []        # ジョブが終わったときに呼ぶ関数(on_finished)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._wake: Optional[asyncio.Event] = None
@@ -114,7 +114,7 @@ class JobRunner:
         self._dispatcher = asyncio.create_task(self._dispatch_loop(), name="job-dispatcher")
         watch = getattr(self.ctx.sched, "watch", None)
         if watch is not None:
-            watch(self.wake)       # 部品が ready になった・仕事中の印が外れた、で割り当てを見直す
+            watch(self.wake)       # エンジンが ready になった・仕事中の印が外れた、で割り当てを見直す
 
     async def stop(self) -> None:
         self._stopping = True
@@ -192,9 +192,9 @@ class JobRunner:
             raise ValueError(f"未対応のジョブの種類です: {kind}")
         comps = getattr(self.ctx.sched, "comps", None)
         if handler.component and isinstance(comps, dict) and handler.component not in comps:
-            # studio.toml で無効にした部品のジョブは受け付けない(受け付けると、載せる段で KeyError になる)
+            # studio.toml で無効にしたエンジンのジョブは受け付けない(受け付けると、載せる段で KeyError になる)
             label = COMPONENT_NAMES.get(handler.component, handler.component)
-            raise ValueError(f"{label}の部品は無効になっているため使えません(studio.toml の [components.{handler.component}] の enabled)")
+            raise ValueError(f"{label}のエンジンは無効になっているため使えません(studio.toml の [components.{handler.component}] の enabled)")
         job = Job(id=uuid.uuid4().hex[:12], tab=tab, kind=kind, params=handler.normalize(kind, params, self.ctx.ledger),
                   lane=handler.component or CPU_LANE)
         self.jobs[job.id] = job
@@ -253,13 +253,13 @@ class JobRunner:
     def _dispatch(self) -> None:
         """受け付けた順に見て、始められるものから始める(後ろのジョブが、空いているレーンで先に走ってよい)。
 
-        始める条件: そのレーンが空いていて(部品ごとに 1 つ、CPU は cpu_slots 本)、GPU の部品は待たずに載せられること。
-        GPU の空き待ちのジョブがあれば、それより後ろの仕事は、そのジョブが降ろしたい部品に入れない
-        (後から来た仕事に追い越され続けないように)。すでに載っていて、降ろされない部品の仕事は、そのまま始めてよい。
+        始める条件: そのレーンが空いていて(エンジンごとに 1 つ、CPU は cpu_slots 本)、GPU のエンジンは待たずに載せられること。
+        GPU の空き待ちのジョブがあれば、それより後ろの仕事は、そのジョブが降ろしたいエンジンに入れない
+        (後から来た仕事に追い越され続けないように)。すでに載っていて、降ろされないエンジンの仕事は、そのまま始めてよい。
         """
         plan_of = getattr(self.ctx.sched, "plan", None)
         load = Counter(self.jobs[jid].lane for jid in self._tasks if jid in self.jobs)
-        blocked = set().union(*self._reserved.values())       # 載せている最中のジョブが降ろす部品
+        blocked = set().union(*self._reserved.values())       # 載せている最中のジョブが降ろすエンジン
         waiting = False                                       # GPU の空きを待っているジョブが、前に居る
         for job in list(self.jobs.values()):
             handler = self.handlers.get(job.kind)
@@ -297,7 +297,7 @@ class JobRunner:
         if handler.component and handler.gpu:
             mark = getattr(self.ctx.sched, "mark_busy", None)
             if mark is not None:
-                mark(handler.component)               # 仕事中の部品は降ろされず、予算も押さえたままになる
+                mark(handler.component)               # 仕事中のエンジンは降ろされず、予算も押さえたままになる
         if plan is not None and plan.victims:
             self._reserved[job.id] = set(plan.victims)
         self._tasks[job.id] = asyncio.create_task(self._execute(job, handler), name=f"job-{job.id}")
@@ -319,7 +319,7 @@ class JobRunner:
 
     async def _execute(self, job: Job, handler: Handler) -> None:
         try:
-            if handler.prepare:       # LLM を使う下ごしらえは、GPU に部品を載せる前に済ませる
+            if handler.prepare:       # LLM を使う下ごしらえは、GPU にエンジンを載せる前に済ませる
                 await handler.prepare(job, self.ctx)
                 if job.cancel_requested:
                     raise JobCancelled()
@@ -332,7 +332,7 @@ class JobRunner:
                 if job.cancel_requested:
                     raise JobCancelled()
             if self._reserved.pop(job.id, None):
-                self.wake()           # 載せ終わった: 降ろす予定で待たせていた部品の仕事も始められる
+                self.wake()           # 載せ終わった: 降ろす予定で待たせていたエンジンの仕事も始められる
             job.status, job.message, job.wait_reason = "running", "生成を始めます", None
             await handler.run(job, self.ctx)
             self._finish(job, "completed", "完了しました")

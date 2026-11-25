@@ -139,7 +139,7 @@ class H3ImageTest(unittest.IsolatedAsyncioTestCase):
             await h3image.run(self.job("h3image.edit", references=["nope"]), self.ctx(FakeComponent(["completed"])))
 
     async def test_cancel_running_via_runner(self):
-        """中止要求 → /api/interrupt → 部品が interrupted を返す → ジョブは cancelled。"""
+        """中止要求 → /api/interrupt → エンジンが interrupted を返す → ジョブは cancelled。"""
         comp = FakeComponent(["running", lambda c: "interrupted" if c.interrupts else "running"])
 
         class Sched:

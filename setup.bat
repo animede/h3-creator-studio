@@ -4,9 +4,9 @@ set "OLDCP=%OLDCP: =%"
 rem UTF-8 first: every line below (Japanese text included) is parsed with this code page
 chcp 65001 >nul
 rem YUZU Creator Studio のセットアップ(Windows)。uv を用意し、管理役の .venv を作って、scripts\setup.py に渡す。
-rem   .\setup.bat                  部品の取り込み + 環境 + モデル(合計 約 150GB、回線次第で数時間)
+rem   .\setup.bat                  エンジンの取り込み + 環境 + モデル(合計 約 150GB、回線次第で数時間)
 rem   .\setup.bat --no-models      環境だけ(モデルは後で)
-rem   .\setup.bat --only h3,ace    指定した部品だけ
+rem   .\setup.bat --only h3,ace    指定したエンジンだけ
 rem   .\setup.bat --llm            同梱 LLM(約 5GB)も先に取得する
 rem   .\setup.bat --mv             MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
 rem   .\setup.bat --only mvtools   その道具だけ
@@ -42,7 +42,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt || goto failed
 
-echo [3/3] 部品の取り込みと準備
+echo [3/3] エンジンの取り込みと準備
 .venv\Scripts\python.exe scripts\setup.py %*
 set "RC=%ERRORLEVEL%"
 if "%UV_NEW%"=="1" call :notice_after

@@ -53,14 +53,14 @@ class Settings:
         self.components = {name: dict(tbl) for name, tbl in data.get("components", {}).items()}
         self.llm = {**LLM_DEFAULTS, **data.get("llm", {})}     # 管理役が持つ LLM(llama-server)の設定
         self.llm_port = int(self.llm["port"])
-        self.gpu_mode = parse_gpu_mode(data.get("gpu", {}).get("mode", "auto"))     # GPU に載せる部品を 1 つにするか、複数にするか
+        self.gpu_mode = parse_gpu_mode(data.get("gpu", {}).get("mode", "auto"))     # GPU に載せるエンジンを 1 つにするか、複数にするか
         self.mv = dict(data.get("mv", {}))     # MV・ショート動画の音声処理などの設定。tools_python = Demucs と librosa の入った Python
 
     def component_names(self) -> list[str]:
         return [n for n, c in self.components.items() if c.get("enabled", True)]
 
     def component_dir(self, name: str) -> Path:
-        """部品のフォルダ。dir があればそれ(相対ならリポジトリ直下から)、無ければ <components_dir>/<repo>。"""
+        """エンジンのフォルダ。dir があればそれ(相対ならリポジトリ直下から)、無ければ <components_dir>/<repo>。"""
         cfg = self.components.get(name, {})
         if cfg.get("dir"):
             p = Path(str(cfg["dir"])).expanduser()

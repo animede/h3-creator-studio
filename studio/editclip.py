@@ -1,4 +1,4 @@
-"""編集タブの部品(第 4 版): 編集プロジェクトの状態(state)の検証・時間軸・分割/削除/挿入と、ffmpeg の引数(filter_complex)の組み立て。
+"""編集タブのエンジン(第 4 版): 編集プロジェクトの状態(state)の検証・時間軸・分割/削除/挿入と、ffmpeg の引数(filter_complex)の組み立て。
 
 純粋な関数だけで、ファイルも ffmpeg も触らない(生成物の長さ・寸法は呼び出し側が sources で渡す)。ffmpeg の実行は studio/handlers/edit.py。
 状態(docs/SPEC.md 第 4 版 §1):

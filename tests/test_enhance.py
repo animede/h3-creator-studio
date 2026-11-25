@@ -61,7 +61,7 @@ class PlanSched(FakeSched):
 
 
 class MarkingSched(PlanSched):
-    """mark_busy / mark_idle を持つ scheduler: 強化の間だけ、部品に仕事中の印が付く。"""
+    """mark_busy / mark_idle を持つ scheduler: 強化の間だけ、エンジンに仕事中の印が付く。"""
 
     def __init__(self, llm, error=None):
         super().__init__(llm)
@@ -95,7 +95,7 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
         runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "強化された動画プロンプト", "mode": "h3-official"}))
         out = await enhance_prompt(runner, "video", " 猫が走る ", seconds=8, task="ref2va")
         self.assertEqual(out, {"text": "強化された動画プロンプト"})
-        # LLM の VRAM を返してから部品を載せ、その後で LLM を起こす(LLM は載った後の空きに合わせて GPU に載る)
+        # LLM の VRAM を返してからエンジンを載せ、その後で LLM を起こす(LLM は載った後の空きに合わせて GPU に載る)
         self.assertEqual(llm.events, ["release", "session+", "ensure h3", "llm", "session-"])
         req = self.requests[0]
         self.assertEqual((req.method, req.url.path), ("POST", "/api/prompt/enhance"))
@@ -148,7 +148,7 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cm.exception.status, 409)
         self.assertIn("MiniMax-H3-Image", cm.exception.message)
         self.assertIn("生成中", cm.exception.message)
-        self.assertEqual((llm.events, self.requests), ([], []))       # LLM も部品も起こさない
+        self.assertEqual((llm.events, self.requests), ([], []))       # LLM もエンジンも起こさない
         for action in ("ready", "fit", "evict"):                      # 載っている・待たずに載せられるなら、いつもどおり
             runner, llm = self.runner(lambda r: httpx.Response(200, json={"result": "強化"}), sched=lambda l, a=action: PlanSched(l, a))
             self.assertEqual((await enhance_prompt(runner, "video", "猫"))["text"], "強化")
@@ -156,7 +156,7 @@ class EnhanceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(llm.events[:3], ["session+", "ensure h3", "llm"] if action == "ready" else ["release", "session+", "ensure h3"], action)
 
     async def test_component_is_marked_busy_only_while_enhancing(self):
-        """強化の最中に別の生成が、その部品を GPU から降ろさないよう、仕事中の印を付ける(成功でも失敗でも外す)。"""
+        """強化の最中に別の生成が、そのエンジンを GPU から降ろさないよう、仕事中の印を付ける(成功でも失敗でも外す)。"""
         made = []
 
         def factory(llm, error=None):

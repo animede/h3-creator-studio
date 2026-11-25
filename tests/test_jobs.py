@@ -120,11 +120,11 @@ class JobsTest(JobsBase):
 
     async def test_handler_errors(self):
         async def boom(job, ctx):
-            raise JobFailed("部品が失敗")
+            raise JobFailed("エンジンが失敗")
         runner, _ = self.make(FakeSched(), make_handler([], boom))
         job = runner.submit("image", "h3image.t2i", {})
         await self.wait_for(job, "failed")
-        self.assertEqual(job.error, "部品が失敗")
+        self.assertEqual(job.error, "エンジンが失敗")
 
         async def cancelled(job, ctx):
             raise JobCancelled()
@@ -173,7 +173,7 @@ class JobsTest(JobsBase):
 
 
 class OrderTest(JobsBase):
-    """prepare(LLM の仕事)→ LLM を止める → 部品を ensure → run の順。"""
+    """prepare(LLM の仕事)→ LLM を止める → エンジンを ensure → run の順。"""
 
     def setUp(self):
         self.order = []
@@ -257,7 +257,7 @@ class FinishedHookTest(JobsBase):
 
     async def test_failed_and_cancelled_jobs_are_reported_too(self):
         async def boom(job, ctx):
-            raise JobFailed("部品が失敗")
+            raise JobFailed("エンジンが失敗")
         runner, seen = self.hooked(make_handler([], boom))
         failed = runner.submit("image", "h3image.t2i", {})
         await self.wait_for(failed, "failed")
@@ -334,7 +334,7 @@ if __name__ == "__main__":
 
 
 class DisabledComponentTest(unittest.TestCase):
-    """studio.toml で無効にした部品のジョブは、受け付けの時点で分かる文言で断る(載せる段の KeyError にしない)。"""
+    """studio.toml で無効にしたエンジンのジョブは、受け付けの時点で分かる文言で断る(載せる段の KeyError にしない)。"""
 
     def test_submit_for_a_disabled_component_is_refused(self):
         import types
@@ -346,4 +346,4 @@ class DisabledComponentTest(unittest.TestCase):
         runner = JobRunner(Ctx(sched, None, None), {"ace.simple": Handler(component="ace", normalize=lambda k, p, l: p, run=noop, cancel=noop)})
         with self.assertRaises(ValueError) as cm:
             runner.submit("music", "ace.simple", {})
-        self.assertIn("音楽(ACE-Step)の部品は無効", str(cm.exception))
+        self.assertIn("音楽(ACE-Step)のエンジンは無効", str(cm.exception))

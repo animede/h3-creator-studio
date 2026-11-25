@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 """YUZU Creator Studio のセットアップ(setup.sh / setup.bat から呼ばれる)。
 
-部品(minimax-h3 / minimax-h3-image-server / ACE-Step-1.5-fast / AivisSpeech-Engine)を components/ に取り込み、
+エンジン(minimax-h3 / minimax-h3-image-server / ACE-Step-1.5-fast / AivisSpeech-Engine)を components/ に取り込み、
 それぞれ自分のセットアップスクリプトで環境とモデルを用意する。何度実行してもよく、済んでいる所は飛ばし、
 途中で止まっても再実行で続きから進む。
 
   python scripts/setup.py                 # 取り込み + 環境 + モデル(合計 約 150GB)
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
-  python scripts/setup.py --only h3,ace   # 指定した部品だけ
+  python scripts/setup.py --only h3,ace   # 指定したエンジンだけ
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
   python scripts/setup.py --mv            # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB)も用意する
   python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける)
@@ -34,7 +34,7 @@ AIVIS_VERSION = "1.2.0"
 AIVIS_BASE = f"https://github.com/Aivis-Project/AivisSpeech-Engine/releases/download/{AIVIS_VERSION}/"
 MIN_RAM_GIB = 30           # 32GB の PC は 31 GiB 台で見えることがあるので、少し下に線を引く
 MIN_VRAM_GIB = 5.8         # 6GB のカードは 5.9〜6.0 GiB で見える
-NEED_DISK_GIB = 150            # 部品とモデルの合計(動画の参照モード用キャッシュ 32GB を含む)
+NEED_DISK_GIB = 150            # エンジンとモデルの合計(動画の参照モード用キャッシュ 32GB を含む)
 NEED_DISK_NO_REF_GIB = 120     # --no-ref のとき
 
 
@@ -59,7 +59,7 @@ COMPS = {
 }
 ORDER = ("h3", "h3image", "ace", "aivis")
 
-# MV の音声処理の道具(components/mvtools/.venv)。部品ではなく、管理役が子プロセスで使う Python 環境(studio/mv_audio.py)
+# MV の音声処理の道具(components/mvtools/.venv)。エンジンではなく、管理役が子プロセスで使う Python 環境(studio/mv_audio.py)
 MV_NAME = "mvtools"
 MV_LABEL = "MV の音声処理の道具(Demucs + librosa、CPU 版 torch)"
 MV_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
@@ -147,7 +147,7 @@ def find_aivis_exe(d: Path, plat: str = None) -> Optional[Path]:
 
 
 def decide_source(name: str, cfg: Settings, home: Path, clone_anyway: bool = False, plat: str = None) -> Source:
-    """部品 1 つについて「既存を使う / 取り込み済み / 取り込む」を決める。何もダウンロードしない。"""
+    """エンジン 1 つについて「既存を使う / 取り込み済み / 取り込む」を決める。何もダウンロードしない。"""
     comp = COMPS[name]
     target = cfg.component_dir(name)
     if cfg.components.get(name, {}).get("dir"):
@@ -155,7 +155,7 @@ def decide_source(name: str, cfg: Settings, home: Path, clone_anyway: bool = Fal
             return Source("existing", target, f"既存を使います: {target}(取り込みもモデル取得も飛ばします)", False)
         return Source("missing-dir", target,
                       f"studio.local.toml の [components.{name}] dir のフォルダがありません: {target}\n"
-                      "  パスを直すか、dir の行を消して setup をやり直してください(この部品は飛ばします)", False)
+                      "  パスを直すか、dir の行を消して setup をやり直してください(このエンジンは飛ばします)", False)
     if comp.url:
         present = (target / ".git").exists() or (target.is_dir() and any(target.iterdir()))
     else:
@@ -171,20 +171,20 @@ def decide_source(name: str, cfg: Settings, home: Path, clone_anyway: bool = Fal
     if in_home.is_dir():
         msg = (f"~/{repo} が見つかりました。これを使うなら studio.local.toml に dir を書いてください(例):\n"
                + "\n".join("    " + ln for ln in toml_dir_example(name, in_home).splitlines())
-               + "\n  新しく取り込み直すなら --clone-anyway を付けて setup をやり直してください(この部品は飛ばします)")
+               + "\n  新しく取り込み直すなら --clone-anyway を付けて setup をやり直してください(このエンジンは飛ばします)")
         if not clone_anyway:
             return Source("home", in_home, msg, False)
     return Source("download" if not comp.url else "clone", target,
                   f"取り込みます: {comp.url or aivis_url()} → {target}", True)
 
 
-# ---- 部品ごとのコマンド(純粋な部分) ----
+# ---- エンジンごとのコマンド(純粋な部分) ----
 
 @dataclass
 class Step:
     label: str
     argv: list
-    cwd: str = "."                               # 部品のフォルダからの相対
+    cwd: str = "."                               # エンジンのフォルダからの相対
     env: dict = field(default_factory=dict)
 
 
@@ -194,7 +194,7 @@ def format_command(argv: list, plat: str = None) -> str:
 
 def component_steps(name: str, models: bool = True, ace_xl: bool = False, have_venv: bool = False,
                     plat: str = None, h3_ref: bool = True) -> list:
-    """環境とモデルの準備に呼ぶコマンド(部品自身のスクリプト)。相対パスは部品のフォルダ基準。"""
+    """環境とモデルの準備に呼ぶコマンド(エンジン自身のスクリプト)。相対パスはエンジンのフォルダ基準。"""
     win = is_win(plat)
     env = {"HF_HUB_DISABLE_SYMLINKS": "1"} if win else {}
     if name == "h3":
@@ -478,8 +478,8 @@ def _py312_on_windows() -> bool:
 
 
 def parse_only(only: str, enabled: list, mv: bool = False) -> tuple:
-    """--only の値 → (対象の部品, MV の音声処理の道具も対象か, 使えない名前)。空なら全部の部品。
-    mvtools は部品ではなく、--mv と同じ(--only mvtools だけなら部品は何も触らない)。"""
+    """--only の値 → (対象のエンジン, MV の音声処理の道具も対象か, 使えない名前)。空なら全部のエンジン。
+    mvtools はエンジンではなく、--mv と同じ(--only mvtools だけならエンジンは何も触らない)。"""
     if not only.strip():
         return list(enabled), mv, []
     want = [x.strip() for x in only.split(",") if x.strip()]
@@ -616,15 +616,15 @@ def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> N
     start = ".\\run.bat" if is_win() else "./run.sh"
     say(f"\n起動: {start}   → ブラウザで http://{cfg.host}:{cfg.port}")
     if any(component_status(n, cfg.component_dir(n))[1] is False for n in selected):
-        say("モデルが「未」の部品は、setup(--no-models なし)をもう一度実行すると続きから用意します。")
+        say("モデルが「未」のエンジンは、setup(--no-models なし)をもう一度実行すると続きから用意します。")
 
 
 def parse_args(argv: list = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="YUZU Creator Studio のセットアップ(何度実行しても安全。続きから進みます)")
     p.add_argument("--no-models", action="store_true", help="環境だけ作り、モデルは取得しない")
-    p.add_argument("--only", default="", help="対象の部品をカンマ区切りで(h3,h3image,ace,aivis。mvtools は MV の音声処理の道具だけを指す)")
-    p.add_argument("--components-dir", default="", help="部品を取り込むフォルダ(既定は studio.toml の components_dir)")
-    p.add_argument("--clone-anyway", action="store_true", help="~/<部品名> があっても components/ に取り込み直す")
+    p.add_argument("--only", default="", help="対象のエンジンをカンマ区切りで(h3,h3image,ace,aivis。mvtools は MV の音声処理の道具だけを指す)")
+    p.add_argument("--components-dir", default="", help="エンジンを取り込むフォルダ(既定は studio.toml の components_dir)")
+    p.add_argument("--clone-anyway", action="store_true", help="~/<エンジン名> があっても components/ に取り込み直す")
     p.add_argument("--ace-xl", action="store_true", help="音楽に XL モデルも入れる(約 45GB。既定は 2B のみで約 15GB)")
     p.add_argument("--no-ref", action="store_true", help="h3 の参照モード用キャッシュ(transformer_ref、+約 32GB)を作らない")
     p.add_argument("--llm", action="store_true", help="同梱 LLM(llama-server と GGUF、約 5GB。画像・音声を読む投影ファイル 約 0.56GB を含む)も先に取得する")
@@ -642,14 +642,14 @@ def main(argv: list = None) -> int:
     cfg = load_settings(REPO_ROOT)
     if args.components_dir:
         cfg.components_dir = args.components_dir
-        say(f"部品の取り込み先: {cfg.component_dir('h3').parent}(この場所を使い続けるなら studio.local.toml に components_dir = '...' を書いてください)")
+        say(f"エンジンの取り込み先: {cfg.component_dir('h3').parent}(この場所を使い続けるなら studio.local.toml に components_dir = '...' を書いてください)")
     enabled = [n for n in ORDER if n in cfg.component_names()]
     selected, want_mv, bad = parse_only(args.only, enabled, args.mv)
     if bad:
         say(f"--only に使えない名前があります: {', '.join(bad)}(使えるのは {', '.join(enabled + [MV_NAME])})")
         return 2
     models = not args.no_models
-    say(f"対象の部品: {', '.join(selected + ([MV_NAME] if want_mv else []))}" + ("   [環境だけ。モデルは取得しません]" if not models else ""))
+    say(f"対象のエンジン: {', '.join(selected + ([MV_NAME] if want_mv else []))}" + ("   [環境だけ。モデルは取得しません]" if not models else ""))
 
     try:
         if selected and not check_prerequisites(selected, models, Path(cfg.root) / cfg.components_dir, ref=not args.no_ref):
@@ -661,7 +661,7 @@ def main(argv: list = None) -> int:
     try:
         # 1. 取り込み(すべて先に済ませる。ここは短い)
         if selected:
-            say("\n== 部品の取り込み ==")
+            say("\n== エンジンの取り込み ==")
         sources = {}
         for name in selected:
             src = decide_source(name, cfg, Path.home(), args.clone_anyway)

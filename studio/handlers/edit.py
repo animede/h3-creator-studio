@@ -1,4 +1,4 @@
-"""編集タブのハンドラ: edit.preview / edit.export(どちらも CPU の仕事。GPU も部品も使わない)。
+"""編集タブのハンドラ: edit.preview / edit.export(どちらも CPU の仕事。GPU もエンジンも使わない)。
 
   preview : いまの状態を短辺 480 の軽い MP4 にして outputs/edit/<プロジェクトの ID>/preview_<N>.mp4 に置き、台帳の preview に(state の指紋と一緒に)記録する。
             これより古い番号のプレビューは消す。ギャラリーには載せない

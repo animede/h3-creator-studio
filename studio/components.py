@@ -1,4 +1,4 @@
-"""部品カタログ: 4 つの部品の起動コマンド・準備確認・GPU の空け方を 1 か所にまとめる。"""
+"""エンジンカタログ: 4 つのエンジンの起動コマンド・準備確認・GPU の空け方を 1 か所にまとめる。"""
 import os
 import sys
 from dataclasses import dataclass, field
@@ -10,7 +10,7 @@ from .gpu import smi_mib
 
 
 class ComponentNotInstalled(Exception):
-    """部品のフォルダや実行ファイルが見つからない。hint に次にやることを日本語で入れる。"""
+    """エンジンのフォルダや実行ファイルが見つからない。hint に次にやることを日本語で入れる。"""
 
     def __init__(self, name: str, hint: str):
         super().__init__(f"{name}: {hint}")
@@ -41,7 +41,7 @@ def _venv_python(name: str, d: Path, order: tuple[str, ...]) -> str:
     py = _find_first([d / v / sub for v in order])
     if py is None:
         raise ComponentNotInstalled(
-            name, f"{d} に仮想環境({' か '.join(order)})の python がありません。その部品の setup を実行してください。")
+            name, f"{d} に仮想環境({' か '.join(order)})の python がありません。そのエンジンの setup を実行してください。")
     return str(py)
 
 
@@ -63,7 +63,7 @@ class ComponentSpec:
     unload_path: Optional[str]
     reload_path: Optional[str]
     startup_timeout_s: int
-    # build_command(dir) と env(dir, port) は部品ごとに差し替える
+    # build_command(dir) と env(dir, port) はエンジンごとに差し替える
     build_command: Callable[[Path], list] = None
     env: Callable[[Path, int], dict] = lambda d, p: {}
     extra_env: dict = field(default_factory=dict)   # studio.toml の env
@@ -80,7 +80,7 @@ class ComponentSpec:
         return self.base_url + self.health_path
 
 
-# ---- 部品ごとの起動コマンド ----
+# ---- エンジンごとの起動コマンド ----
 
 def _h3_command(d: Path, port: int) -> list:
     return _uvicorn_cmd("h3", d, port, "app:app", ("venv", ".venv"))
@@ -128,7 +128,7 @@ H3_PROFILES = (96, 80, 48, 32, 16, 8)       # H3 の H3_PROFILE が受ける級(
 
 
 def default_budget_gb(name: str, total_mib: int) -> Optional[float]:
-    """share のときの、部品ごとの既定の予算(GiB)。総 VRAM T に対して H3 = min(T×0.5, 48)、H3-Image = min(T×0.35, 31)、ACE = 14。CPU の部品は None。"""
+    """share のときの、エンジンごとの既定の予算(GiB)。総 VRAM T に対して H3 = min(T×0.5, 48)、H3-Image = min(T×0.35, 31)、ACE = 14。CPU のエンジンは None。"""
     total_gb = total_mib / 1024
     return {"h3": min(total_gb * 0.5, 48), "h3image": min(total_gb * 0.35, 31), "ace": 14}.get(name)
 
@@ -173,7 +173,7 @@ def get_spec(name: str, cfg: Settings = None) -> ComponentSpec:
                     startup_timeout_s=900)
         spec.build_command = lambda dd: _h3_command(dd, spec.port)
         spec.budget_env = h3_budget_env
-        # 部品の内蔵 LLM は使わず、管理役の LLM(llama-server)を使う
+        # エンジンの内蔵 LLM は使わず、管理役の LLM(llama-server)を使う
         spec.env = lambda dd, p: {"H3_LLM_LOCAL": "0", "H3_LLM_URL": f"http://127.0.0.1:{cfg.llm_port}",
                                       "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True"}
     elif name == "h3image":
@@ -196,7 +196,7 @@ def get_spec(name: str, cfg: Settings = None) -> ComponentSpec:
                     uses_gpu=False, can_unload=False, unload_path=None, reload_path=None, startup_timeout_s=180)
         spec.build_command = lambda dd: _aivis_command(dd, spec.port)
     else:
-        raise KeyError(f"未知の部品: {name}")
+        raise KeyError(f"未知のエンジン: {name}")
     return spec
 
 

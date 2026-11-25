@@ -2,14 +2,14 @@
 
 (リポジトリ名は `h3-creator-studio` のまま)
 
-**最新版: 2026-11-25 12:40 JST** — 名前を **YUZU Creator Studio** に(リポジトリ名はそのまま)、ライセンスを Apache-2.0 に。画面の下に著作権と部品のクレジット、題の左に柚子のロゴ。編集タブ(第 4 版: つなぐ・切る・挿入・色調・選択区間の効果(フェード / ズーム / パン)・境目の効果・音声の差し替え。元の動画は変えず、元に戻す / やり直す、プレビューつき、このコマを画像に)。他のタブの動作は変わらない。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+**最新版: 2026-11-25 14:30 JST** — 画面と説明の「部品」を「エンジン」に(MiniMax-H3 などの生成エンジン。設定の `[components.*]` とフォルダ名は英語のまま)。全体の見直しで不具合を多数修正(テロップの Windows パス、編集のズームのプレビュー、共有モードの待ち合い、編集の最短 0.1 秒の規則など)。名前を **YUZU Creator Studio** に(リポジトリ名はそのまま)、ライセンスを Apache-2.0 に。画面の下に著作権とエンジンのクレジット、題の左に柚子のロゴ。編集タブ(第 4 版: つなぐ・切る・挿入・色調・選択区間の効果(フェード / ズーム / パン)・境目の効果・音声の差し替え。元の動画は変えず、元に戻す / やり直す、プレビューつき、このコマを画像に)。他のタブの動作は変わらない。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 **mv-V3 や story のシンプル版を統合した、誰でも使える簡易な画像・動画・音楽コンテンツ制作スタジオ。**
 ブラウザ 1 枚の画面で、画像・動画(音声つき)・音楽を作る。ComfyUI のようにノードをつなぐ必要はない。
 
-中で動いているのは、次の 4 つの部品。どれも既存のリポジトリを、そのまま使っている。
+中で動いているのは、次の 4 つのエンジン(コンポーネント)。どれも既存のリポジトリを、そのまま使っている。
 
-| 部品 | 役目 |
+| エンジン | 役目 |
 |---|---|
 | [MiniMax-H3](https://github.com/animede/Diffusers_minimax-h3) | 動画+音声(テキスト / 最初・最後のフレーム / 参照から)と静止画 |
 | [MiniMax-H3-Image](https://github.com/animede/minimax-h3-image-server) | 画像(テキストから、参照画像で編集) |
@@ -18,12 +18,12 @@
 
 **MV タブ** は、キャラクター画像 1 枚と曲 1 つから、口の合った MV(リップシンク MV)か、歌わないイメージ MV を作る。MiniMax-H3 の Ref2VA(+ 歌わせるときは Vocal Lock)をシーンごとに使い、ボーカルの分離には Demucs を使う(`setup --mv` で入れる)。
 **ショート動画タブ** は、物語の文章・曲・セリフ・参照画像から、物語性のある短い動画(目安 5 分まで)を作る。MV タブの仕組みが土台で、H3 だけで作る。
-**編集タブ** は、できた動画・画像・曲をつなぎ、切り、色を変え、音を差し替える簡単な編集。ffmpeg だけで動き、GPU は使わない(部品の起動も要らない)。
+**編集タブ** は、できた動画・画像・曲をつなぎ、切り、色を変え、音を差し替える簡単な編集。ffmpeg だけで動き、GPU は使わない(エンジンの起動も要らない)。
 
-**部品だけではできないこと: VRAM と CPU メモリの管理。** これがこのアプリの役目。
+**エンジンだけではできないこと: VRAM と CPU メモリの管理。** これがこのアプリの役目。
 
-- 12〜24GB の GPU では **1 つの部品だけ** を載せ、使う部品に自動で載せ替える。40GB 以上では、部品ごとに VRAM の予算を決めて **複数を同時に** 載せ、別々のタブの生成を並行に走らせる。
-- 生成は **部品ごとの通り道**(同じ部品は 1 つずつ)。GPU を使わない仕事(MV の音声分離・結合など)は、GPU の生成を待たずに進む。
+- 12〜24GB の GPU では **1 つのエンジンだけ** を載せ、使うエンジンに自動で載せ替える。40GB 以上では、エンジンごとに VRAM の予算を決めて **複数を同時に** 載せ、別々のタブの生成を並行に走らせる。
+- 生成は **エンジンごとの通り道**(同じエンジンは 1 つずつ)。GPU を使わない仕事(MV の音声分離・結合など)は、GPU の生成を待たずに進む。
 - 画面の上に **VRAM・CPU メモリの計器** がある。
 - Windows で VRAM があふれて「共有 GPU メモリ」に逃げ始めたら(極端に遅くなる)、**警告を出す**。
 - プロンプト強化と作詞に使う **同梱 LLM** は、空き VRAM に入る分だけ載せ、GPU で生成する前に止める。生成中に頼んだときは **CPU だけで動かして答える**(遅いが断らない)。
@@ -34,7 +34,7 @@
 |---|---|
 | GPU | NVIDIA。VRAM の下限は設けない。6GB でも画角を絞れば動くが、時間がかかる。**推奨は 12GB 以上** |
 | CPU メモリ | **32GB 以上を前提**。これより少ないと、動画の準備(量子化)と音楽の同梱 LLM が厳しくなる |
-| ストレージ | **NVMe を推奨**。空きは約 150GB(部品とモデルの合計。動画の参照モード用キャッシュ 32GB を含む。`--no-ref` なら約 120GB) |
+| ストレージ | **NVMe を推奨**。空きは約 150GB(エンジンとモデルの合計。動画の参照モード用キャッシュ 32GB を含む。`--no-ref` なら約 120GB) |
 | OS | Windows 10 / 11、または Linux(x64) |
 
 ## インストール
@@ -64,7 +64,7 @@ cd h3-creator-studio
 - **入手は `git clone` で行う(GitHub の ZIP は使わない)。** ZIP だと `.bat` の改行コード(CRLF)が崩れて動かないことがある。
 - コンソールで Ctrl+C を押すと「バッチ ジョブを終了しますか」と聞かれる。**Y** を答える。また、簡易編集モードのままウィンドウの中をクリックすると出力が止まり、サーバーが固まったように見える(Enter で再開する)。
 
-`setup.bat` は uv(Python の道具)を入れ、部品を `components\` に取り込み、環境とモデルを用意する。
+`setup.bat` は uv(Python の道具)を入れ、エンジンを `components\` に取り込み、環境とモデルを用意する。
 uv を入れた直後に「PowerShell を開き直してもう一度実行」と出たら、その通りにする(ここまでで入れたのは uv だけ)。
 
 ### Linux
@@ -81,12 +81,12 @@ cd h3-creator-studio
 | オプション | 意味 |
 |---|---|
 | `--no-models` | 環境だけ作る。モデルは後で(もう一度 setup を実行すると取得する) |
-| `--only h3,ace` | 指定した部品だけ(`h3` `h3image` `ace` `aivis`) |
+| `--only h3,ace` | 指定したエンジンだけ(`h3` `h3image` `ace` `aivis`) |
 | `--llm` | 同梱 LLM(約 5GB)と、画像・音声を読む投影ファイル(約 0.56GB。MV の「画像から作る」「曲から作る」用)も先に取得する。付けなくても、最初に使うときに取得する |
 | `--mv` | MV タブの音声処理(Demucs・librosa、CPU 版 torch)を `components/mvtools/` に入れる(ダウンロード約 0.3〜0.4GB、ディスク約 1.3GB)。`--only mvtools` でこれだけ |
 | `--ace-xl` | 音楽に XL モデルも入れる(約 45GB。既定は 2B のみで約 15GB) |
 | `--no-ref` | 動画の参照モード(参照から・Vocal Lock)用のキャッシュ(約 32GB)を作らない。参照モードを使わない人向け |
-| `--components-dir <場所>` | 部品の取り込み先を変える |
+| `--components-dir <場所>` | エンジンの取り込み先を変える |
 | `--clone-anyway` | 下の「既に入れている人」のフォルダがあっても、取り込み直す |
 
 目安: MiniMax-H3 のモデル 約 60GB(いちばん時間がかかる)、MiniMax-H3-Image 約 25GB、ACE-Step 約 15GB、AivisSpeech 約 0.3GB。
@@ -94,7 +94,7 @@ cd h3-creator-studio
 ### 既に minimax-h3 などを入れている人
 
 その場所を使える。コピーも再ダウンロードもしない。`studio.local.toml.example` を `studio.local.toml` という名前でコピーして、
-使いたい部品の `dir` にフォルダを書く。
+使いたいエンジンの `dir` にフォルダを書く。
 
 Windows の例(パスは `'...'` で囲むと、`\` をそのまま書ける):
 
@@ -114,8 +114,8 @@ dir = "/home/you/minimax-h3"
 dir = "/home/you/ACE-Step-1.5-fast"
 ```
 
-- `dir` を書いた部品は、setup が取り込みもモデル取得も飛ばす。そのフォルダに環境とモデルが済んでいることが前提。
-- 書かなくても、setup はホームに `~/minimax-h3` などを見つけると、「これを使うなら dir を書いてください」と知らせて、その部品を飛ばす(勝手に取り込み直さない)。
+- `dir` を書いたエンジンは、setup が取り込みもモデル取得も飛ばす。そのフォルダに環境とモデルが済んでいることが前提。
+- 書かなくても、setup はホームに `~/minimax-h3` などを見つけると、「これを使うなら dir を書いてください」と知らせて、そのエンジンを飛ばす(勝手に取り込み直さない)。
 
 ## 起動と使い方
 
@@ -123,13 +123,13 @@ dir = "/home/you/ACE-Step-1.5-fast"
 .\run.bat        # Linux は ./run.sh
 ```
 
-ブラウザで **http://127.0.0.1:8700** を開く。止めるときは、起動した画面で `Ctrl+C`(部品もいっしょに止まる)。
+ブラウザで **http://127.0.0.1:8700** を開く。止めるときは、起動した画面で `Ctrl+C`(エンジンもいっしょに止まる)。
 
-**初回は、部品の起動にモデルの読み込みで数分かかる。** 画面の「部品」の行に進み具合が出る。待っていれば自動で使える状態になる。
+**初回は、エンジンの起動にモデルの読み込みで数分かかる。** 画面の「エンジン」の行に進み具合が出る。待っていれば自動で使える状態になる。
 
 ### 画面
 
-- **上**: メモリ計(VRAM・CPU メモリ。Windows では共有 GPU メモリも)と「部品」の一覧。今どの部品が GPU にいるか、起動中か、エラーかが分かる。その下に、GPU の使い方(1 部品ずつ / 同時に複数)と、部品ごとの実行中・待ちのジョブが出る。
+- **上**: メモリ計(VRAM・CPU メモリ。Windows では共有 GPU メモリも)と「エンジン」の一覧。今どのエンジンが GPU にいるか、起動中か、エラーかが分かる。その下に、GPU の使い方(エンジン 1 つずつ / 同時に複数)と、エンジンごとの実行中・待ちのジョブが出る。
 - **タブが 6 つ**: 画像 / 動画 / 音楽 / MV(ミュージックビデオ。リップシンク MV / イメージ MV)/ ショート動画 / 編集。
 - **プリセット**: 編集以外の各タブの左上。入力欄の値に名前を付けて保存し、選ぶだけで呼び戻せる(下の「プリセット」)。
 - **左: 操作**。**右上: 生成物**(できたものを大きく表示、保存ボタン)。**右下: 履歴**(そのタブで作ったもの)。
@@ -184,7 +184,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 1. **曲**(音楽タブの曲・ギャラリー・PC の音声ファイル)と **キャラクター画像**(画像タブの画像・ギャラリー・PC の画像)を落とす。
    ギャラリーから落とすと、画像のプロンプトが「人物の説明」に、曲のテーマとキャプションが「曲の内容」に入る(空のときだけ。自分で書き直してよい)。
-   **外から持ち込んだ画像・曲**(プロンプトもテーマも無い)は、欄の横の **🔍 画像から作る**(同梱 LLM が画像を見て、髪・目・服・画風だけを日本語 1 行にする。CPU で 15 秒ほど、初回は画像・音声を読む部品 約 0.56GB を取得する)と
+   **外から持ち込んだ画像・曲**(プロンプトもテーマも無い)は、欄の横の **🔍 画像から作る**(同梱 LLM が画像を見て、髪・目・服・画風だけを日本語 1 行にする。CPU で 15 秒ほど、初回は画像・音声を読む投影ファイル 約 0.56GB を取得する)と
    **🎧 曲から作る**(同梱 LLM が曲の 30 秒を最大 2 か所聞いて、言語・ジャンル・雰囲気・楽器・ボーカル・テンポを読み取り、曲の内容・世界観の案を書く。CPU で 30 秒ほど。ACE-Step は使わず、GPU の載せ替えも要らない。読み取った内容は「曲の聞き取り(参考)」に閉じて出る。歌詞は聞き取らず、案にも使わない)で入れられる。
    入った文は確かめて直してから作れる(書いた文は、確認なしには置き換えない)。空のまま **MV を作る** を押しても、制作の中で同じことを自動でやり、制作の画面にどの説明が自動かが出る(曲を聞けなければ、曲の内容なしで作る)。
 2. **投稿先**(横長 16:9 / 縦長 9:16 / 正方形 1:1 / 縦 4:5)と **画質**(高速 / 標準 / 高画質)、シーンの長さ(5〜10 秒)を選んで **MV を作る**。
@@ -243,7 +243,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 ### 編集タブ
 
-ギャラリーの動画・画像・曲を、**つなぐ・区間を切る・途中に挿入する・色を変える・境目をつなぎ替える・曲を付け替える**、簡単な編集。**元の動画は一切変えない**(非破壊)。編集の中身は「どのクリップのどこを、どの順で、どんな効果で」という設定だけで、ffmpeg(CPU)で作り直す。**GPU も部品の起動も要らない**ので、MV や動画の生成と同時に使える。
+ギャラリーの動画・画像・曲を、**つなぐ・区間を切る・途中に挿入する・色を変える・境目をつなぎ替える・曲を付け替える**、簡単な編集。**元の動画は一切変えない**(非破壊)。編集の中身は「どのクリップのどこを、どの順で、どんな効果で」という設定だけで、ffmpeg(CPU)で作り直す。**GPU もエンジンの起動も要らない**ので、MV や動画の生成と同時に使える。
 
 1. 上の選びで **編集プロジェクト** を選ぶか、**新規** で名前を付けて作る(名前の変更・削除もここ)。
 2. **クリップ** の欄に、動画・画像を落とす(動画タブ・MV・ショート動画の生成物、ギャラリー、PC のファイル)。**末尾に足されます**。
@@ -285,21 +285,21 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 ## VRAM と CPU メモリの管理(このアプリの特徴)
 
-GPU のメモリは足りない。4 つの部品を同時に載せると、すぐあふれる。そこで:
+GPU のメモリは足りない。4 つのエンジンを同時に載せると、すぐあふれる。そこで:
 
-1. **載るだけ載せ、載らなければ待つ。** 生成は部品ごとの通り道に並ぶ(同じ部品は 1 つずつ)。別の部品の生成は、GPU に一緒に載るなら並行に走る。受け付けた順に見て、始められるものから始める。ただし先頭が「GPU の空き待ち」のときは、その仕事が降ろしたい部品に後から来た仕事を入れない(追い越され続けないように)。
-   - **12〜24GB(`[gpu] mode` の既定 `auto` → 1 部品ずつ)**: GPU には 1 つだけ。画像なら MiniMax-H3-Image、動画なら MiniMax-H3、音楽なら ACE-Step。
-   - **40GB 以上(`auto` → 同時に複数)**: 部品ごとに VRAM の予算を決め、起動するときに渡す(MiniMax-H3 は `H3_PROFILE` と `H3_VRAM_LIMIT_GB`、MiniMax-H3-Image は `H3IMG_VRAM_GB`、ACE-Step は `ACESTEP_GPU_PROFILE`)。予算の合計が GPU に収まる間は降ろさない。足りなくなったら、仕事中でない部品を使った時刻の古い順に降ろす。既定の予算は MiniMax-H3 = 総 VRAM の半分(最大 48GB)、MiniMax-H3-Image = 35%(最大 31GB)、ACE-Step = 14GB。`[components.<名前>] vram_budget_gb` で変えられる。
+1. **載るだけ載せ、載らなければ待つ。** 生成はエンジンごとの通り道に並ぶ(同じエンジンは 1 つずつ)。別のエンジンの生成は、GPU に一緒に載るなら並行に走る。受け付けた順に見て、始められるものから始める。ただし先頭が「GPU の空き待ち」のときは、その仕事が降ろしたいエンジンに後から来た仕事を入れない(追い越され続けないように)。
+   - **12〜24GB(`[gpu] mode` の既定 `auto` → エンジン 1 つずつ)**: GPU には 1 つだけ。画像なら MiniMax-H3-Image、動画なら MiniMax-H3、音楽なら ACE-Step。
+   - **40GB 以上(`auto` → 同時に複数)**: エンジンごとに VRAM の予算を決め、起動するときに渡す(MiniMax-H3 は `H3_PROFILE` と `H3_VRAM_LIMIT_GB`、MiniMax-H3-Image は `H3IMG_VRAM_GB`、ACE-Step は `ACESTEP_GPU_PROFILE`)。予算の合計が GPU に収まる間は降ろさない。足りなくなったら、仕事中でないエンジンを使った時刻の古い順に降ろす。既定の予算は MiniMax-H3 = 総 VRAM の半分(最大 48GB)、MiniMax-H3-Image = 35%(最大 31GB)、ACE-Step = 14GB。`[components.<名前>] vram_budget_gb` で変えられる。
    - GPU を使わない仕事(MV の分離・分割・結合)は、GPU の生成と並行に進む(同時に 2 つまで)。
 2. **載せ替えは自動。** 載せる場所が足りないとき、管理役が次の順で進める。
-   1. 今 GPU にいる部品を空ける。**画像・動画の部品は退避**(モデルを GPU から降ろす。プロセスは残る)。**音楽は停止**(ACE-Step には降ろす方法が無いので、プロセスを止める)。生成中の部品があると切り替えられない(「生成中の部品があるので…」と出る)。終わってからもう一度押す。
+   1. 今 GPU にいるエンジンを空ける。**画像・動画のエンジンは退避**(モデルを GPU から降ろす。プロセスは残る)。**音楽は停止**(ACE-Step には降ろす方法が無いので、プロセスを止める)。生成中のエンジンがあると切り替えられない(「生成中のエンジンがあるので…」と出る)。終わってからもう一度押す。
    2. VRAM が空いたのを確かめる。
-   3. 次の部品を起動、または再ロードして、準備ができるのを待つ(生成物の画面に手順が出る)。
-3. **同梱 LLM(Gemma 4 E4B)** は、プロンプト強化・作詞・MV の演出と、画像から人物の説明を作る(画像入力)・曲を聞いて曲の内容を作る(音声入力)ために管理役が 1 つだけ持つ。GPU で生成している間に頼まれたら、**CPU だけで動かして答える**(GPU の生成は止めない)。最初に使うときに起こし、**いま GPU にいる部品の隣の空き VRAM に入る分だけ GPU に載せる**(入らない分は CPU)。**GPU で生成する直前に止めて** VRAM を返し、生成中は起こさない。各部品の内蔵 LLM は使わない。
+   3. 次のエンジンを起動、または再ロードして、準備ができるのを待つ(生成物の画面に手順が出る)。
+3. **同梱 LLM(Gemma 4 E4B)** は、プロンプト強化・作詞・MV の演出と、画像から人物の説明を作る(画像入力)・曲を聞いて曲の内容を作る(音声入力)ために管理役が 1 つだけ持つ。GPU で生成している間に頼まれたら、**CPU だけで動かして答える**(GPU の生成は止めない)。最初に使うときに起こし、**いま GPU にいるエンジンの隣の空き VRAM に入る分だけ GPU に載せる**(入らない分は CPU)。**GPU で生成する直前に止めて** VRAM を返し、生成中は起こさない。各エンジンの内蔵 LLM は使わない。
 4. **VRAM が 10GB 未満(8GB のカードなど)のときは、音楽に自動で省メモリの設定を入れる。** 次の 5 つ。
    - `ACESTEP_GPU_PROFILE=12gb`(2B モデルのプロファイル)
    - `ACESTEP_LM_OFFLOAD_TO_CPU=1`(言語モデルを CPU に置く)
-   - `ACESTEP_RESIDENT_COMPONENTS=none`(常駐させる部品を無くす。空にはしない: Windows では空は未設定と同じ)
+   - `ACESTEP_RESIDENT_COMPONENTS=none`(常駐させるエンジンを無くす。空にはしない: Windows では空は未設定と同じ)
    - `ACESTEP_VAE_DECODE_CHUNK_SIZE=128`(最後のデコードを小さく区切る)
    - `ACESTEP_QUANTIZATION=int8_weight_only`(int8 に量子化)
 
@@ -310,15 +310,15 @@ GPU のメモリは足りない。4 つの部品を同時に載せると、す�
 
 - **VRAM**: GPU のメモリの使用量(nvidia-smi を 2 秒おきに読む)。
 - **共有 GPU メモリ**: Windows だけ。ここが増えたら、VRAM があふれている合図。
-- **CPU メモリ**: 部品のプロセスが使っている分も含めた、PC 全体の使用量。32GB に近づくと、量子化や LLM が遅くなる。
+- **CPU メモリ**: エンジンのプロセスが使っている分も含めた、PC 全体の使用量。32GB に近づくと、量子化や LLM が遅くなる。
 
-## 部品の更新(git pull)
+## エンジンの更新(git pull)
 
-各部品は、`components\` の中の **普通の git のクローン**。更新は、その部品のフォルダで `git pull` して、**その部品のセットアップをもう一度**実行する(済んでいる所は飛ばすので、短く終わる)。
+各エンジンは、`components\` の中の **普通の git のクローン**。更新は、そのエンジンのフォルダで `git pull` して、**そのエンジンのセットアップをもう一度**実行する(済んでいる所は飛ばすので、短く終わる)。
 
-**更新の前に、管理役を止める**(`run.bat` の画面で `Ctrl+C`)。`studio.local.toml` の `dir` で別の場所を指している部品は、その場所のフォルダで行う。
+**更新の前に、管理役を止める**(`run.bat` の画面で `Ctrl+C`)。`studio.local.toml` の `dir` で別の場所を指しているエンジンは、その場所のフォルダで行う。
 
-| 部品 | フォルダ | 更新 |
+| エンジン | フォルダ | 更新 |
 |---|---|---|
 | MiniMax-H3 | `components\minimax-h3` | `git pull` → `.\scripts\install.bat`(Linux: `bash scripts/install.sh`)→ モデルの更新があるときだけ `.\venv\Scripts\python.exe scripts\prepare_lowvram.py --ref`(Linux: `venv/bin/python scripts/prepare_lowvram.py --ref`。`--no-ref` で入れた人は `--ref` を付けない) |
 | MiniMax-H3-Image | `components\minimax-h3-image-server` | `git pull` → `uv pip install --python .venv\Scripts\python.exe -r requirements-windows.txt`(Linux: `uv pip install --python .venv/bin/python -r requirements.txt`)→ モデルの更新があるときだけ `.venv\Scripts\python.exe scripts\prepare_models.py`(Linux: `.venv/bin/python scripts/prepare_models.py`) |
@@ -334,7 +334,7 @@ git pull
 cd ..\..
 ```
 
-- モデルの更新があるかは、その部品の README / 更新履歴に書いてある。迷ったら、準備のコマンドを実行してよい(済んでいるものは数秒で飛ばす)。
+- モデルの更新があるかは、そのエンジンの README / 更新履歴に書いてある。迷ったら、準備のコマンドを実行してよい(済んでいるものは数秒で飛ばす)。
 - `git pull` が「手元の変更があるので…」と止まったら、そのフォルダを自分で触った跡。`git status` で確かめてから、`git stash` するか、変更を戻す。
 
 **Studio 自身の更新**:
@@ -344,9 +344,9 @@ git pull
 .\setup.bat --no-models
 ```
 
-`--no-models` は管理役の環境(`.venv`)の更新と、足りない部品の取り込み、各部品の環境の確認(済んでいれば短く終わる)をする。部品のモデルは触らない。
+`--no-models` は管理役の環境(`.venv`)の更新と、足りないエンジンの取り込み、各エンジンの環境の確認(済んでいれば短く終わる)をする。エンジンのモデルは触らない。
 
-**部品を入れ直したいとき**は、そのフォルダを消して、`setup` を実行し直す(消したフォルダだけ、取り込みから用意する)。`studio.local.toml` の `dir` で指しているフォルダは、setup は消さない。自分で消す。
+**エンジンを入れ直したいとき**は、そのフォルダを消して、`setup` を実行し直す(消したフォルダだけ、取り込みから用意する)。`studio.local.toml` の `dir` で指しているフォルダは、setup は消さない。自分で消す。
 
 ## 設定
 
@@ -355,31 +355,31 @@ git pull
 | 項目 | 意味 |
 |---|---|
 | `host` / `port` | 管理役の待ち受け。既定は `127.0.0.1` / `8700`。他の PC に公開はしない(第 1 版) |
-| `components_dir` | 部品を取り込む場所。既定は `components` |
-| `[components.<名前>]` の `dir` | 部品の場所を直接指す。書くと、取り込みもモデル取得も飛ばす |
-| 同 `enabled` | `false` でその部品を使わない(例: 音楽は要らない) |
-| 同 `port` | 部品のポート(競合したとき変える) |
-| 同 `env` | 部品に渡す環境変数。`[components.h3.env]` のように書く |
+| `components_dir` | エンジンを取り込む場所。既定は `components` |
+| `[components.<名前>]` の `dir` | エンジンの場所を直接指す。書くと、取り込みもモデル取得も飛ばす |
+| 同 `enabled` | `false` でそのエンジンを使わない(例: 音楽は要らない) |
+| 同 `port` | エンジンのポート(競合したとき変える) |
+| 同 `env` | エンジンに渡す環境変数。`[components.h3.env]` のように書く |
 | `[llm]` の `port` / `tools_dir` | 同梱 LLM(llama-server)のポート(既定 8701)と、取得先のフォルダ |
 | `[llm]` の `gpu` | 同梱 LLM を載せる先。`auto`(空きに入る分だけ GPU)/ `off`(CPU のみ)/ `all` / 層数 |
 | `[llm]` の `gguf` / `llama_server` / `mmproj` | 書くと、取得せずに、そのファイルを使う(`mmproj` は画像・音声を読む投影ファイル。空なら自動で探し、無ければ「画像から作る」「曲から作る」で 1 回だけ取得する) |
-| `[gpu]` の `mode` | `auto`(総 VRAM 40GiB 以上なら同時に複数、未満なら 1 部品ずつ)/ `exclusive`(1 部品ずつ)/ `share`(同時に複数) |
-| `[components.<名前>]` の `vram_budget_gb` | 同時に複数載せるときの、その部品の VRAM の予算(GB) |
+| `[gpu]` の `mode` | `auto`(総 VRAM 40GiB 以上なら同時に複数、未満なら エンジン 1 つずつ)/ `exclusive`(エンジン 1 つずつ)/ `share`(同時に複数) |
+| `[components.<名前>]` の `vram_budget_gb` | 同時に複数載せるときの、そのエンジンの VRAM の予算(GB) |
 | `[mv]` の `tools_python` | MV の音声処理(Demucs・librosa)を動かす Python。空なら `setup --mv` が作る `components/mvtools/.venv` |
 | `[mv]` の `device` | ボーカル分離の場所。既定 `cpu`(GPU の生成と並行に動く) |
 
-部品の名前は `h3` / `h3image` / `ace` / `aivis`。
+エンジンの名前は `h3` / `h3image` / `ace` / `aivis`。
 
 ## トラブルシューティング
 
-- **部品が「エラー」と出る**: その行の「ログ」を開く。同じ内容は `logs\<名前>.log`(`logs/h3.log` など)にある。モデルが無い、環境が無い、のときは、setup をもう一度実行する。
+- **エンジンが「エラー」と出る**: その行の「ログ」を開く。同じ内容は `logs\<名前>.log`(`logs/h3.log` など)にある。モデルが無い、環境が無い、のときは、setup をもう一度実行する。
 - **ポートが使われている**: 8700(管理役)、8701(同梱 LLM)、8611(動画)、8633(画像)、8001(音楽)、10101(読み上げ)のどれかを別のアプリが使っている。相手を止めるか、`studio.local.toml` でポートを変える。
 - **「VRAM があふれて…」と警告が出る**: 画角(サイズ・解像度)を下げる。他の GPU アプリ(ブラウザの動画再生、ゲーム、別の生成ツール)を閉じる。
 - **「中止」を押してもすぐ止まらない**: 中止は **いまのステップの後で止まる**。音楽は、言語モデル(LM)の段と、最後のデコードの最中は止まらないことがある。
-- **外部で動いている部品は止めない**: 管理役が起動したものだけを止める。別に起動していた部品がすでにポートで待ち受けていれば、それをそのまま使い、停止はしない(画面にも「外部」と出る)。画像・動画の部品は外部でも GPU から降ろせるが、ACE-Step は降ろす方法が無く、止めるしかない。外部の ACE-Step が GPU にいて載せ替えが必要なときは、GPU に次の部品の分(目安: 動画 12GB、画像 13.5GB、音楽 14GB + 1GB)の空きがあれば止めずに同居し、無ければ「同居できません」と断る。その場合は先に自分で止めるか、`studio.local.toml` の `[components.ace]` に別の `port` を書いて管理役に起こさせる。
+- **外部で動いているエンジンは止めない**: 管理役が起動したものだけを止める。別に起動していたエンジンがすでにポートで待ち受けていれば、それをそのまま使い、停止はしない(画面にも「外部」と出る)。画像・動画のエンジンは外部でも GPU から降ろせるが、ACE-Step は降ろす方法が無く、止めるしかない。外部の ACE-Step が GPU にいて載せ替えが必要なときは、GPU に次のエンジンの分(目安: 動画 12GB、画像 13.5GB、音楽 14GB + 1GB)の空きがあれば止めずに同居し、無ければ「同居できません」と断る。その場合は先に自分で止めるか、`studio.local.toml` の `[components.ace]` に別の `port` を書いて管理役に起こさせる。
 - **CPU メモリが足りない**: 動画の準備(量子化)中に落ちるときは、他のアプリを閉じる。32GB 未満では、動画と同梱 LLM が厳しい。
 - **MV タブに「setup --mv を実行してください」と出る**: `.\setup.bat --mv --only mvtools`(Linux は `./setup.sh --mv --only mvtools`)で音声処理の道具を入れる。すでに Demucs と librosa の入った Python があれば `[mv] tools_python` に書けば入れなくてよい。
-- **ジョブに「GPU の空きを待っています」と出る**: 別の部品が生成中で、終わらないと載せられない。終われば自動で始まる(中止もできる)。
+- **ジョブに「GPU の空きを待っています」と出る**: 別のエンジンが生成中で、終わらないと載せられない。終われば自動で始まる(中止もできる)。
 - **setup が途中で失敗した**: 失敗した手順と、それだけをやり直すコマンドが画面に出る。原因を直して、setup をもう一度実行すれば、続きから進む。
 
 ## 構成
@@ -388,8 +388,8 @@ git pull
 h3-creator-studio/
 ├── setup.bat / setup.sh   セットアップ(uv を入れ、scripts/setup.py を呼ぶ)
 ├── run.bat / run.sh       管理役の起動
-├── scripts/setup.py       部品の取り込み、環境とモデルの準備(部品自身のスクリプトを呼ぶ)
-├── studio/                管理役(FastAPI): 部品の起動と停止、載せ替え、メモリ監視、ジョブ、LLM、MV・ショート動画の制作、編集
+├── scripts/setup.py       エンジンの取り込み、環境とモデルの準備(エンジン自身のスクリプトを呼ぶ)
+├── studio/                管理役(FastAPI): エンジンの起動と停止、載せ替え、メモリ監視、ジョブ、LLM、MV・ショート動画の制作、編集
 ├── studio/mvtools/        MV・ショート動画の音声処理(ボーカル分離・シーン分割。components/mvtools の Python で動かす)
 ├── presets/               同梱のプリセット(タブごとの JSON)
 ├── web/                   画面(素の HTML / JavaScript / CSS。ビルド不要)
@@ -398,9 +398,9 @@ h3-creator-studio/
 ├── studio.local.toml.example  自分の設定の見本
 ├── pyproject.toml / requirements.txt  管理役の Python の依存
 ├── LICENSE / NOTICE       Apache-2.0 と、移植したファイルの記録
-├── components/            取り込んだ部品(それぞれ独立した git リポジトリ。git の管理外)と、mvtools(MV の音声処理の環境)
+├── components/            取り込んだエンジン(それぞれ独立した git リポジトリ。git の管理外)と、mvtools(MV の音声処理の環境)
 ├── outputs/               生成物と台帳(studio.db)(git の管理外)
-├── logs/                  部品のログ(git の管理外)
+├── logs/                  エンジンのログ(git の管理外)
 ├── tests/                 テスト(`python -m unittest discover -s tests -t .`)
 └── docs/SPEC.md           仕様
 ```
@@ -408,16 +408,16 @@ h3-creator-studio/
 ## クレジット
 
 - **このアプリ**: © 2026 ゆずき(YUZUKI、GitHub: animede)。コードは Apache License 2.0([LICENSE](LICENSE)、[NOTICE](NOTICE))。
-- **[MiniMax-H3 / MiniMax-H3-Image](https://huggingface.co/MiniMaxAI)**(MiniMax): 動画・音声・静止画・画像のモデル。モデルの重みは MiniMax Community License(非商用は無料、商用は年商 $20M 未満まで、要クレジット。本家のモデルカードを確認)。このアプリは [Diffusers_minimax-h3](https://github.com/animede/Diffusers_minimax-h3) と [minimax-h3-image-server](https://github.com/animede/minimax-h3-image-server)(Diffusers_minimax-h3 は Apache-2.0、minimax-h3-image-server は MIT)を部品として動かす。
-- **[ACE-Step](https://github.com/ace-step/ACE-Step)**(ACE Studio / StepFun): 音楽のモデル(MIT)。部品は [ACE-Step-1.5-fast](https://github.com/animede/ACE-Step-1.5-fast)(MIT)。
+- **[MiniMax-H3 / MiniMax-H3-Image](https://huggingface.co/MiniMaxAI)**(MiniMax): 動画・音声・静止画・画像のモデル。モデルの重みは MiniMax Community License(非商用は無料、商用は年商 $20M 未満まで、要クレジット。本家のモデルカードを確認)。このアプリは [Diffusers_minimax-h3](https://github.com/animede/Diffusers_minimax-h3) と [minimax-h3-image-server](https://github.com/animede/minimax-h3-image-server)(Diffusers_minimax-h3 は Apache-2.0、minimax-h3-image-server は MIT)をエンジンとして動かす。
+- **[ACE-Step](https://github.com/ace-step/ACE-Step)**(ACE Studio / StepFun): 音楽のモデル(MIT)。エンジンは [ACE-Step-1.5-fast](https://github.com/animede/ACE-Step-1.5-fast)(MIT)。
 - **[AivisSpeech-Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)**(Aivis Project): 読み上げ(LGPL-3.0。別プロセスとして HTTP で呼ぶだけで、組み込まない)。音声モデル(aivm)は、それぞれの作者の利用規約に従う。
 - そのほか: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)と Google の Gemma 4(ライセンスはモデルカード [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) を確認)、[Demucs](https://github.com/facebookresearch/demucs)(MIT)、[librosa](https://librosa.org/)(ISC)、[ffmpeg](https://ffmpeg.org/)(LGPL/GPL。PATH のものを使う)。
 
-画面の下にも、著作権と主な部品のクレジットを出している。
+画面の下にも、著作権と主なエンジンのクレジットを出している。
 
 ## ライセンス
 
-Apache License 2.0([LICENSE](LICENSE))。© 2026 YUZUKI(ゆずき)。再配布のときは著作権表示と [NOTICE](NOTICE) を保つ(Apache-2.0 第 4 条)。部品とモデルは、それぞれのライセンスに従う。MV のシーン分割と演出の組み立て(`studio/mvtools/`、`studio/mvscript.py`、`studio/mvclip.py`、`studio/mvdescribe.py`、`studio/mvsub.py`)は、同じ作者の [Minimax-H3-lipsync-mv](https://github.com/animede/Minimax-H3-lipsync-mv)(Apache-2.0)からの移植([NOTICE](NOTICE))。
+Apache License 2.0([LICENSE](LICENSE))。© 2026 YUZUKI(ゆずき)。再配布のときは著作権表示と [NOTICE](NOTICE) を保つ(Apache-2.0 第 4 条)。エンジンとモデルは、それぞれのライセンスに従う。MV のシーン分割と演出の組み立て(`studio/mvtools/`、`studio/mvscript.py`、`studio/mvclip.py`、`studio/mvdescribe.py`、`studio/mvsub.py`)は、同じ作者の [Minimax-H3-lipsync-mv](https://github.com/animede/Minimax-H3-lipsync-mv)(Apache-2.0)からの移植([NOTICE](NOTICE))。
 
 ## 謝辞
 

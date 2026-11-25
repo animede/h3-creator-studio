@@ -240,7 +240,7 @@ class AivisLayoutTest(unittest.TestCase):
         self.assertTrue(exe.stat().st_mode & 0o100)
 
     def test_components_spec_finds_the_result(self):
-        """展開後の置き場所を、管理役の部品カタログが実際に見つけられること。"""
+        """展開後の置き場所を、管理役のエンジンカタログが実際に見つけられること。"""
         d = self.root / "AivisSpeech-Engine"
         touch(d / "AivisSpeech-Engine-Linux-x64-1.2.0" / "run")
         cfg = Settings({"components": {"aivis": {"dir": str(d)}}}, self.root)

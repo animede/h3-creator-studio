@@ -1,6 +1,6 @@
 """AivisSpeech(音声合成)の利用: 話者の一覧と、文章 → WAV の合成。VOICEVOX 互換の API を使う。
 
-AivisSpeech は CPU で動く部品なので、必要なら scheduler.ensure("aivis") で起こしても GPU の常駐者は変わらない。
+AivisSpeech は CPU で動くエンジンなので、必要なら scheduler.ensure("aivis") で起こしても GPU の常駐者は変わらない。
 """
 import asyncio
 import re

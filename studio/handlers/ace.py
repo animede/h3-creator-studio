@@ -1,7 +1,7 @@
 """ACE-Step(音楽)の簡単モードとおまかせ: 管理役の LLM で曲のプランを作り → ACE の LM で BPM・調を決め → 生成 → mp3 を取り込む。
 
 流れ(Easy Music と同じ):
-  ace.simple  prepare(部品を載せる前): テーマ・歌詞・キャプションのうち、空のものだけを LLM で作る(書いたものは作り直さない)
+  ace.simple  prepare(エンジンを載せる前): テーマ・歌詞・キャプションのうち、空のものだけを LLM で作る(書いたものは作り直さない)
               run: モデルを確認(未読込なら /v1/init)→ /format_input で BPM・調・拍子 → /release_task → /query_result を 2 秒おきに見る → mp3 を取り込む
   ace.omakase 一言(query)を /release_task の sample_query で渡す。LLM は使わず、ACE の LM が全部決める
 """
@@ -225,7 +225,7 @@ def _envelope_error(r: httpx.Response) -> str:
 
 
 async def list_models(base_url: str, transport=None) -> dict:
-    """ACE の /v1/models を画面向けに整える(部品を起こしはしない)。動いていなければ空の一覧と note を返す。"""
+    """ACE の /v1/models を画面向けに整える(エンジンを起こしはしない)。動いていなければ空の一覧と note を返す。"""
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=5.0, transport=transport) as c:
             r = await c.get("/v1/models")

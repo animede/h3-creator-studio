@@ -6,7 +6,7 @@ from studio import procman
 
 
 class CapLogTest(unittest.TestCase):
-    """部品のログは追記だけなので、起動のときに大きすぎれば末尾だけを残す。"""
+    """エンジンのログは追記だけなので、起動のときに大きすぎれば末尾だけを残す。"""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

@@ -1,5 +1,5 @@
 :root {
-  color-scheme: dark;      /* スクロールバー・数の欄の矢印など、ブラウザの部品も暗い色で描かせる */
+  color-scheme: dark;      /* スクロールバー・数の欄の矢印など、ブラウザのエンジンも暗い色で描かせる */
   --bg: #14161a; --panel: #1d2026; --line: #2d323b; --text: #e6e8ec; --muted: #8b93a1;
   --accent: #5b9dff; --ok: #3fb97a; --warn: #e9a23b; --err: #e5584f; --bar: #2a2f38;
 }

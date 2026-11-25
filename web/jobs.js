@@ -118,7 +118,7 @@ function wireEnhance({ tab, ta, btn, undo, note, body = () => ({}), showMsg }) {
     showMsg("");
     btn.disabled = true;
     undo.hidden = true;
-    note.textContent = "強化しています…(部品や LLM を起こすので、数分かかることがあります)";
+    note.textContent = "強化しています…(エンジンや LLM を起こすので、数分かかることがあります)";
     try {
       const r = await fetch("/api/enhance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tab, text, ...body() }) });
       const js = await r.json().catch(() => ({}));

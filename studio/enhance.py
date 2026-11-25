@@ -1,7 +1,7 @@
-"""プロンプト強化: 各部品が持つ強化の API(H3 の /api/prompt/enhance、H3-Image の /api/prompts/enhance)を呼ぶ。
+"""プロンプト強化: 各エンジンが持つ強化の API(H3 の /api/prompt/enhance、H3-Image の /api/prompts/enhance)を呼ぶ。
 
-プロンプトの作り込み自体は部品の側にある。部品は環境変数(H3_LLM_URL / H3IMG_LLM_BASE_URL)で
-管理役の LLM(llama-server)を指しているので、ここでは「LLM を起こす」「部品を準備する」「部品に頼む」の順に進めるだけ。
+プロンプトの作り込み自体はエンジンの側にある。エンジンは環境変数(H3_LLM_URL / H3IMG_LLM_BASE_URL)で
+管理役の LLM(llama-server)を指しているので、ここでは「LLM を起こす」「エンジンを準備する」「エンジンに頼む」の順に進めるだけ。
 """
 import logging
 
@@ -30,7 +30,7 @@ class EnhanceError(Exception):
 
 
 def _fail(label: str, r: httpx.Response) -> EnhanceError:
-    if r.status_code == 501:     # 部品が LLM の接続先を知らない = 管理役が起動した部品ではない
+    if r.status_code == 501:     # エンジンが LLM の接続先を知らない = 管理役が起動したエンジンではない
         return EnhanceError(409, f"{label} に管理役の LLM が設定されていません。管理役から起動した {label} でないと強化できません"
                                  "(外部で動いている場合は、いったん停止して管理役から起動し直してください)")
     return EnhanceError(502, f"{label} がプロンプトを強化できませんでした: {error_text(r)}")
@@ -48,7 +48,7 @@ async def _enhance_video(c: httpx.AsyncClient, text: str, mode, seconds, task, l
 
 
 async def _enhance_image(c: httpx.AsyncClient, ledger, text: str, references: list) -> dict:
-    """参照画像があれば編集用(edit)の強化。参照は一時的に部品へ送り、終わったら消す。"""
+    """参照画像があれば編集用(edit)の強化。参照は一時的にエンジンへ送り、終わったら消す。"""
     assets = []
     try:
         for oid in references:
@@ -82,19 +82,19 @@ async def enhance_prompt(runner, tab: str, text: str, mode: str = None, seconds:
     name = COMPONENTS[tab]
     if name not in ctx.sched.comps:
         raise EnhanceError(409, f"{name} が無効になっています(studio.toml の [components.{name}] enabled を確認してください)")
-    # 生成中でも強化はできる(LLM は CPU 専用で動く)。ただし部品が載っていないときは、載せるために仕事中の部品を降ろすことになるなら断る
+    # 生成中でも強化はできる(LLM は CPU 専用で動く)。ただしエンジンが載っていないときは、載せるために仕事中のエンジンを降ろすことになるなら断る
     plan = ctx.sched.plan(name) if hasattr(ctx.sched, "plan") else None
     if plan is not None and plan.action == "wait":
-        busy = "、".join(ctx.sched.comps[n].spec.label for n in plan.blockers) or "別の部品"
+        busy = "、".join(ctx.sched.comps[n].spec.label for n in plan.blockers) or "別のエンジン"
         raise EnhanceError(409, f"{ctx.sched.comps[name].spec.label} を GPU に載せられません({busy} が生成中のため)。"
                                 "生成が終わってからもう一度押してください")
     if (plan is None or plan.action != "ready") and ctx.llm is not None:
-        # 部品を GPU に載せる前に、管理役の LLM が GPU に持っている VRAM を返す(GPU のジョブと同じ。持たせたまま載せると、12GB では部品の取り分が
-        # 減っていた)。LLM の区間(session)に入る前に呼ぶ(入った後だと、自分の区間の終わりを待ってしまう)。部品の後で起こす LLM は、空きに合わせて載る
+        # エンジンを GPU に載せる前に、管理役の LLM が GPU に持っている VRAM を返す(GPU のジョブと同じ。持たせたまま載せると、12GB ではエンジンの取り分が
+        # 減っていた)。LLM の区間(session)に入る前に呼ぶ(入った後だと、自分の区間の終わりを待ってしまう)。エンジンの後で起こす LLM は、空きに合わせて載る
         await ctx.llm.release_before_gpu()
     mark, idle = getattr(ctx.sched, "mark_busy", None), getattr(ctx.sched, "mark_idle", None)
     if mark is not None:
-        mark(name)                 # 強化の最中は、別の生成がこの部品を GPU から降ろさないようにする
+        mark(name)                 # 強化の最中は、別の生成がこのエンジンを GPU から降ろさないようにする
     try:
         return await _enhance(ctx, name, tab, text, mode, seconds, task, lang, references)
     finally:
@@ -105,8 +105,8 @@ async def enhance_prompt(runner, tab: str, text: str, mode: str = None, seconds:
 async def _enhance(ctx, name: str, tab: str, text: str, mode, seconds, task, lang, references) -> dict:
     async with ctx.llm.session():
         try:
-            await ctx.sched.ensure(name)                 # 部品が応えられる状態に(強化の後、どのみち生成で使う)
-            await ctx.llm.ensure_running()               # 部品が話す相手。部品が載った後で起こすので、空きに合わせて GPU に載る
+            await ctx.sched.ensure(name)                 # エンジンが応えられる状態に(強化の後、どのみち生成で使う)
+            await ctx.llm.ensure_running()               # エンジンが話す相手。エンジンが載った後で起こすので、空きに合わせて GPU に載る
         except SwitchError as e:
             raise EnhanceError(503, f"{ctx.sched.comps[name].spec.label} を準備できませんでした: {e.message}")
         except LlmError as e:

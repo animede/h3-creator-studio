@@ -116,7 +116,7 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
         d = {n: b.decode() for n, _, b in form}
         self.assertEqual(path, "/api/t2va")
         self.assertEqual((d["prompt"], d["width"], d["height"], d["seconds"], d["seed"]), ("猫が歩く", "768", "512", "6.0", "5"))
-        self.assertNotIn("resolution", d)   # 部品のプリセット名ではなく width / height で渡す
+        self.assertNotIn("resolution", d)   # エンジンのプリセット名ではなく width / height で渡す
         self.assertNotIn("num_inference_steps", d)
         progress, message, remote = comp.seen[0]          # 進捗を読んで、ジョブに写している
         self.assertEqual(remote, "remote1")
@@ -148,7 +148,7 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
         d = {n: b.decode() for n, f, b in form if not f}
         self.assertEqual(path, "/api/ref2va")
         self.assertEqual([f for n, f, _ in form if n == "references"], ["a.png", "v.mp4", "voice.wav", "b.png"])
-        self.assertNotIn("seconds", d)      # 秒数を送らない = 音声の長さに合わせる(部品の仕様)
+        self.assertNotIn("seconds", d)      # 秒数を送らない = 音声の長さに合わせる(エンジンの仕様)
         self.assertEqual(d["vocal_lock"], "true")
         self.assertNotIn("still", d)
         self.assertEqual(comp.downloads, ["/outputs/out_1.mp4"])
@@ -211,7 +211,7 @@ class H3Test(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ledger.list_outputs(), [])
 
     async def test_progress_message_prefix_and_file_part(self):
-        """MV が使う口: 進捗の文言の頭に prefix を付ける(「シーン 2 / 5: 」)。台帳に載せない作業用のファイルも multipart の部品にできる。"""
+        """MV が使う口: 進捗の文言の頭に prefix を付ける(「シーン 2 / 5: 」)。台帳に載せない作業用のファイルも multipart のエンジンにできる。"""
         comp = FakeH3()
         job = Job(id="job123456789", tab="mv", kind="mv.scene", params={})
         comp.job = job

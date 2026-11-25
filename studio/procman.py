@@ -16,7 +16,7 @@ from .config import REPO_ROOT
 
 log = logging.getLogger("studio.procman")
 LOG_DIR = REPO_ROOT / "logs"
-LOG_MAX_BYTES = 50 * 1024 * 1024       # 部品のログがこれを超えていたら、起動のときに前の部分を捨てる(追記だけなので、何か月も使うと GB 単位になる)
+LOG_MAX_BYTES = 50 * 1024 * 1024       # エンジンのログがこれを超えていたら、起動のときに前の部分を捨てる(追記だけなので、何か月も使うと GB 単位になる)
 LOG_KEEP_BYTES = 1024 * 1024           # そのとき残す末尾(画面のログ表示と、失敗の理由の末尾に使う分)
 
 
@@ -118,7 +118,7 @@ def _windows_job_object(popen: subprocess.Popen):
             raise OSError("AssignProcessToJobObject failed")
         return job
     except Exception as e:  # noqa: BLE001
-        log.warning("Job Object を設定できませんでした(管理役が強制終了されると部品が残るかもしれません): %s", e)
+        log.warning("Job Object を設定できませんでした(管理役が強制終了されるとエンジンが残るかもしれません): %s", e)
         return None
 
 

@@ -2,7 +2,7 @@
 
 どのジョブをいつ入れるか(順番・一時停止・やり直し)は short.ShortDirector(mv.Director と同じ)が決める。ここは 1 つのジョブの仕事だけをして、結果を台帳の
 mv_projects(kind = "short")に書く。ジョブの params は {"project_id", ("scene")} だけで、中身はその都度台帳から読む。MV のハンドラ(handlers/mv.py)の
-部品(曲の分析・クリップの整形・結合・ギャラリーへの登録)をそのまま使う。
+エンジン(曲の分析・クリップの整形・結合・ギャラリーへの登録)をそのまま使う。
   analyze  : CPU。時間軸で違う ― speech: セリフを AivisSpeech で文ごとに合成してつなぎ(narration.wav。文ごとの時刻は sentences.json)、
              song.wav と vocals.wav の両方として置き、文の切れ目で 5〜10 秒のシーンに束ねる(Demucs は使わない)/ music: MV と同じ(Demucs で分離して分ける)/
              free: 長さを置くだけ(シーンは short.plan が作る)

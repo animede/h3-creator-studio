@@ -1,6 +1,6 @@
 // ショート動画タブ: 物語・曲・セリフ・参照画像から、物語性のある短い動画を作る(H3 だけ。MV タブの仕組みが土台)。
 // 左 = 入力、右上 = いまの制作(進み・最終の動画・シーン)、右下 = 制作の履歴。ジョブは管理役の Director がつなぐので、ここは /api/short を見て操作するだけ。
-// 右側の画面(制作の進み・シーンの行・最終の動画・やり直し・結合し直し・履歴・削除)は MV タブと共通の部品(web/project.js の makeProjectPanel)。
+// 右側の画面(制作の進み・シーンの行・最終の動画・やり直し・結合し直し・履歴・削除)は MV タブと共通の仕組み(web/project.js の makeProjectPanel)。
 // 時間軸は入力で決まる: セリフあり → 読み上げ(人物が口を合わせる。曲は BGM)/ 曲だけ → 曲 / どちらも無し → 指定の長さ。
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
   const SIZES = VIDEO_SIZES, QUALITY_NOTE = VIDEO_QUALITY_NOTE;      // 投稿先 × 画質の寸法と、画質の説明(web/project.js。MV タブと共通)
@@ -280,7 +280,7 @@
     return Math.round(sh("narr").value.replace(/\s/g, "").length / SPEECH_CHARS_PER_S);
   }
 
-  // 入力が変わったときに追従する部品: 物語の必須の案内・曲の BGM の案内・長さの欄と案内・5 分超の警告・ボタン
+  // 入力が変わったときに追従するエンジン: 物語の必須の案内・曲の BGM の案内・長さの欄と案内・5 分超の警告・ボタン
   function changed() {
     const t = timeline();
     syncPerson();
