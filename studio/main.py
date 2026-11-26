@@ -23,6 +23,7 @@ from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
 from .enhance import EnhanceError, enhance_prompt
 from .genres import GenreError
+from . import gpu
 from .gpu import GpuMonitor
 from .handlers import HANDLERS
 from .jobs import TERMINAL, Ctx, JobRunner
@@ -77,6 +78,7 @@ async def lifespan(app: FastAPI):
     app.state.edit = EditManager(runner, ledger, OUTPUTS_DIR)      # 編集タブ(ジョブは再起動で消えるので、復元するものは無い)
     app.state.mvinstall = installer = mvinstall.ToolsInstaller()     # MV の音声処理の道具を画面から入れる(同時に 1 つ)
     llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
+    gpu.configure_devices(settings.gpu_devices)     # 管理する GPU(2 枚以上ある PC。監視とエンジンの CUDA_VISIBLE_DEVICES の両方)
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
     sched.monitor = monitor
     monitor.start()

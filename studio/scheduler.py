@@ -26,6 +26,18 @@ GPU_FREE_WAIT_S = 60
 SHARE_MIN_TOTAL_MIB = 40 * 1024     # auto: 総 VRAM がこれ以上なら share
 
 
+_NO_MODULE = re.compile(r"(?:No module named|ModuleNotFoundError:[^\n]*?module named)\s+['\"]?([\w.]+)")
+
+
+def exit_message(label: str, name: str, code, tail: str) -> str:
+    """起動中に終了したときの文。ログに「No module named x」があれば、仮想環境が不完全なので setup をやり直すよう案内する。"""
+    m = _NO_MODULE.search(tail or "")
+    if m:
+        return (f"{label} の Python 環境が不完全です(モジュール {m.group(1)} がありません)。"
+                f"スタジオを止めてから setup.bat --only {name}(Linux は ./setup.sh --only {name})を実行してください")
+    return f"{label} が途中で終了しました(終了コード {code})"
+
+
 class SwitchError(Exception):
     """載せ替え・起動の失敗。log_tail はエンジンのログ末尾(画面に出す)。"""
 
@@ -698,10 +710,11 @@ class Scheduler:
         while True:
             if not c.external and not procman.is_alive(c.proc):
                 code = c.proc.popen.returncode if c.proc and c.proc.popen else "?"
-                msg = f"{spec.label} が途中で終了しました(終了コード {code})"
+                tail = procman.log_tail(spec.name, 20)
+                msg = exit_message(spec.label, spec.name, code, tail)
                 c.proc = None
                 self._set(c, "error", msg)
-                raise SwitchError(msg, procman.log_tail(spec.name, 20))
+                raise SwitchError(msg, tail)
             status, js = await http_get_json(spec.health_url)
             if status == 200 and spec.health_ok(js):
                 return

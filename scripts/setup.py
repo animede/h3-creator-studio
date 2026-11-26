@@ -278,7 +278,10 @@ def component_steps(name: str, models: bool = True, ace_xl: bool = False, have_v
         steps = []
         if not have_venv:
             steps.append(Step("h3image: 仮想環境の作成(uv venv)", ["uv", "venv", "--python", "3.12", ".venv"]))
-        steps.append(Step("h3image: 依存パッケージ(uv pip install)", ["uv", "pip", "install", "--python", py, "-r", req]))
+        # --index-strategy unsafe-best-match: requirements の --extra-index-url(PyTorch の配布元)に無い wheel(Windows の torchao など)を
+        # PyPI からも探す(pip と同じ探し方。uv の既定は最初に見つかった取得先だけを見るので、Windows で依存が 1 つも入らなかった)
+        steps.append(Step("h3image: 依存パッケージ(uv pip install)", ["uv", "pip", "install", "--python", py, "-r", req,
+                                                                 "--index-strategy", "unsafe-best-match"]))
         if models:
             script = "scripts\\prepare_models.py" if win else "scripts/prepare_models.py"
             steps.append(Step("h3image: モデルの準備(scripts/prepare_models.py)", [py, script], env=env))

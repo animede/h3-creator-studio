@@ -37,9 +37,65 @@ def find_nvidia_smi() -> Optional[str]:
     return None
 
 
+# ---- 管理する GPU(2 枚以上ある PC。2026-11-26) ----
+# 管理役が VRAM を数えるのは 1 枚だけ。既定(auto)では、すべてのエンジンに CUDA_VISIBLE_DEVICES=<その番号> を渡して同じ 1 枚に寄せる
+# (MiniMax-H3-Image は GPU が 2 枚見えると TE を 2 枚目に置くので、小さい 2 枚目で OOM になった)。
+_devices = "auto"        # [gpu] devices: "auto" / "all" / 番号("1" など)
+_count_cache: Optional[int] = None
+
+
+def parse_gpu_devices(value) -> str:
+    """[gpu] devices の値を "auto" / "all" / 番号の文字列にそろえる。読めなければ auto。"""
+    v = str(value).strip().lower()
+    if v in ("auto", "all") or v.isdigit():
+        return v
+    log.warning("[gpu] devices = %r は読めません(auto / all / GPU の番号 のいずれか)。auto として扱います", value)
+    return "auto"
+
+
+def configure_devices(value) -> None:
+    global _devices
+    _devices = parse_gpu_devices(value)
+
+
 def _gpu_index() -> int:
+    """管理する GPU の物理番号。[gpu] devices が番号ならそれ、無ければ CUDA_VISIBLE_DEVICES の先頭、無ければ 0。"""
+    if _devices.isdigit():
+        return int(_devices)
     first = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip()
     return int(first) if first.isdigit() else 0
+
+
+def gpu_count() -> int:
+    """nvidia-smi で見える GPU の数(一度だけ数える)。nvidia-smi が無ければ 0。"""
+    global _count_cache
+    if _count_cache is None:
+        exe = find_nvidia_smi()
+        n = 0
+        if exe:
+            try:
+                out = subprocess.run([exe, "--query-gpu=index", "--format=csv,noheader"], capture_output=True, text=True,
+                                     timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                n = sum(1 for x in out.stdout.splitlines() if x.strip().isdigit()) if out.returncode == 0 else 0
+            except (OSError, subprocess.SubprocessError):
+                n = 0
+        _count_cache = n
+    return _count_cache
+
+
+def pin_env(env: dict, count: Optional[int] = None) -> dict:
+    """エンジンを管理する GPU に寄せる環境変数。env(子に渡す予定の環境)に CUDA_VISIBLE_DEVICES があれば何もしない
+    (管理役自身の環境・[components.<name>.env]・CPU 専用の LLM の -1)。devices = "all" なら寄せない。
+    auto は GPU が 2 枚以上のときだけ、番号の指定は常に寄せる。"""
+    if "CUDA_VISIBLE_DEVICES" in env or _devices == "all":
+        return {}
+    if not _devices.isdigit() and (gpu_count() if count is None else count) <= 1:
+        return {}
+    # 番号は nvidia-smi の並び(PCI バス順)。CUDA の既定の並び(速い順)とずれる PC があるので、CUDA_DEVICE_ORDER もそろえる
+    out = {"CUDA_VISIBLE_DEVICES": str(_gpu_index())}
+    if "CUDA_DEVICE_ORDER" not in env:
+        out["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    return out
 
 
 def smi_mib(field: str) -> Optional[int]:
@@ -71,7 +127,7 @@ def parse_smi(text: str, index: int = 0) -> Optional[dict]:
             return int(float(s))
         except ValueError:
             return 0
-    return {"name": row[1], "used_mib": num(row[2]), "total_mib": num(row[3]), "util": num(row[4])}
+    return {"index": int(row[0]), "count": len(rows), "name": row[1], "used_mib": num(row[2]), "total_mib": num(row[3]), "util": num(row[4])}
 
 
 PERFLIB = r"HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib"

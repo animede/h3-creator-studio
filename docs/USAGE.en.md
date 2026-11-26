@@ -792,6 +792,12 @@ The quickest way is to copy the built-in `samples/mv-starry-night/sample.json` a
 - It's stopped just before GPU generation to give back the VRAM.
 - The projector file (mmproj, about 0.56GB) for reading images and audio is downloaded the first time you use "From image" or "From song".
 
+### PCs with 2 or more GPUs
+
+- The supervisor counts VRAM on one GPU only (the first entry of `CUDA_VISIBLE_DEVICES` in its environment, or GPU 0). The top bar shows "GPU in use: 0 <name>" (only with 2 or more GPUs).
+- By default (`[gpu] devices = "auto"`) every engine and the bundled LLM get `CUDA_VISIBLE_DEVICES=<that index>` and run on that same GPU.
+- For another GPU write `devices = "1"` etc., to not pin write `devices = "all"`, in `[gpu]` of `studio.local.toml`. An engine with `CUDA_VISIBLE_DEVICES` in `[components.<name>.env]` keeps that setting.
+
 ### Shared GPU memory on Windows
 
 When VRAM overflows, Windows starts using CPU memory in place of GPU memory. It doesn't stop, but it gets extremely slow. If "**VRAM overflowed and is spilling into shared GPU memory (this is extremely slow).**…" (VRAM があふれて共有 GPU メモリに退避しています(極端に遅くなります)。…) appears at the top:
@@ -815,6 +821,7 @@ When VRAM overflows, Windows starts using CPU memory in place of GPU memory. It 
 
 ### Common issues
 
+- **"The Python environment of ... is incomplete (module uvicorn is missing)"**: that engine's virtual environment was only partly installed (its log has `No module named ...`). Stop the studio, then run `.\setup.bat --only <name>` (Linux: `./setup.sh --only <name>`). The name (h3 / h3image / ace, etc.) is in the message.
 - **An engine shows "Error"**: open **Log** on that engine's row in the engine panel. The same content is in `logs\<name>.log` (`logs/h3.log`, etc.). If a model or environment is missing, run setup again.
 - **A port is in use**: another app is using one of 8700 (supervisor), 8701 (bundled LLM), 8611 (video), 8633 (image), 8001 (music), or 10101 (text-to-speech). Stop that app, or change the port in `studio.local.toml`.
 - **"Cannot connect to the supervisor" appears**: check that the `run.bat` (`run.sh`) window hasn't frozen. In the Windows console, clicking inside the window pauses its output (QuickEdit mode). Press Enter to resume.

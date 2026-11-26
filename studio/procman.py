@@ -12,6 +12,7 @@ from typing import Optional
 import httpx
 import psutil
 
+from . import gpu
 from .config import REPO_ROOT
 
 log = logging.getLogger("studio.procman")
@@ -132,6 +133,7 @@ def start(spec, extra_env: dict = None) -> Proc:
     """
     cmd = spec.build_command(spec.dir)           # 未導入なら ComponentNotInstalled
     env = {**os.environ, **spec.env(spec.dir, spec.port), **(extra_env or {}), **spec.extra_env, "PYTHONUNBUFFERED": "1"}
+    env.update(gpu.pin_env(env))     # GPU が 2 枚以上なら、管理役が数える 1 枚に寄せる(利用者が CUDA_VISIBLE_DEVICES を書いていればそのまま)
     # 標準出力をログファイルへ流すと、Windows の cp932 では日本語の print で UnicodeEncodeError になるため UTF-8 に固定する
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")

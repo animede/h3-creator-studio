@@ -159,14 +159,15 @@ class CommandsTest(unittest.TestCase):
         with mock.patch.object(sys, "platform", "linux"):
             st = S.component_steps("h3image")
             self.assertEqual(st[0].argv, ["uv", "venv", "--python", "3.12", ".venv"])
-            self.assertEqual(st[1].argv, ["uv", "pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt"])
+            self.assertEqual(st[1].argv, ["uv", "pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt",
+                                          "--index-strategy", "unsafe-best-match"])
             self.assertEqual(st[2].argv, [".venv/bin/python", "scripts/prepare_models.py"])
             self.assertEqual(len(S.component_steps("h3image", have_venv=True)), 2)
 
     def test_h3image_windows_uses_windows_requirements(self):
         with mock.patch.object(sys, "platform", "win32"):
             st = S.component_steps("h3image")
-            self.assertEqual(st[1].argv[-3:], [".venv\\Scripts\\python.exe", "-r", "requirements-windows.txt"])
+            self.assertEqual(st[1].argv[-5:], [".venv\\Scripts\\python.exe", "-r", "requirements-windows.txt", "--index-strategy", "unsafe-best-match"])
             self.assertEqual(st[2].argv, [".venv\\Scripts\\python.exe", "scripts\\prepare_models.py"])
 
     def test_ace(self):

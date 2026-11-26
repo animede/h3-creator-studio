@@ -130,6 +130,8 @@ EN = {
     "VRAM の利用枠 {}GiB。": "VRAM allocation {0} GiB. ",
     "{} を起動しています({}モデルの読み込みに数分かかります)": "Starting {0} ({1}loading the model takes a few minutes)",
     "{} が途中で終了しました(終了コード {})": "{0} exited unexpectedly (exit code {1})",
+    "{} の Python 環境が不完全です(モジュール {} がありません)。スタジオを止めてから setup.bat --only {}(Linux は ./setup.sh --only {})を実行してください":
+        "The Python environment of {0} is incomplete (module {1} is missing). Stop the studio, then run setup.bat --only {2} (Linux: ./setup.sh --only {3})",
     "{} が {} 秒以内に準備できませんでした": "{0} did not become ready within {1} seconds",
     "別のエンジン": "another engine",
 

@@ -38,6 +38,9 @@
 #
 # [gpu]
 # mode = "share"                 # "auto"(既定。総 VRAM 40GiB 以上で share)/ "exclusive"(エンジン 1 つずつ)/ "share"(複数を同時に載せる)
+# devices = "1"                  # GPU が 2 枚以上: 1 番の GPU を管理し、エンジンもそこで動かす("auto" = 既定 / "all" = 寄せない)
+# [components.h3image.env]
+# CUDA_VISIBLE_DEVICES = "0,1"   # このエンジンだけ 2 枚とも見せる(書いたものは上書きしない)
 #
 # [llm]
 # gpu = "off"                    # 同梱 LLM を CPU だけで動かす("auto" / "off" / "all" / 層数)

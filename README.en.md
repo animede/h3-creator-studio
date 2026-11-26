@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: 2026-11-26 JST** — The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: 2026-11-26 JST** — When an engine fails to start because its virtual environment is incomplete, the studio now says how to re-run setup. On PCs with 2 or more GPUs, all engines are pinned by default to the one GPU the supervisor manages (`[gpu] devices`). Also, The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -411,6 +411,8 @@ There is never enough GPU memory. Load all four engines at once and it overflows
    To change them yourself, write them in `[components.ace.env]` in `studio.local.toml`.
 5. **Warning on spill into Windows "shared GPU memory".** When VRAM overflows, Windows starts using CPU memory in place of GPU memory. It doesn't stop, but it gets extremely slow. If **"VRAM があふれて共有 GPU メモリに退避しています…"** (VRAM has overflowed into shared GPU memory) appears at the top of the screen, use a smaller aspect or close other apps that use the GPU.
 
+6. **PCs with 2 or more GPUs.** The supervisor counts VRAM on one GPU only (the first entry of `CUDA_VISIBLE_DEVICES` in the supervisor's environment, or GPU 0). By default (`[gpu] devices = "auto"`) every engine and the bundled LLM get `CUDA_VISIBLE_DEVICES=<that index>`, so they all stay on the same GPU (this prevents, for example, MiniMax-H3-Image putting its text encoder on a smaller 2nd GPU and running out of memory). The top bar shows "GPU in use: 0 <name>". To use another GPU, write an index such as `devices = "1"`; to not pin at all, `devices = "all"` (in `[gpu]` of `studio.local.toml`; VRAM accounting still covers one GPU). If you set `CUDA_VISIBLE_DEVICES` in the supervisor's environment or in `[components.<name>.env]`, that wins.
+
 ### Reading the usage meters
 
 - **VRAM**: GPU memory usage (reads nvidia-smi every 2 seconds).
@@ -478,6 +480,7 @@ Engine names are `h3` / `h3image` / `ace` / `aivis`.
 ## Troubleshooting
 
 - **An engine shows "Error"**: open "Log" on that row. The same content is in `logs\<name>.log` (`logs/h3.log`, etc.). If the model or environment is missing, run setup again.
+- **"The Python environment of ... is incomplete (module uvicorn is missing)"**: that engine's virtual environment was only partly installed (its log has `No module named ...`). Stop the studio, then run `.\setup.bat --only <name>` (Linux: `./setup.sh --only <name>`). The name (h3 / h3image / ace, etc.) is in the message.
 - **Port already in use**: another app is using one of 8700 (supervisor), 8701 (bundled LLM), 8611 (video), 8633 (image), 8001 (music) or 10101 (TTS). Stop it, or change the port in `studio.local.toml`.
 - **The "VRAM があふれて…" warning appears**: lower the aspect (size, resolution). Close other GPU apps (video playback in the browser, games, other generation tools).
 - **"Cancel" doesn't stop right away**: cancel **stops after the current step**. For music, the language model (LM) stage and the final decode may not stop mid-way.

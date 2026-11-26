@@ -11,7 +11,7 @@ SAMPLE = "0, NVIDIA GeForce RTX 3090, 1234, 24576, 7\n1, NVIDIA GeForce RTX 3060
 class GpuTest(unittest.TestCase):
     def test_parse_picks_index(self):
         self.assertEqual(parse_smi(SAMPLE, 1)["total_mib"], 12288)
-        self.assertEqual(parse_smi(SAMPLE, 0), {"name": "NVIDIA GeForce RTX 3090", "used_mib": 1234, "total_mib": 24576, "util": 7})
+        self.assertEqual(parse_smi(SAMPLE, 0), {"index": 0, "count": 2, "name": "NVIDIA GeForce RTX 3090", "used_mib": 1234, "total_mib": 24576, "util": 7})
 
     def test_parse_garbage(self):
         self.assertIsNone(parse_smi("No devices were found"))

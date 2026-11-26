@@ -54,6 +54,7 @@ class Settings:
         self.llm = {**LLM_DEFAULTS, **data.get("llm", {})}     # 管理役が持つ LLM(llama-server)の設定
         self.llm_port = int(self.llm["port"])
         self.gpu_mode = parse_gpu_mode(data.get("gpu", {}).get("mode", "auto"))     # GPU に載せるエンジンを 1 つにするか、複数にするか
+        self.gpu_devices = str(data.get("gpu", {}).get("devices", "auto"))   # 2 枚以上の GPU のとき、エンジンを寄せる GPU(auto / all / 番号)
         self.mv = dict(data.get("mv", {}))     # MV・ショート動画の音声処理などの設定。tools_python = Demucs と librosa の入った Python
 
     def component_names(self) -> list[str]:

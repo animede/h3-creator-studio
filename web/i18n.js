@@ -123,6 +123,7 @@ const I18N_EN = {
   "CPU メモリ": "CPU memory",
   "FL2VA: 最初・最後のフレームから動画": "FL2VA: video from first/last frame",
   "GPU なし": "No GPU",
+  "使用 GPU: {index} {name}": "GPU in use: {index} {name}",
   "GPU: エンジン 1 つずつ": "GPU: one engine at a time",
   "GPU: 共有(複数のエンジンを同時に載せる)": "GPU: shared (several engines loaded at once)",
   "GPU: 空き": "GPU: free",

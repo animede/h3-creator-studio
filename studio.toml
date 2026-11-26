@@ -40,6 +40,13 @@ enabled = true
 # GPU を使わない仕事(TTS、MV の音声分離など)は、GPU の使い方によらず CPU で 2 本まで同時に走る。
 [gpu]
 mode = "auto"
+# devices = GPU が 2 枚以上ある PC で、エンジンをどの GPU で動かすか。
+#   "auto" = 管理役が VRAM を数える 1 枚(CUDA_VISIBLE_DEVICES の先頭、無ければ 0 番)に、すべてのエンジンを寄せる
+#            (子に CUDA_VISIBLE_DEVICES=<その番号> を渡す。GPU が 1 枚なら何もしない)
+#   "all"  = 寄せない(エンジンが自分で複数の GPU を使う。VRAM の計算は 1 枚分のまま)
+#   "1" など = その番号の GPU を管理し、エンジンもそこへ寄せる
+# 管理役を起動する環境や [components.<name>.env] に CUDA_VISIBLE_DEVICES を書いたときは、そちらが優先(上書きしない)。
+devices = "auto"
 
 # MV・ショート動画タブの音声処理(Demucs のボーカル分離、シーン分割、読み上げの分割)を動かす Python。
 # 空なら setup --mv が作る components/mvtools/.venv を使う。すでに Demucs と librosa の入った環境があれば、その python を書く。

@@ -97,6 +97,10 @@ function render(s) {
   const gpu = s.gpu;
   if (gpu) setGauge("g-vram", gpu.used_mib, gpu.total_mib, `${gib(gpu.used_mib)} / ${gib(gpu.total_mib)} GiB`);
   else setGauge("g-vram", 0, 0, t("GPU なし"));
+  // GPU が 2 枚以上ある PC: 管理役が数えている(エンジンを寄せている)GPU を小さく出す
+  const multi = !!(gpu && gpu.count > 1);
+  $("g-gpu").hidden = !multi;
+  if (multi) $("g-gpu").textContent = t("使用 GPU: {index} {name}", { index: gpu.index, name: gpu.name });
   $("g-shared").hidden = s.shared_gpu_mib == null;
   if (s.shared_gpu_mib != null) {      // Windows の共有 GPU メモリ。上限はサーバが知っていればそれ(ふつう CPU メモリの半分)、無ければ 4GiB で目安にする
     const total = s.shared_gpu_total_mib || 4096;
