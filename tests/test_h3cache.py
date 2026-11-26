@@ -80,6 +80,26 @@ class PrequantDirTest(unittest.TestCase):
             self.assertEqual(h3cache.cache_status(d, {}), {"base": True, "ref": True, "dir": pq})
 
 
+class SharedTextEncoderTest(unittest.TestCase):
+    """動画のエンジンが作った 32B のテキストエンコーダ(画像のエンジンと同じもの。setup が画像のエンジンにも使わせる)。"""
+
+    def test_found_only_when_finished_and_follows_the_engine_env(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "minimax-h3"
+            self.assertEqual(h3cache.te_prequant_dir(d, {}), d / "models" / "prequant")
+            self.assertEqual(h3cache.te_prequant_dir(d, {"H3_TE_PREQUANT_DIR": "/big/pq", "H3_TRANSFORMER_PREQUANT_DIR": "/t"}),
+                             Path("/big/pq"))              # テキストエンコーダは H3_TE_PREQUANT_DIR だけを見る(エンジンと同じ)
+            self.assertIsNone(h3cache.shared_te(d, {}))
+            touch(d / "models" / "prequant" / "te_bnb-4bit_prune1.tmp" / "config.json")       # 作りかけ
+            touch(d / "models" / "prequant" / "te_proj_Qwen--Qwen3-VL-4B-Instruct_bnb-4bit" / "config.json")   # 8〜16GB の級の代わりのエンコーダ
+            self.assertIsNone(h3cache.shared_te(d, {}))
+            touch(d / "models" / "prequant" / "te_bnb-4bit_prune1" / "config.json")
+            self.assertEqual(h3cache.shared_te(d, {}), d / "models" / "prequant" / "te_bnb-4bit_prune1")
+            other = Path(t) / "pq"
+            touch(other / "te_bnb-4bit_prune1" / "config.json")
+            self.assertEqual(h3cache.shared_te(d, {"H3_TE_PREQUANT_DIR": str(other)}), other / "te_bnb-4bit_prune1")
+
+
 class NeededRuleTest(unittest.TestCase):
     """要るのは、エンジンが重みをキャッシュのファイルから流す構成(file)で、参照モードを group の経路で読むとき。"""
 

@@ -32,9 +32,9 @@ They remain under the Apache License, Version 2.0; each file carries
                exists; instrumental detection (has_vocals).
 
 Demucs, PyTorch, librosa and the other packages these scripts use are not
-included in this repository. `setup --mv` installs them into
+included in this repository. setup installs them by default into
 components/mvtools/.venv from PyPI and download.pytorch.org under their own
-licenses.
+licenses (`--no-mv` skips them; `--only mvtools` installs only them).
 
 ----------------------------------------------------------------------
 studio/mvscript.py, studio/mvclip.py
@@ -101,3 +101,63 @@ remains under the Apache License, Version 2.0; it carries
                ledger prompt or a neutral text. The song listening (listen_song) and
                the song-concept proposal (propose_concept) in the same file are
                new code for this studio.
+
+----------------------------------------------------------------------
+Third-party components
+----------------------------------------------------------------------
+None of the following is bundled in this repository. setup clones or
+downloads them (or the studio fetches them on first use) into the studio
+folder, each under its own license, which governs its use. License names
+are as stated by each project at the time of writing; check the linked
+project for the current text.
+
+Engines (cloned by setup into components/, or downloaded as a release build)
+  Diffusers_minimax-h3 (MiniMax-H3 engine)           Apache-2.0
+      https://github.com/animede/Diffusers_minimax-h3
+  minimax-h3-image-server (MiniMax-H3-Image engine)   MIT
+      https://github.com/animede/minimax-h3-image-server
+  ACE-Step-1.5-fast (ACE-Step engine; fork of ACE-Step)   MIT
+      https://github.com/animede/ACE-Step-1.5-fast
+      https://github.com/ace-step/ACE-Step
+  AivisSpeech-Engine (text-to-speech; release build,
+      run as a separate process over HTTP)            LGPL-3.0
+      https://github.com/Aivis-Project/AivisSpeech-Engine
+      Voice models (aivm) follow their own authors' terms.
+  llama.cpp (llama-server binary for the bundled LLM) MIT
+      https://github.com/ggml-org/llama.cpp
+
+Model weights (downloaded by the engines or by setup)
+  MiniMax-H3, MiniMax-H3-Image (MiniMax)              MiniMax Community License
+      https://huggingface.co/MiniMaxAI
+      (as stated in the engines' READMEs; see the model cards)
+  Qwen3-VL (text encoder used by MiniMax-H3 and
+      MiniMax-H3-Image, quantized by the engines)     Qwen license (see model card)
+  ACE-Step 1.5 models (ACE Studio / StepFun)          MIT (per the ACE-Step repository)
+  Gemma 4 E4B GGUF (ggml-org/gemma-4-E4B-it-GGUF),
+      the bundled LLM, fetched by `setup --llm` or
+      on first use into components/llm                 Gemma Terms of Use
+      https://ai.google.dev/gemma/terms  (including its Prohibited Use Policy;
+      downloading and using the model means accepting them)
+  htdemucs weights (Demucs, Meta)                      MIT (Demucs repository)
+
+Music Video audio tools (components/mvtools/.venv, installed by setup)
+  Demucs                                              MIT
+  librosa                                             ISC
+  PyTorch / torchaudio (CPU build)                    BSD-3-Clause
+  soundfile                                           BSD-3-Clause
+
+External tool (expected on PATH, not installed by setup)
+  ffmpeg                                              LGPL-2.1+ / GPL-2.0+ (depends on the build)
+      https://ffmpeg.org/
+
+Python packages of the supervisor (.venv, from requirements.txt)
+  fastapi               MIT
+  uvicorn               BSD-3-Clause
+  httpx                 BSD-3-Clause
+  psutil                BSD-3-Clause
+  Pillow                MIT-CMU
+  python-multipart      Apache-2.0
+  huggingface_hub       Apache-2.0
+  py7zr                 LGPL-2.1-or-later
+  multivolumefile       LGPL-2.1-or-later
+  tomli (Python < 3.11 only)   MIT

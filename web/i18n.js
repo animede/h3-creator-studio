@@ -49,8 +49,10 @@ function setLang(lang) {
 const langHeaders = (h) => Object.assign({ "Accept-Language": LANG }, h || {});
 
 const I18N_EN = {
-  "このステップ数は初回だけ本体のキャッシュを作ります(62GB のダウンロード、1 時間以上)。setup.bat --only h3image で先に作っておけます":
-    "This step count builds the main-model cache on its first run only (a 62GB download, over an hour). You can build it ahead with setup.bat --only h3image",
+  "このステップ数は初回だけ本体のキャッシュを作ります(62GB のダウンロード、1 時間以上)。setup.bat --only h3image(Linux は ./setup.sh --only h3image)で先に作っておけます":
+    "This step count builds the main-model cache on its first run only (a 62GB download, over an hour). You can build it ahead with setup.bat --only h3image (on Linux: ./setup.sh --only h3image)",
+  "画像のエンジンのモデルの準備が終わっていません(テキストエンコーダがありません)。スタジオを止めてから setup.bat --only h3image(Linux は ./setup.sh --only h3image)を最後まで実行してください(約 67GB の取得があります)":
+    "The image engine has not finished preparing its models (the text encoder is missing). Stop the studio, then run setup.bat --only h3image (on Linux: ./setup.sh --only h3image) to the end (it downloads about 67GB)",
   "  (VRAM 不足)": "  (not enough VRAM)",
   "  (未読込。選ぶと読み込みます)": "  (not loaded; loads when selected)",
   "  ✓読込済": "  ✓ loaded",
@@ -383,6 +385,7 @@ const I18N_EN = {
   "モデルとエンジンは、それぞれのライセンスに従います(README のクレジット)": "Models and engines are subject to their own licenses (see README credits)",
   "モノクロ": "Monochrome",
   "ライセンス: {license}": "License: {license}",
+  "CC0 (このサンプルの動画・画像・曲は自由に使ってよい)": "CC0 (the video, images and song of this sample are free to use)",      // samples/*/sample.json の license の値
   "ラフ確認用(2 ステップ)": "Quick draft (2 steps)",
   "ランダム": "Random",
   "リング": "Ring",

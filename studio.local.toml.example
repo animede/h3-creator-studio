@@ -48,6 +48,6 @@
 
 # MV・ショート動画タブの音声処理と、セリフのテロップ
 # [mv]
-# tools_python = ""          # 空なら setup --mv が作る components/mvtools/.venv の Python
+# tools_python = ""          # 空なら setup が既定で作る components/mvtools/.venv の Python(--no-mv で飛ばした人は、MV タブの「道具を入れる」か setup --only mvtools)
 # device = ""                # ボーカルの分離(Demucs)の装置。空なら CPU("cuda" で GPU)
 # subtitle_font = ""         # テロップの字体。空なら Noto Sans CJK JP(Windows は "Meiryo" など)

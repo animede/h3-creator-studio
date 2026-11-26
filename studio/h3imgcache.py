@@ -11,6 +11,7 @@ setup(scripts/setup.py)は prepare_models.py --build-cache で先に作り、管
 知らせない側に倒す)。判定はエンジンの実装を写したもの(エンジン側が変わったら合わせる)。
 """
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -25,6 +26,14 @@ DEFAULT_STEPS = 3                                                               
 # 作りかけはこの名前のフォルダにならない
 MARKERS = ("transformer_adaln_table.safetensors", "transformer_int8wo_adaln_table.pt")
 CACHE_GB = {"ck-w4a8": 11, "int8wo": 19}                                         # ディスク上の大きさの目安(1 ステップ数あたり)
+
+
+# エンジンの量子化済みテキストエンコーダ(models/te、約 17GB)。prepare_models.py が 66.7GB を取得して作る。無いまま生成すると、エンジンは
+# 「text_encoder キャッシュが見つかりません: <場所>(H3IMG_TE_DIR)」で失敗する(app/engine.py _load_te。2026-11-26、Windows の実機)
+TE_MISSING = "text_encoder キャッシュが見つかりません"
+TE_MISSING_MESSAGE = ("画像のエンジン(MiniMax-H3-Image)のモデルの準備が終わっていません(テキストエンコーダがありません)。"
+                      "スタジオを止めてから setup.bat --only h3image(Linux は ./setup.sh --only h3image)を最後まで実行してください"
+                      "(テキストエンコーダの準備で約 67GB を取得します)")
 
 
 def _is_win(plat: str = None) -> bool:
@@ -45,6 +54,26 @@ def default_steps(env: dict = None) -> int:
     except ValueError:
         return DEFAULT_STEPS
     return v if v in STEP_TAGS else DEFAULT_STEPS
+
+
+def te_dir(img_dir, env: dict = None) -> Path:
+    """量子化済みテキストエンコーダの置き場所。エンジンと同じく H3IMG_TE_DIR → H3IMG_MODELS_DIR/te → <エンジン>/models/te。"""
+    env = os.environ if env is None else env
+    value = str(env.get("H3IMG_TE_DIR") or "").strip()
+    if value:
+        return Path(img_dir) / value       # 絶対パスならそのまま
+    models = str(env.get("H3IMG_MODELS_DIR") or "").strip()
+    return (Path(img_dir) / models if models else Path(img_dir) / "models") / "te"
+
+
+def te_ready(img_dir, env: dict = None) -> bool:
+    """テキストエンコーダがあるか(エンジンと同じく config.json で見る)。"""
+    return (te_dir(img_dir, env) / "config.json").is_file()
+
+
+def friendly_error(text) -> str:
+    """エンジンの失敗の文が「テキストエンコーダが無い」なら、setup を最後まで実行する案内に置き換える。それ以外は空。"""
+    return TE_MISSING_MESSAGE if TE_MISSING in str(text or "") else ""
 
 
 def cache_dir(img_dir, env: dict = None) -> Path:
@@ -95,9 +124,16 @@ def prepare_argv(steps, plat: str = None) -> list:
     return [py, script, "--build-cache"] + [str(s) for s in (steps if isinstance(steps, (list, tuple)) else [steps])]
 
 
-def prepare_command(img_dir, steps, plat: str = None) -> str:
-    """画面・setup に出す 1 行(Windows は PowerShell 向けに cd; で続ける)。"""
+PREPARE_ENV_KEYS = ("H3IMG_MODELS_DIR", "H3IMG_TE_DIR", "H3IMG_CACHE_DIR")     # 置き場所を変える環境変数(手で流すときも同じ場所に作る)
+
+
+def prepare_command(img_dir, steps, plat: str = None, env: dict = None) -> str:
+    """画面・setup に出す 1 行(Windows は PowerShell 向けに cd; で続ける)。env に置き場所の環境変数(H3IMG_TE_DIR など)があれば前置する
+    (無いと、動画のエンジンのテキストエンコーダを使う設定で 67GB の取得が始まる)。"""
     argv = " ".join(prepare_argv(steps, plat))
+    extra = {k: str(env.get(k)).strip() for k in PREPARE_ENV_KEYS if env and str(env.get(k) or "").strip()}
     if _is_win(plat):
-        return f"cd \"{img_dir}\"; .\\{argv}"
-    return f"cd '{img_dir}' && {argv}"
+        env_part = "".join("$env:%s='%s'; " % (k, v.replace("'", "''")) for k, v in extra.items())
+        return f"cd \"{img_dir}\"; {env_part}.\\{argv}"
+    env_part = "".join(f"{k}={shlex.quote(v)} " for k, v in extra.items())
+    return f"cd '{img_dir}' && {env_part}{argv}"

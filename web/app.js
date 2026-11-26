@@ -8,6 +8,9 @@ let partsCollapsed = false;       // エンジンパネルの折りたたみ(利
 let partsTouched = false;
 let lastStatus = null;
 let doneCounter = null;           // 終わったジョブの数。変わったら、自分が追っていないジョブ(API や別のブラウザ)も含めて一覧を読み直す
+let actError = null;              // 画面の操作(起動・停止・準備・LLM の停止)が POST の段階で断られたときの失敗 {error, at, opId}。/api/status の operation に
+                                  // 新しい操作(別の id)が出るか ACT_ERROR_MS 経つまで、operation の行より優先して出す(2 秒おきの描き直しで消えないように)
+const ACT_ERROR_MS = 10000;
 
 const $ = (id) => document.getElementById(id);
 const gib = (mib) => (mib / 1024).toFixed(1);
@@ -55,8 +58,15 @@ function buildRow(name, c) {
   rows[name] = parts;
 }
 
+// POST が断られた(409 など)か通信に失敗した: 操作(operation)は作られていないので、いまの operation の id を覚えて、それが変わるまで失敗を出し続ける
+function failAct(e) {
+  const op = lastStatus ? lastStatus.operation : null;
+  actError = { error: String(e.message || e), at: Date.now(), opId: op ? op.id : null };
+  showOp(op);
+}
+
 async function act(name, action) {
-  try { await post(`/api/components/${name}/${action}`); } catch (e) { showOp({ steps: [], error: String(e.message || e) }); }
+  try { await post(`/api/components/${name}/${action}`); } catch (e) { failAct(e); }
   poll();
 }
 
@@ -69,6 +79,8 @@ async function refreshLog(name) {
 }
 
 function showOp(op) {
+  if (actError && (Date.now() - actError.at > ACT_ERROR_MS || (op ? op.id : null) !== actError.opId)) actError = null;   // 新しい操作が始まったか、時間が経った
+  if (actError) op = { steps: [], error: actError.error };      // 画面の操作の失敗を、operation の行より優先して出す
   const line = $("opline");
   line.replaceChildren();
   line.classList.toggle("err", !!(op && op.error));
@@ -145,7 +157,7 @@ function renderLlm(l) {
     llmRow.bStop = el("button", "", LANG === "en" ? "Stop" : "停止");      // i18n-skip エンジンの行と同じ(状態の「停止」と鍵を分ける)
     llmRow.bStop.title = t("止めても、次に LLM を使うときに自動で起動し直します");
     llmRow.bStop.onclick = async () => {
-      try { await post("/api/llm/stop"); } catch (e) { showOp({ steps: [], error: String(e.message || e) }); }
+      try { await post("/api/llm/stop"); } catch (e) { failAct(e); }
       poll();
     };
     llmRow.btns.append(llmRow.bStop);

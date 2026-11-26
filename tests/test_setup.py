@@ -328,7 +328,12 @@ class StatusTest(unittest.TestCase):
             touch(d / ".venv" / "bin" / "python")
             self.assertEqual(S.component_status("h3image", d), (True, False))
             touch(d / "models" / "te" / "model.safetensors")
+            self.assertEqual(S.component_status("h3image", d), (True, False))        # config.json が無い = 作りかけ(エンジンも読まない)
+            touch(d / "models" / "te" / "config.json")
             self.assertEqual(S.component_status("h3image", d), (True, True))
+            shared = d / "shared_te"
+            touch(shared / "config.json")
+            self.assertEqual(S.component_status("h3image", d / "other", env={"H3IMG_TE_DIR": str(shared)}), (False, True))   # 設定の場所を見る
             self.assertEqual(S.component_status("ace", d), (False, False))
             touch(d / "run_api_server_fast.sh")
             touch(d / "checkpoints" / "acestep-v15-turbo" / "c")
@@ -778,3 +783,117 @@ class SetupBatTest(unittest.TestCase):
         utf8 = next(i for i in range(run, len(lines)) if lines[i] == b"chcp 65001 >nul")
         self.assertTrue(all(not line.strip() or line.startswith(b"rem ") for line in lines[back + 1:run]))
         self.assertTrue(all(line.isascii() for line in lines[back:utf8 + 1]))   # 元のコードページで読む行は ASCII だけ
+
+
+class SharedTextEncoderTest(unittest.TestCase):
+    """画像のエンジンのテキストエンコーダ: 動画のエンジンが作った量子化済みを使う(share_h3_te)、既存の画像のエンジンの確認(plan_existing_h3image)。"""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = Path(self._t.name)
+        self.toml = self.root / "studio.local.toml"
+        self.h3 = self.root / "minimax-h3"
+        self.img = self.root / "minimax-h3-image-server"
+        self.img.mkdir()
+        self.shared = self.h3 / "models" / "prequant" / "te_bnb-4bit_prune1"
+        self.cfg = Settings({}, self.root)
+        self.lines = []
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        for k in [k for k in os.environ if k.startswith(("H3_", "H3IMG_"))]:
+            del os.environ[k]
+        for target, new in (("say", self.lines.append), ("ask_yes", mock.Mock(return_value=True))):
+            p = mock.patch.object(S, target, new)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_write_local_env(self):
+        self.toml.write_text("[components.h3image]\ndir = 'C:\\e'\n[gpu]\nmode = 'auto'\n", encoding="utf-8")
+        self.assertTrue(S.write_local_env(self.toml, "h3image", "H3IMG_TE_DIR", "C:\\a\\te"))
+        self.assertTrue(S.write_local_env(self.toml, "h3image", "H3IMG_STEPS", "6"))
+        self.assertTrue(S.write_local_env(self.toml, "h3image", "H3IMG_TE_DIR", "C:\\b\\te"))      # 同じキーは置き換える
+        import tomllib
+        cfg = tomllib.loads(self.toml.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["components"]["h3image"], {"dir": "C:\\e", "env": {"H3IMG_TE_DIR": "C:\\b\\te", "H3IMG_STEPS": "6"}})
+        self.assertEqual(cfg["gpu"], {"mode": "auto"})
+        inline = self.root / "inline.toml"
+        inline.write_text("[components.h3image]\nenv = { H3IMG_STEPS = '6' }\n", encoding="utf-8")
+        self.assertFalse(S.write_local_env(inline, "h3image", "H3IMG_TE_DIR", "x"))              # 書くと TOML の重複になる
+        self.assertEqual(inline.read_text(encoding="utf-8"), "[components.h3image]\nenv = { H3IMG_STEPS = '6' }\n")
+
+    def test_quotes_in_paths(self):
+        self.assertEqual(S.toml_string("C:\\AI\\x"), "'C:\\AI\\x'")
+        self.assertEqual(S.toml_string("C:\\Users\\O'Brien\\x"), '"C:\\\\Users\\\\O\'Brien\\\\x"')
+        import tomllib
+        S.write_local_dir(self.toml, "h3", Path("/home/o'brien/minimax-h3"))
+        self.toml.write_text(self.toml.read_text(encoding="utf-8").replace("[components.h3]", "[components.h3]  # メモ"), encoding="utf-8")
+        S.write_local_dir(self.toml, "h3", Path("/home/o'brien/h3"))                 # 見出しの後ろにコメントがあっても同じ節
+        self.assertTrue(S.write_local_env(self.toml, "h3", "H3_X", "it's"))
+        cfg = tomllib.loads(self.toml.read_text(encoding="utf-8"))
+        self.assertEqual(cfg["components"]["h3"], {"dir": "/home/o'brien/h3", "env": {"H3_X": "it's"}})
+
+    def test_second_run_keeps_passing_the_shared_encoder(self):
+        # 2 回目の setup: 設定に H3IMG_TE_DIR がある → share_h3_te は {} だが、準備には設定の env を重ねて渡す(main と同じ合成)
+        touch(self.shared / "config.json")
+        S.share_h3_te(self.cfg, self.h3, self.img, self.toml)
+        cfg2 = S.load_settings(self.root)
+        self.assertEqual(cfg2.component_env("h3image"), {"H3IMG_TE_DIR": str(self.shared.resolve())})
+        self.assertEqual(S.share_h3_te(cfg2, self.h3, self.img, self.toml), {})
+        merged = {**cfg2.component_env("h3image"), **{}}
+        self.ready_cache()
+        touch(self.img / ".venv" / "bin" / "python")
+        self.assertIsNone(S.plan_existing_h3image(self.img, env=S.h3imgcache.engine_env(cfg2), extra_env=merged))   # 揃っている
+        self.assertEqual(S.component_status("h3image", self.img, env=S.h3imgcache.engine_env(cfg2))[1], True)        # まとめも「あり」
+        self.assertIn("H3IMG_TE_DIR=", S.h3imgcache.prepare_command(self.img, 3, "linux", merged))
+        self.assertIn("$env:H3IMG_TE_DIR='", S.h3imgcache.prepare_command(self.img, 3, "win32", merged))
+
+    def test_configured_but_missing_encoder_is_explained(self):
+        S.write_local_env(self.toml, "h3image", "H3IMG_TE_DIR", "/gone/te")
+        cfg2 = S.load_settings(self.root)
+        self.assertEqual(S.share_h3_te(cfg2, self.h3, self.img, self.toml), {})
+        self.assertIn("H3IMG_TE_DIR(/gone/te)にテキストエンコーダがありません", "\n".join(self.lines))
+
+    def test_share_when_the_video_engine_made_it(self):
+        self.assertEqual(S.share_h3_te(self.cfg, self.h3, self.img, self.toml), {})        # 動画のエンジンが作っていない(8〜16GB の級)
+        self.assertFalse(self.toml.exists())
+        touch(self.shared / "config.json")
+        env = S.share_h3_te(self.cfg, self.h3, self.img, self.toml)
+        self.assertEqual(env, {"H3IMG_TE_DIR": str(self.shared.resolve())})
+        import tomllib
+        self.assertEqual(tomllib.loads(self.toml.read_text(encoding="utf-8"))["components"]["h3image"]["env"], env)
+        self.assertIn("約 67GB の取得と量子化を省きます", "\n".join(self.lines))
+        self.assertEqual(S.share_h3_te(self.cfg, None, self.img, self.toml), {})             # 動画のエンジンが無い
+
+    def test_keep_the_image_engines_own(self):
+        touch(self.shared / "config.json")
+        touch(self.img / "models" / "te" / "config.json")
+        self.assertEqual(S.share_h3_te(self.cfg, self.h3, self.img, self.toml), {})
+        self.assertFalse(self.toml.exists())
+
+    def ready_cache(self):
+        touch(self.img / "models" / "cache" / "ckw4a8_adaln_table_pdmd3" / "transformer_adaln_table.safetensors")
+
+    def test_existing_engine_without_text_encoder_is_prepared(self):
+        # 「既存を使う」と答えたが、モデルの準備がされていなかった(2026-11-26、Windows の実機)
+        self.ready_cache()
+        py = touch(self.img / ".venv" / "bin" / "python")
+        step = S.plan_existing_h3image(self.img, env={}, plat="linux")
+        self.assertEqual(step.argv, [str(py), "scripts/prepare_models.py", "--build-cache", "3"])
+        self.assertIn("テキストエンコーダ(約 17GB。作るときに 66.7GB を取得)がありません", "\n".join(self.lines))
+        S.ask_yes.assert_called_once()
+
+    def test_existing_engine_with_the_shared_text_encoder_needs_nothing(self):
+        self.ready_cache()
+        touch(self.shared / "config.json")
+        self.assertIsNone(S.plan_existing_h3image(self.img, env={}, plat="linux", extra_env={"H3IMG_TE_DIR": str(self.shared)}))
+        self.assertIn("  本体のキャッシュ(ステップ数 3): ✓  テキストエンコーダ: ✓", self.lines)
+        S.ask_yes.assert_not_called()
+
+    def test_the_build_step_gets_the_shared_text_encoder(self):
+        touch(self.shared / "config.json")
+        touch(self.img / ".venv" / "Scripts" / "python.exe")
+        step = S.plan_existing_h3image(self.img, env={}, plat="win32", extra_env={"H3IMG_TE_DIR": str(self.shared)})
+        self.assertEqual(step.env, {"HF_HUB_DISABLE_SYMLINKS": "1", "H3IMG_TE_DIR": str(self.shared)})
+        self.assertNotIn("テキストエンコーダ(約 17GB", "\n".join(self.lines))            # 本体のキャッシュだけが足りない

@@ -50,9 +50,23 @@ function makeDraggable(node, id) {
   node.addEventListener("dragend", () => node.classList.remove("dragging"));
 }
 
+// サムネイル・カード(div。onclick で開く)をキーボードでも扱えるようにする: Tab で止まり、Enter / Space がクリックと同じ。label は読み上げの名前
+// (中の × ボタンは button なので自分で受ける。そこからのキーは拾わない)
+function keyClickable(node, label) {
+  node.tabIndex = 0;
+  node.setAttribute("role", "button");
+  if (label) node.setAttribute("aria-label", label);
+  node.addEventListener("keydown", (e) => {
+    if (e.target !== node || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    node.click();
+  });
+}
+
 function thumbNode(item, onClick, onDelete) {
   const th = el("div", "thumb");
   th.title = (item.kind === "audio" && item.params && item.params.theme) || `${item.filename || ""}${item.width ? `  ${item.width}×${item.height}` : ""}`;
+  keyClickable(th, th.title);
   if (item.thumb_url) {
     const img = el("img");
     img.src = item.thumb_url;

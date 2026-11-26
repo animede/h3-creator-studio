@@ -15,7 +15,7 @@ from typing import Optional
 
 import httpx
 
-from . import procman
+from . import h3imgcache, procman
 from .components import ComponentNotInstalled, all_specs, default_budget_gb
 
 log = logging.getLogger("studio.scheduler")
@@ -35,6 +35,8 @@ def exit_message(label: str, name: str, code, tail: str) -> str:
     if m:
         return (f"{label} の Python 環境が不完全です(モジュール {m.group(1)} がありません)。"
                 f"スタジオを止めてから setup.bat --only {name}(Linux は ./setup.sh --only {name})を実行してください")
+    if name == h3imgcache.COMPONENT and h3imgcache.friendly_error(tail):
+        return h3imgcache.TE_MISSING_MESSAGE        # 起動時に読み込む設定(H3IMG_PRELOAD=1)で、テキストエンコーダが無かった
     return f"{label} が途中で終了しました(終了コード {code})"
 
 

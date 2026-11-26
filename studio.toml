@@ -53,12 +53,13 @@ devices = "auto"
 free_cpu_engines = "auto"
 
 # MV・ショート動画タブの音声処理(Demucs のボーカル分離、シーン分割、読み上げの分割)を動かす Python。
-# 空なら setup --mv が作る components/mvtools/.venv を使う。すでに Demucs と librosa の入った環境があれば、その python を書く。
+# 空なら setup が既定で作る components/mvtools/.venv を使う(--no-mv で飛ばせる。--only mvtools でこれだけ入れる)。すでに Demucs と librosa の入った環境があれば、その python を書く。
 # device = ボーカルの分離(Demucs)を動かす装置。空なら CPU("cuda" で GPU。GPU の仕事と VRAM を取り合うので、空きに余裕があるときだけ)。
 # subtitle_font = ショート動画のセリフのテロップ(字幕)の字体の名前。空なら Noto Sans CJK JP(無ければ libass が同じ文字を持つ字体に置き換える。Windows は Meiryo など)。
 [mv]
 tools_python = ""
 device = ""
+subtitle_font = ""
 
 # 管理役が持つ LLM(プロンプト強化・作詞)。llama.cpp の llama-server で Gemma 4 E4B を動かす。
 # gpu = "auto"(空き VRAM に入る分だけ GPU、残りは CPU)/ "off"(CPU のみ)/ "all" / 層数

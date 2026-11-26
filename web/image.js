@@ -120,8 +120,11 @@ function renderStepsNote() {
   const note = im("steps-note");
   const c = cacheInfo;
   const steps = im("steps").value || (c && String(c.default_steps));
-  note.hidden = !(c && c.installed && steps && c.ready[steps] === false);
-  note.textContent = note.hidden ? "" : t("このステップ数は初回だけ本体のキャッシュを作ります(62GB のダウンロード、1 時間以上)。setup.bat --only h3image で先に作っておけます");
+  const noTe = !!(c && c.installed && c.te_ready === false);    // テキストエンコーダが無い: 生成は失敗するので、こちらを先に出す
+  note.hidden = !(noTe || (c && c.installed && steps && c.ready[steps] === false));
+  note.textContent = note.hidden ? "" : noTe
+    ? t("画像のエンジンのモデルの準備が終わっていません(テキストエンコーダがありません)。スタジオを止めてから setup.bat --only h3image(Linux は ./setup.sh --only h3image)を最後まで実行してください(約 67GB の取得があります)")
+    : t("このステップ数は初回だけ本体のキャッシュを作ります(62GB のダウンロード、1 時間以上)。setup.bat --only h3image(Linux は ./setup.sh --only h3image)で先に作っておけます");
 }
 
 async function refreshCache() {

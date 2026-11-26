@@ -492,6 +492,7 @@ function makeProjectPanel(cfg) {
   function projectNode(p) {
     const card = el("div", "thumb mvcard");
     card.title = `${p.title}\n${p.message || ""}`;
+    keyClickable(card, p.title);      // キーボードでも開ける(web/gallery.js)
     if (p.thumb_url) {
       const img = el("img");
       img.src = p.thumb_url;

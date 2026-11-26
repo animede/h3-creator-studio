@@ -80,6 +80,12 @@ class ExitMessageTest(unittest.TestCase):
         m = exit_message("X", "ace", 1, "ModuleNotFoundError: No module named 'torch.cuda'")
         self.assertIn("モジュール torch.cuda", m)
 
+    def test_image_engine_without_text_encoder(self):
+        from studio import h3imgcache
+        tail = "RuntimeError: text_encoder キャッシュが見つかりません: C:\\e\\models\\te(H3IMG_TE_DIR)\n"
+        self.assertEqual(exit_message("MiniMax-H3-Image(画像)", "h3image", 1, tail), h3imgcache.TE_MISSING_MESSAGE)
+        self.assertEqual(exit_message("X", "ace", 1, tail), "X が途中で終了しました(終了コード 1)")   # 画像のエンジンだけ
+
     def test_other_exit(self):
         self.assertEqual(exit_message("X", "ace", 1, "Traceback\nRuntimeError: boom"), "X が途中で終了しました(終了コード 1)")
 

@@ -508,7 +508,8 @@ fieldset.edbody:disabled { opacity: .55; }
   .topbar { flex-wrap: wrap; gap: 8px 16px; }
   .topright { flex-basis: 100%; }
   .gauges { flex-wrap: wrap; justify-content: flex-start; gap: 6px 16px; }
-  .gauge { min-width: 0; flex: 1 1 160px; }
+  .gauge { min-width: 0; flex: 1 1 100%; }      /* 計は 1 つで 1 行(ラベル・バー・数値は縮まないので、375px で 2 つ並べると画面の外にはみ出る) */
+  .fld > .chk, .chk.fld { white-space: normal; }      /* 長いチェックボックスの文(音楽タブの「キャプション自動…」「Thinking…」)は折り返す */
   .lanes { justify-content: flex-start; }
   .tabs { flex-wrap: wrap; }
   .tab { padding: 6px 14px; }

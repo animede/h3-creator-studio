@@ -487,7 +487,7 @@ class JobRunner:
                 and not (tts is not None and getattr(tts, "in_use", lambda: False)()) and not self._tts_job_running()):
             targets.append("aivis")
         if llm is not None and getattr(llm, "idle_stoppable", lambda: False)():
-            targets.append("llm")
+            targets.insert(0, "llm")      # LLM を先に(読み上げの停止を待つ間に chat が入ると、使用中の LLM を止めてしまう)
         if not targets:
             return []
         job.message = MSG_FREE_CPU
@@ -501,8 +501,10 @@ class JobRunner:
                         await sched.stop("aivis", op)
                     finally:
                         op.done = True
-                elif await llm.stop():
-                    pass
+                elif not llm.idle_stoppable():      # 確かめてから止めるまでの間に chat が始まっていたら、止めない
+                    continue
+                else:
+                    await llm.stop()
                 stopped.append(name)
             except Exception:  # noqa: BLE001  止められなくても、仕事は続ける
                 log.exception("待機中の %s を止められません", name)

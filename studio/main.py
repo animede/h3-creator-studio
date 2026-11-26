@@ -489,15 +489,17 @@ def _ref_cache_view() -> dict:
 def api_image_cache():
     """MiniMax-H3-Image の本体のキャッシュが、どのステップ数にあるか(studio/h3imgcache.py)。画像タブは、選んだステップ数(サーバ既定なら
     default_steps)に無ければ、欄の下に案内を出す。量子化はエンジンが起動時に決めるので、auto ならどちらかの量子化のがあれば ready。
-    エンジンのフォルダが無ければ installed=false(案内は出さない)。"""
+    エンジンのフォルダが無ければ installed=false(案内は出さない)。te_ready はテキストエンコーダがあるか(無ければ、setup を最後まで
+    実行する案内を先に出す。無いまま生成すると失敗する)。"""
     d = settings.component_dir(h3imgcache.COMPONENT)
     if not d.is_dir():
-        return {"installed": False, "default_steps": h3imgcache.DEFAULT_STEPS, "ready": {}, "quant": None, "command": None}
-    st = h3imgcache.status(d, h3imgcache.engine_env())
+        return {"installed": False, "default_steps": h3imgcache.DEFAULT_STEPS, "ready": {}, "quant": None, "command": None, "te_ready": None}
+    env = h3imgcache.engine_env()
+    st = h3imgcache.status(d, env)
     missing = [s for s, ok in st["ready"].items() if not ok]
-    return {"installed": True, "default_steps": st["default_steps"], "quant": st["quant"],
+    return {"installed": True, "default_steps": st["default_steps"], "quant": st["quant"], "te_ready": h3imgcache.te_ready(d, env),
             "ready": {str(k): v for k, v in st["ready"].items()},
-            "command": h3imgcache.prepare_command(d, missing) if missing else None}
+            "command": h3imgcache.prepare_command(d, missing, env=env) if missing else None}
 
 
 @app.post("/api/mv/tools/install")

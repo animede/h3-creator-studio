@@ -72,7 +72,7 @@ function wireSamples({ tab, box, apply }) {
       v.src = s.video_url;
       c.append(v);
     }
-    if (s.license) c.append(el("div", "note", t("ライセンス: {license}", { license: s.license })));
+    if (s.license) c.append(el("div", "note", t("ライセンス: {license}", { license: t(s.license) })));      // 値(sample.json の日本語)も題・説明と同じく訳す
     return c;
   }
 

@@ -57,6 +57,12 @@ class CacheStatusTest(unittest.TestCase):
         self.assertEqual(C.prepare_argv([2, 6], "win32"), [".venv\\Scripts\\python.exe", "scripts\\prepare_models.py", "--build-cache", "2", "6"])
         self.assertEqual(C.prepare_command(Path("C:/e"), 3, "win32"),
                          'cd "C:/e"; .\\.venv\\Scripts\\python.exe scripts\\prepare_models.py --build-cache 3')
+        env = {"H3IMG_TE_DIR": "C:/AI/minimax-h3/models/prequant/te_bnb-4bit_prune1", "H3IMG_STEPS": "6", "PATH": "x"}
+        self.assertEqual(C.prepare_command(Path("C:/e"), 3, "win32", env),
+                         'cd "C:/e"; $env:H3IMG_TE_DIR=\'C:/AI/minimax-h3/models/prequant/te_bnb-4bit_prune1\'; '
+                         '.\\.venv\\Scripts\\python.exe scripts\\prepare_models.py --build-cache 3')
+        self.assertEqual(C.prepare_command(Path("/e"), 3, "linux", {"H3IMG_TE_DIR": "/a b/te"}),
+                         "cd '/e' && H3IMG_TE_DIR='/a b/te' .venv/bin/python scripts/prepare_models.py --build-cache 3")
 
     def test_endpoint(self):
         with mock.patch.object(main.settings, "component_dir", return_value=self.d):
@@ -67,6 +73,9 @@ class CacheStatusTest(unittest.TestCase):
                 js = main.api_image_cache()
         self.assertEqual((js["installed"], js["default_steps"], js["ready"]), (True, 3, {"6": False, "3": True, "2": False}))
         self.assertIn("--build-cache 6 2", js["command"])
+        with mock.patch.object(main.settings, "component_dir", return_value=self.d), \
+             mock.patch.object(C, "engine_env", return_value={"H3IMG_TE_DIR": "/shared/te"}):
+            self.assertIn("H3IMG_TE_DIR=/shared/te ", main.api_image_cache()["command"])      # 画面のコマンドも同じ場所に作る
 
 
 class BuildingProgressTest(unittest.IsolatedAsyncioTestCase):
@@ -93,6 +102,58 @@ class BuildingProgressTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(h3image.config.settings, "component_dir", return_value=Path("/nonexistent/h3img")):
             self.assertTrue(h3image._cache_ready(3))
 
+
+
+class TextEncoderTest(unittest.IsolatedAsyncioTestCase):
+    """量子化済みテキストエンコーダ(models/te)の有無と、無いまま生成したときの案内(2026-11-26、Windows の実機)。"""
+    ENGINE_ERROR = "RuntimeError: text_encoder キャッシュが見つかりません: C:\\e\\models\\te(H3IMG_TE_DIR)"
+
+    def setUp(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        self.d = Path(t.name) / "minimax-h3-image-server"
+
+    def test_dir_ready_and_message(self):
+        self.assertEqual(C.te_dir(self.d, {}), self.d / "models" / "te")
+        self.assertEqual(C.te_dir(self.d, {"H3IMG_MODELS_DIR": "m"}), self.d / "m" / "te")
+        self.assertEqual(C.te_dir(self.d, {"H3IMG_TE_DIR": "/x/te"}), Path("/x/te"))
+        self.assertFalse(C.te_ready(self.d, {}))
+        touch(self.d / "models" / "te" / "config.json")
+        self.assertTrue(C.te_ready(self.d, {}))
+        self.assertEqual(C.friendly_error(self.ENGINE_ERROR), C.TE_MISSING_MESSAGE)
+        self.assertEqual((C.friendly_error("CUDA out of memory"), C.friendly_error(None)), ("", ""))
+        self.assertIn("setup.bat --only h3image", C.TE_MISSING_MESSAGE)
+        self.assertIn("the text encoder is missing", tr(C.TE_MISSING_MESSAGE, "en"))
+
+    def test_endpoint_reports_the_text_encoder(self):
+        self.d.mkdir(parents=True)
+        with mock.patch.object(main.settings, "component_dir", return_value=self.d), mock.patch.object(C, "engine_env", return_value={}):
+            self.assertIs(main.api_image_cache()["te_ready"], False)
+            touch(self.d / "models" / "te" / "config.json")
+            self.assertIs(main.api_image_cache()["te_ready"], True)
+
+    async def test_job_failure_becomes_the_setup_hint(self):
+        def handler(req):
+            return httpx.Response(200, json={"status": "failed", "error": self.ENGINE_ERROR})
+        job = types.SimpleNamespace(cancel_requested=False, remote_id="r", progress=0.0, message="")
+        async with httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler)) as c:
+            with self.assertRaises(h3image.JobFailed) as cm:
+                await h3image._poll(job, c)
+        self.assertEqual(cm.exception.message, C.TE_MISSING_MESSAGE)
+
+    async def test_other_failures_keep_the_engine_text(self):
+        def handler(req):
+            return httpx.Response(200, json={"status": "failed", "error": "CUDA out of memory"})
+        job = types.SimpleNamespace(cancel_requested=False, remote_id="r", progress=0.0, message="")
+        async with httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler)) as c:
+            with self.assertRaises(h3image.JobFailed) as cm:
+                await h3image._poll(job, c)
+        self.assertEqual(cm.exception.message, "CUDA out of memory")
+
+    def test_web_note(self):
+        js = (Path(__file__).resolve().parent.parent / "web" / "image.js").read_text("utf-8")
+        self.assertIn("c.te_ready === false", js)
+        self.assertIn("テキストエンコーダがありません", js)
 
 if __name__ == "__main__":
     unittest.main()

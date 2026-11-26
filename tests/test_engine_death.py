@@ -266,6 +266,14 @@ class FreeCpuTest(RunnerBase):
         job = await self.run_with(sched, 16 * 1024 ** 3, tts=tts, llm=llm)
         self.assertEqual((job.status, sched.stops, llm.stopped), ("completed", ["aivis"], 1))
 
+    async def test_llm_that_became_busy_is_not_stopped(self):
+        # 確かめてから止めるまでの間(読み上げの停止を待つ間)に chat が始まった: LLM は止めない(aivis は止める)
+        sched, llm = self.sched_with_aivis(), self.fake_llm()
+        answers = iter([True, False])
+        llm.idle_stoppable = lambda: next(answers, False)
+        job = await self.run_with(sched, 16 * 1024 ** 3, llm=llm)
+        self.assertEqual((job.status, sched.stops, llm.stopped), ("completed", ["aivis"], 0))
+
     async def test_busy_or_external_helpers_are_kept(self):
         llm = self.fake_llm(idle=False)
         for sched, tts in ((self.sched_with_aivis(), types.SimpleNamespace(in_use=lambda: True)),

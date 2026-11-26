@@ -120,7 +120,8 @@ async def run(job: Job, ctx: Ctx) -> None:
                 body["conditions"] = conditions
             r = await c.post("/api/jobs", json=body)
             if r.status_code != 202:
-                raise JobFailed(f"H3-Image がジョブを受け付けませんでした: {_error_text(r)}")
+                error = _error_text(r)
+                raise JobFailed(h3imgcache.friendly_error(error) or f"H3-Image がジョブを受け付けませんでした: {error}")
             job.remote_id = r.json()["id"]
             info = await _poll(job, c, building=not _cache_ready(p.get("steps")))
 
@@ -171,7 +172,8 @@ async def _poll(job: Job, c: httpx.AsyncClient, building: bool = False) -> dict:
         if status == "completed" and info.get("image_url"):
             return info
         if status == "failed":
-            raise JobFailed(info.get("error") or "H3-Image が失敗を報告しました")
+            error = info.get("error") or "H3-Image が失敗を報告しました"
+            raise JobFailed(h3imgcache.friendly_error(error) or error)      # テキストエンコーダが無い: setup を最後まで、と案内する
         if status == "interrupted":
             raise JobCancelled()
         if status == "running":

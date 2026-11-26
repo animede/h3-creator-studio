@@ -49,6 +49,28 @@ def prequant_dir(h3_dir, env: dict = None) -> Path:
     return Path(h3_dir) / "models" / "prequant"
 
 
+# 32B のテキストエンコーダの量子化済み(Qwen3-VL-32B を 51 層にして nf4 にしたもの)。MiniMax-H3 は 32gb / 48gb 級(H3_TE_PRUNE=1。
+# およそ VRAM 20〜48GB のカード、またはスタジオの共有モード)で動いたときに、ここへ保存する(core/runner.py _te_prequant_dir)。
+# 80gb / 96gb 級は層を減らさない別の名前(te_bnb-4bit_prune0)で保存し、prepare_lowvram.py は作らない(8〜16GB の級は小さい代わりの
+# エンコーダ(4B + 投影)を使う)。画像のエンジン(MiniMax-H3-Image)のテキストエンコーダと同じもので、setup はあれば画像のエンジンにも
+# 使わせる(66.7GB の取得と量子化を省く)
+SHARED_TE_NAME = "te_bnb-4bit_prune1"
+
+
+def te_prequant_dir(h3_dir, env: dict = None) -> Path:
+    """テキストエンコーダの量子化済みの置き場所。エンジンと同じく H3_TE_PREQUANT_DIR → <エンジン>/models/prequant。"""
+    env = os.environ if env is None else env
+    value = str(env.get("H3_TE_PREQUANT_DIR") or "").strip()
+    return Path(h3_dir) / value if value else Path(h3_dir) / "models" / "prequant"
+
+
+def shared_te(h3_dir, env: dict = None) -> Optional[Path]:
+    """動画のエンジンが作った 32B のテキストエンコーダ(できあがったもの。保存は一時フォルダからの名前の変更なので、config.json が
+    あれば揃っている)。無ければ None。"""
+    d = te_prequant_dir(h3_dir, env) / SHARED_TE_NAME
+    return d if (d / "config.json").is_file() else None
+
+
 def cache_ready(d) -> bool:
     """キャッシュのフォルダができあがっているか。prepare_lowvram.py もエンジンも <名前>.tmp に作ってから名前を変えるので、作りかけは
     この名前にならない。エンジンの読み込みは config.json と meta.json の両方を要る(meta.json が無いと bf16 から作り直そうとする)。"""

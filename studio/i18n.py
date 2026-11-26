@@ -139,6 +139,8 @@ EN = {
     "{} の Python 環境が不完全です(モジュール {} がありません)。スタジオを止めてから setup.bat --only {}(Linux は ./setup.sh --only {})を実行してください":
         "The Python environment of {0} is incomplete (module {1} is missing). Stop the studio, then run setup.bat --only {2} (Linux: ./setup.sh --only {3})",
     "{} が {} 秒以内に準備できませんでした": "{0} did not become ready within {1} seconds",
+    "画像のエンジン(MiniMax-H3-Image)のモデルの準備が終わっていません(テキストエンコーダがありません)。スタジオを止めてから setup.bat --only h3image(Linux は ./setup.sh --only h3image)を最後まで実行してください(テキストエンコーダの準備で約 67GB を取得します)":
+        "The image engine (MiniMax-H3-Image) has not finished preparing its models (the text encoder is missing). Stop the studio, then run setup.bat --only h3image (Linux: ./setup.sh --only h3image) to the end (preparing the text encoder downloads about 67GB)",
     "別のエンジン": "another engine",
 
     # ---- 管理役の API(main.py) ----

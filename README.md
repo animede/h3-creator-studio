@@ -4,12 +4,12 @@
 
 (リポジトリ名は `h3-creator-studio` のまま)
 
-**最新版: 2026-11-26 JST** — ショート動画タブで、落とした画像の役割の既定を **景色・物** に(人物は選び直す)。人物の画像が無いセリフは、口を合わせずに **画面の外の声(ナレーション)** として景色に載せる。画像タブの edit で作った画像の指示(「周囲を広げる」など)を人物の説明に使わない。エンジンが途中で終了していたら(RAM 不足など)、その旨とログの末尾を出し、1 回だけ起動し直してやり直す。RAM 32GiB 未満の PC では、GPU の仕事の前に待機中の読み上げと同梱 LLM を止めて RAM を空ける。エンジンの欄に同梱 LLM の行(状態・RAM・停止)。それより前(同じ日): setup が MiniMax-H3-Image の本体のキャッシュも作る、画像タブの edit に **アングル**、全タブに **画風** など。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+**最新版: 2026-11-26 JST** — Windows 10 の PowerShell で setup の質問が文字化けしていたのを修正。画像のエンジンのモデルの準備(テキストエンコーダ)が終わっていないとき、生成の失敗と画像タブに「setup を最後まで実行」と案内する。setup は、動画のエンジンが 32B のテキストエンコーダを持っていれば画像のエンジンにも使う(動画のエンジンが 32gb / 48gb 級、つまり およそ VRAM 20〜48GB のカードか、スタジオの共有モードで動いたときに作られる。約 67GB の取得を省く)。ショート動画タブで、落とした画像の役割の既定を **景色・物** に(人物は選び直す)。人物の画像が無いセリフは、口を合わせずに **画面の外の声(ナレーション)** として景色に載せる。画像タブの edit で作った画像の指示(「周囲を広げる」など)を人物の説明に使わない。エンジンが途中で終了していたら(RAM 不足など)、その旨とログの末尾を出し、1 回だけ起動し直してやり直す。RAM 32GiB 未満の PC では、GPU の仕事の前に待機中の読み上げと同梱 LLM を止めて RAM を空ける。エンジンの欄に同梱 LLM の行(状態・RAM・停止)。それより前(同じ日): setup が MiniMax-H3-Image の本体のキャッシュも作る、画像タブの edit に **アングル**、全タブに **画風** など。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 画面の言語は、右上の「使い方」の隣で **日本語 / English** を切り替えられる(選んだ言語はブラウザに覚える。最初はブラウザの言語に合わせる。サーバからの進み具合・エラー・エンジンの状況の文も、選んだ言語で返る。訳の無い文とエンジン自身のログは日本語・原文のまま)。
 
 **ブラウザ 1 枚で、画像・動画(音声つき)・音楽・読み上げ・ミュージックビデオ・物語の動画・編集まで。全部ローカルで、ノードをつなぐ必要はない。**
-mv-V3 や story-studio の考え方を 1 つにまとめた、誰でも使える制作スタジオ。
+作者の以前の制作ツールの考え方を 1 つにまとめた、誰でも使える制作スタジオ。
 
 ## できること
 
@@ -54,20 +54,25 @@ GIF は冒頭 14 秒(クリックで元の動画)。元の動画と、作った�
 | エンジン | モデル | Python 環境 |
 |---|---|---|
 | MiniMax-H3(動画) | 約 60GB(量子化キャッシュ)+ 参照モード(Ref2VA / Vocal Lock)用 約 32GB(`--no-ref` で省ける) | 約 5GB |
-| MiniMax-H3-Image(画像) | 約 25GB + 本体のキャッシュ 約 11GB(使うステップ数ごと。setup は既定の 3 だけ作る。作るときの bf16 の本体 約 62GB はシャード 1 つずつ取得して消すので残らない) | 約 5GB |
+| MiniMax-H3-Image(画像) | 約 25GB(うちテキストエンコーダ 約 17GB)+ 本体のキャッシュ 約 11GB(使うステップ数ごと。setup は既定の 3 だけ作る)。作るときに取得する bf16 のテキストエンコーダ 約 67GB と本体 約 62GB は、シャード 1 つずつ取得して消すので残らない(取得の合計は約 130GB)。動画のエンジンが 32B のテキストエンコーダを作ってあれば(32gb / 48gb 級、つまり およそ VRAM 20〜48GB のカードか、スタジオの共有モードで動いたとき。80gb / 96gb 級が作る層を減らさないエンコーダは使わない)、setup はそれを使い、約 67GB の取得を省く | 約 5GB |
 | ACE-Step(音楽) | 約 15GB(2B 系。`--ace-xl` で +約 30GB) | 約 9GB |
-| AivisSpeech(読み上げ) | 約 2GB(標準の音声モデルを含む) | 約 3GB |
+| AivisSpeech(読み上げ) | 約 1.2GB(配布版。実行環境と標準の音声モデルを含む。取得は約 0.3GB) | —(配布版に含む) |
 | 同梱 LLM / MV の道具 | 約 5.6GB(Gemma 4 E4B + 投影ファイル)/ 約 1.3GB | — |
 
 
 ## 稼働 OS
 
-- **Windows 10 / 11**(x64、NVIDIA の GPU とドライバ。各エンジンは RTX 3050 6GB / 3060 12GB / 4060 Laptop 8GB の実機で確認済み。スタジオ本体の Windows での確認は進行中)
-- **Linux**(x64。Debian / Ubuntu 系で確認)
+- **Windows 10 / 11**(x64、NVIDIA の GPU とドライバ。スタジオ本体は Windows 11(RTX 4060 Laptop 8GB、RAM 16GB)と Windows 10(RTX 3060 12GB、RAM 32GB)で、setup・MV・画像の edit・音楽・ショート動画を確認済み。各エンジン単体は RTX 3050 6GB / 3060 12GB / 4060 Laptop 8GB の実機でも確認済み)
+- **Linux**(x64。Debian / Ubuntu 系。RTX A4000 16GB と RTX PRO 6000 96GB で確認)
+
+### 前提
+
+- **NVIDIA のドライバは CUDA 13 に対応したもの(580 以降)**。画像のエンジンが torch 2.11(cu130)を、動画と音楽のエンジンが cu128 の torch を使うため。ドライバが古いと、エンジンが CUDA を使えず起動に失敗する。
+- **Windows 10** で下の「かんたん版」の 1 行(`winget`)を使うには、Microsoft Store の **アプリ インストーラー** が要る(Windows 11 には最初から入っている)。無ければ Store から入れるか、Git・Python 3.12・ffmpeg を手で入れる(uv は `setup.bat` が入れる)。
 
 ## 中で動いているエンジン
 
-次の 4 つのエンジン(コンポーネント)を、別プロセスとして動かす。どれも既存のリポジトリを、そのまま使っている。
+次の 4 つのエンジンを、別プロセスとして動かす(設定ファイルでは `[components.<名前>]` と呼ぶ)。どれも既存のリポジトリを、そのまま使っている。
 
 | エンジン | 役目 |
 |---|---|
@@ -149,15 +154,15 @@ cd h3-creator-studio
 | オプション | 意味 |
 |---|---|
 | `--no-models` | 環境だけ作る。モデルは後で(もう一度 setup を実行すると取得する) |
-| `--only h3,ace` | 指定したエンジンだけ(`h3` `h3image` `ace` `aivis`) |
+| `--only h3,ace` | 指定したエンジンだけ(`h3` `h3image` `ace` `aivis`。MV の音声処理の道具は `mvtools`)。`--only` を書いたときは書いたものだけを扱うので、道具も `mvtools` を並べなければ入れない |
 | `--llm` | 同梱 LLM(約 5GB)と、画像・音声を読む投影ファイル(約 0.56GB。MV の「画像から作る」「曲から作る」用)も先に取得する。付けなくても、最初に使うときに取得する |
 | `--no-mv` | MV タブの音声処理(Demucs・librosa、CPU 版 torch。ダウンロード約 0.3〜0.4GB、ディスク約 1.3GB)を入れない(既定では `components/mvtools/` に入れる)。`--only mvtools` でこれだけ。`--mv` は以前の名残で、付けても何も変わらない |
 | `--ace-xl` | 音楽に XL モデルも入れる(約 45GB。既定は 2B のみで約 15GB) |
-| `--no-ref` | 動画の参照モード(参照から・Vocal Lock)用のキャッシュ(約 32GB)を作らない。参照モードを使わない人向け(Windows と RAM 48GB 未満の PC では、MV と、参照画像・セリフを使うショート動画も作れなくなる。後から作るには下の「トラブルシューティング」) |
+| `--no-ref` | 動画の参照モード(参照から・Vocal Lock)用のキャッシュ(約 32GB)を作らない。参照モードを使わない人向け(Windows と RAM 48GB 未満の PC では、MV と、参照画像を使う(人物の画像にセリフを合わせる、景色の画像を使う)ショート動画も作れなくなる。後から作るには下の「トラブルシューティング」) |
 | `--components-dir <場所>` | エンジンの取り込み先を変える |
 | `--clone-anyway` | 下の「既に入れている人」のフォルダがあっても、取り込み直す |
 
-目安: MiniMax-H3 のモデル 約 60GB(いちばん時間がかかる)、MiniMax-H3-Image 約 25GB + 本体のキャッシュ 約 11GB(bf16 の本体 約 62GB を取得して作る。GPU を使う)、ACE-Step 約 15GB、AivisSpeech 約 0.3GB。
+目安: MiniMax-H3 のモデル 約 60GB(いちばん時間がかかる)、MiniMax-H3-Image 約 25GB + 本体のキャッシュ 約 11GB(テキストエンコーダ 約 67GB と本体 約 62GB の bf16 を取得して量子化する。取得の合計は約 130GB、GPU を使う)、ACE-Step 約 15GB、AivisSpeech 約 0.3GB(取得。展開すると約 1.2GB)。
 
 ### 既に minimax-h3 などを入れている人
 
@@ -185,7 +190,8 @@ dir = "/home/you/ACE-Step-1.5-fast"
 - `dir` を書いたエンジンは、setup が取り込みもモデル取得も飛ばす。そのフォルダに環境とモデルが済んでいることが前提。
 - 書かなくても、setup は既に入れてあるエンジンを探す(ホーム直下と、ホームの `AI` `Documents` `github` `src`、Windows では各ドライブの直下と `\AI`。`Diffusers_minimax-h3` のような別名も)。見つけると「これを使いますか? [Y/n]」と聞き、**Enter(はい)で `studio.local.toml` に場所を自動で書いて**、取り込みもモデル取得も飛ばす。n なら書かずに、そのエンジンを飛ばす(勝手に取り込み直さない。取り込み直すなら `--clone-anyway`)。
 - 既存の MiniMax-H3 は、setup が量子化キャッシュ(エンジンの `models\prequant` の、本体 `transformer_int8` と参照モード用 `transformer_ref_int8`)を確かめる。揃っていれば「キャッシュ: 本体 ✓ 参照用 ✓」と出るだけ。Windows と RAM 48GB 未満の PC で足りなければ、何が無いか(本体 約 60GB、参照モード用 約 32GB。作るのに数時間)を出して「いま作りますか? [Y/n]」と聞き、**Enter(はい)でエンジンの `scripts\prepare_lowvram.py --ref` を流す**(`--no-ref` なら `--ref` を付けず、参照モード用は数えない)。n のときと自動実行(端末でない)のときは、作るコマンドだけを出して先へ進む。エンジンの venv が無ければ、先にエンジンの install を、`prepare_lowvram.py` の無い古いエンジンなら、先に更新(下の「エンジンの更新」)を求める。RAM 48GB 以上の Linux では、エンジンが起動時に作れるので聞かない(作っておくコマンドを `--keep-source` 付きで出すだけ。prepare は量子化した bf16 の重みを消すため)。
-- 既存の MiniMax-H3-Image は、setup が本体のキャッシュ(エンジンの `models\cache\ckw4a8_adaln_table_pdmd3` など。既定のステップ数 3、`[components.h3image.env]` に `H3IMG_STEPS` を書いていればその値)を確かめる。無ければ「いま作りますか? [Y/n]」と聞き、Enter(はい)でエンジンの `scripts\prepare_models.py --build-cache 3` を流す(1 時間ほど、GPU を使う)。n のときと自動実行のときは、作るコマンドだけを出す。
+- 既存の MiniMax-H3-Image は、setup が本体のキャッシュ(エンジンの `models\cache\ckw4a8_adaln_table_pdmd3` など。既定のステップ数 3、`[components.h3image.env]` に `H3IMG_STEPS` を書いていればその値)と、テキストエンコーダ(`models\te`)を確かめる。無ければ「いま作りますか? [Y/n]」と聞き、Enter(はい)でエンジンの `scripts\prepare_models.py --build-cache 3` を流す(1 時間ほど、GPU を使う。テキストエンコーダも無ければ、さらに約 67GB を取得する)。n のときと自動実行のときは、作るコマンドだけを出す。
+- MiniMax-H3-Image にテキストエンコーダが無く、MiniMax-H3 が 32B のテキストエンコーダ(`models\prequant\te_bnb-4bit_prune1`。MiniMax-H3 が 32gb / 48gb 級、つまり およそ VRAM 20〜48GB のカードか、スタジオの共有モード(80〜96GB のカードでも 32gb 級になる)で動いたときに作られる。80gb / 96gb 級が作る層を減らさないエンコーダは使わない)を持っていれば、setup はそれを使うよう `studio.local.toml` の `[components.h3image.env]` に `H3IMG_TE_DIR` を書く(2 つのエンジンのテキストエンコーダは同じもの。約 67GB の取得と量子化を省く)。
 
 ## 起動と使い方
 
@@ -301,7 +307,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 - **曲を聞く**(同梱 LLM。曲の内容が空で、曲に台帳の情報が無いときだけ): 曲の一部を聞いて、曲の内容・世界観の案を作る(分析で分かった BPM も材料にする)。
 - **演出**(同梱 LLM): 人物の説明が空なら画像を見て作ったうえで、人物の見た目(場所や光を除いたもの)を整理し、シーンごとの演出を MiniMax-H3 公式の Ref2VA の形式で書く。歌う区間は正面か 3/4 向きで口が見える構図にする。
 - **シーンの生成**(MiniMax-H3): 画像とそのシーンのボーカルを参照に Ref2VA + Vocal Lock。1 シーン終わるごとに次を入れるので、その間に他のタブの生成が割り込める。
-  **歌わせない**ときは、ボーカルを渡さず、画像だけを参照にシーンの尺(秒)を指定して作る(H3 が付ける音声は使わない)。口を動かしているのは音声の参照そのものなので、音声を渡さなければ「歌わない・口は閉じたまま」の指示が効く(mv_studio_V3 で確かめた)。演出も歌う前提を外し、歩く・見つめる・景色など、どんな構図でも使う。シーンの切れ目は同じ(分離したボーカルの谷・息継ぎ・小節)。
+  **歌わせない**ときは、ボーカルを渡さず、画像だけを参照にシーンの尺(秒)を指定して作る(H3 が付ける音声は使わない)。口を動かしているのは音声の参照そのものなので、音声を渡さなければ「歌わない・口は閉じたまま」の指示が効く(作者の以前の制作ツールで確かめた)。演出も歌う前提を外し、歩く・見つめる・景色など、どんな構図でも使う。シーンの切れ目は同じ(分離したボーカルの谷・息継ぎ・小節)。
   口は動かないが、演出を書く LLM は「MV」からマイクやステージなど歌う場面を選ぶことがある(確認では、マイクを持って口が少し開くシーンが出た)。**景色や日常だけの映像にしたいときは、「曲の内容」に「マイクやステージは出さない。歌う場面は無い」のように、出したくないものを書く**(そのまま LLM に渡る。歌わせないを選ぶと、欄の下に同じ案内が出る)。
 - **結合**: クリップをつなぎ、音声は元の曲に差し替えた MP4 にする(ギャラリーに入る)。
 
@@ -390,7 +396,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 - いまのサンプルは 2 つ: ショート動画「港町の一日」(物語の文章だけ。曲もセリフも参照画像も無し)と、MV「星降る夜に歌う」(キャラクター画像 1 枚と音楽タブの曲から、歌う区間は口を合わせるリップシンク MV)。サンプルの無いタブでは、ボタンは出ない。
 - 素材(画像・曲)は、読み込んだときに**ギャラリーへ 1 回だけ**コピーされる(`outputs/samples/<id>/`)。同じサンプルをもう一度読み込んでも、増えない。ギャラリーに入ったものは、ほかの生成物と同じに使え、消すこともできる(消してから読み込み直すと、また入る)。
-- サンプルの動画・画像・曲は CC0(自由に使ってよい)。
+- サンプルの動画・画像・曲は CC0(自由に使ってよい)。作例の素材は作者が各エンジンで生成したもの(画像は MiniMax-H3-Image、曲は ACE-Step、動画は MiniMax-H3)。
 - 自分のサンプルを足すときは、`samples/<id>/sample.json`(タブ・題・説明・入力欄の値・素材・動画・サムネイル)と、そのファイルを置く(`<id>` はフォルダ名と同じ)。読めないもの・ファイルが足りないものは、管理役の起動時に警告を出して飛ばす。
 
 ## VRAM と CPU メモリの管理(このアプリの特徴)
@@ -476,9 +482,12 @@ git pull
 | `[llm]` の `gpu` | 同梱 LLM を載せる先。`auto`(空きに入る分だけ GPU)/ `off`(CPU のみ)/ `all` / 層数 |
 | `[llm]` の `gguf` / `llama_server` / `mmproj` | 書くと、取得せずに、そのファイルを使う(`mmproj` は画像・音声を読む投影ファイル。空なら自動で探し、無ければ「画像から作る」「曲から作る」で 1 回だけ取得する) |
 | `[gpu]` の `mode` | `auto`(総 VRAM 40GiB 以上なら同時に複数、未満なら エンジン 1 つずつ)/ `exclusive`(エンジン 1 つずつ)/ `share`(同時に複数) |
+| `[gpu]` の `devices` | GPU が 2 枚以上ある PC で、エンジンを動かす GPU。`auto`(管理役が VRAM を数える 1 枚に、すべてのエンジンを寄せる)/ `all`(寄せない)/ `"1"` などの番号 |
+| `[gpu]` の `free_cpu_engines` | GPU の仕事の前に、待機中の読み上げ(AivisSpeech)と同梱 LLM を止めて RAM を空けるか。`auto`(搭載 RAM 32GiB 未満のときだけ)/ `always` / `never` |
 | `[components.<名前>]` の `vram_budget_gb` | 同時に複数載せるときの、そのエンジンの VRAM の利用枠(GB) |
 | `[mv]` の `tools_python` | MV の音声処理(Demucs・librosa)を動かす Python。空なら setup が作る `components/mvtools/.venv` |
 | `[mv]` の `device` | ボーカル分離の場所。既定 `cpu`(GPU の生成と並行に動く) |
+| `[mv]` の `subtitle_font` | ショート動画のセリフのテロップ(字幕)の字体。空なら Noto Sans CJK JP(無ければ libass が同じ文字を持つ字体に置き換える。Windows は `"Meiryo"` など) |
 
 エンジンの名前は `h3` / `h3image` / `ace` / `aivis`。
 
@@ -493,20 +502,36 @@ git pull
 - **CPU メモリが足りない**: 動画の準備(量子化)中に落ちるときは、他のアプリを閉じる。32GB 未満では、動画と同梱 LLM が厳しい。搭載 RAM が 32GiB 未満の PC では、GPU の仕事(画像・動画・音楽・MV・ショート動画のシーン)を始める前に、待機中の AivisSpeech(管理役が起動したもの・読み上げ中でない)と同梱 LLM(使用中でない)を自動で止める(ジョブに「メモリを空けています(読み上げ・同梱 LLM を止めます)」と出る。どちらも次に使うときに起動し直す)。`studio.local.toml` の `[gpu] free_cpu_engines` で `"auto"`(既定)/ `"always"` / `"never"` を選べる。同梱 LLM はエンジンの欄にも行があり(停止 / 起動中 / 準備完了(GPU / CPU)・RAM)、**停止** で手で止められる。
 - **「動画(MiniMax-H3) が終了していました(RAM 不足の可能性があります)。ログの最後: …」と出る**: 生成の途中でエンジンのプロセスが終わっていた(多くは RAM が足りず OS に止められた。ログが「Loading checkpoint shards」の途中で切れている、など)。管理役はそのエンジンを停止扱いにし、**1 回だけ自動で起動し直してやり直す**(MV・ショート動画のシーン、画像・動画・音楽のジョブ)。2 回目も終了したら失敗にする。他のアプリを閉じて RAM を空けてから、やり直す・再開する。ジョブの詳しいログ(`log_tail`)にエンジンのログの末尾が入る。
 - **MV タブに「MV の音声処理の道具…が見つかりません」と出る**(`--no-mv` で入れなかったとき、または以前の setup のとき): タブの「道具を入れる(約 1.3GB)」ボタンを押すか、`.\setup.bat --only mvtools`(Linux は `./setup.sh --only mvtools`)で音声処理の道具を入れる。すでに Demucs と librosa の入った Python があれば `[mv] tools_python` に書けば入れなくてよい。
-- **「MiniMax-H3 の参照モード用のキャッシュ(transformer_ref_int8、約 32GB)がありません」と出る**(MV タブ・ショート動画タブの上と、動画タブの Ref2VA / 静止画(参照あり)にも、同じ案内が出る。MV タブでは **MV を作る** が押せない): Windows と RAM 48GB 未満の PC では、エンジンが重みを量子化キャッシュのファイルから流すので、参照モード(MV、参照画像・セリフを使うショート動画、動画タブの Ref2VA / Ref2I)にこのキャッシュが要る。setup で入れたエンジンには作ってあるが、既に入れてあったエンジン(`dir` を書いた、または setup が見つけた)には無いことがある。`--no-ref` で入れた人も無い(`--no-ref` が省くのが、まさにこのキャッシュ)。1 回だけ、次の手順で作る。
+- **「MiniMax-H3 の参照モード用のキャッシュ(transformer_ref_int8、約 32GB)がありません」と出る**(MV タブ・ショート動画タブの上と、動画タブの Ref2VA / 静止画(参照あり)にも、同じ案内が出る。MV タブでは **MV を作る** が押せない): Windows と RAM 48GB 未満の PC では、エンジンが重みを量子化キャッシュのファイルから流すので、参照モード(MV、参照画像を使うショート動画、動画タブの Ref2VA / Ref2I)にこのキャッシュが要る(参照画像の無いショート動画は、セリフだけのナレーションでも要らない)。setup で入れたエンジンには作ってあるが、既に入れてあったエンジン(`dir` を書いた、または setup が見つけた)には無いことがある。`--no-ref` で入れた人も無い(`--no-ref` が省くのが、まさにこのキャッシュ)。1 回だけ、次の手順で作る。
   1. スタジオを止める(`run.bat` の画面で `Ctrl+C`)。RAM を空けるため。作るのに GPU は使わない。
   2. PowerShell で `cd <h3 のフォルダ>; .\venv\Scripts\python.exe scripts\prepare_lowvram.py --ref` を実行する(Linux は `cd <h3 のフォルダ> && venv/bin/python scripts/prepare_lowvram.py --ref`)。h3 のフォルダは、`studio.local.toml` の `[components.h3]` の `dir`。書いていなければ、スタジオのフォルダの `components\minimax-h3`(例: `C:\h3-creator-studio\components\minimax-h3`)。画面の案内とエラーには、この PC 用のコマンドがそのまま出る。
   3. これは transformer_ref(66GB)をシャード 1 つずつ取得して量子化し、取得した分は消しながら、`models\prequant\transformer_ref_int8` に約 32GB を書く。ディスクの空きが約 37GB 要る。回線次第で数時間。RAM 16GB でも作れる。できているキャッシュ(本体の `transformer_int8` など)は飛ばす。途中で止めても壊れない。同じコマンドをもう一度実行すればよい(ただし、作りかけの参照モード用は最初から作り直す)。
   4. 終わったら `run.bat` でスタジオを起動し、失敗した制作の **再開** を押す。曲の分析と演出はそのまま使い、シーンだけを作り直す(作る前に断られたときは、もう一度作ればよい)。
   5. 代わりに `.\setup.bat --only h3`(Linux は `./setup.sh --only h3`)でもよい。キャッシュを確かめて「いま作りますか?」と聞き、同じコマンドを流す。
+- **画像の生成が「画像のエンジン(MiniMax-H3-Image)のモデルの準備が終わっていません(テキストエンコーダがありません)」で失敗する**(画像タブにも同じ案内が出る): setup の途中で止めたか、既にあったエンジンを「使う」と答えて、モデルの準備がされていない。スタジオを止めてから `.\setup.bat --only h3image`(Linux は `./setup.sh --only h3image`)を最後まで実行する(テキストエンコーダの準備で約 67GB を取得する)。
 - **最初の画像の生成が 1 時間以上かかる / ダウンロードが続く**(RAM が何度も埋まる): MiniMax-H3-Image の本体のキャッシュ(ステップ数ごと、約 11GB)が無く、最初の生成で bf16 の本体(約 62GB)をシャード 1 つずつ取得して量子化している。以前の setup はこのキャッシュを作らなかった。止めずに待てば、できあがった後は速い(ジョブには「本体のキャッシュを作っています(初回だけ)」と出る)。先に作るなら、スタジオを止めて PowerShell で `cd <h3image のフォルダ>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 3` を実行する(Linux は `cd <h3image のフォルダ> && .venv/bin/python scripts/prepare_models.py --build-cache 3`。GPU を使う)。`.\setup.bat --only h3image` でも確かめて作れる。2 や 6 のステップ数を使うなら、その数も並べる。
 - **ジョブに「GPU の空きを待っています」と出る**: 別のエンジンが生成中で、終わらないと載せられない。終われば自動で始まる(中止もできる)。
 - **setup が途中で失敗した**: 失敗した手順と、それだけをやり直すコマンドが画面に出る。原因を直して、setup をもう一度実行すれば、続きから進む。
+- **問題の報告**: [GitHub の Issues](https://github.com/animede/h3-creator-studio/issues) へ。そろえるものは [docs/USAGE.md の「不具合を知らせるとき」](docs/USAGE.md#不具合を知らせるとき)。
+
+## アンインストール
+
+setup は、取り込んだフォルダの外にはほとんど何も入れない。
+
+1. スタジオを止めて(`run.bat` の画面で `Ctrl+C`)、**取り込んだフォルダ(`C:\h3-creator-studio` など)を丸ごと消す**。エンジン(`components\`)、同梱 LLM(`components\llm`)、MV の音声処理の道具(`components\mvtools`)、生成物(`outputs\`)、ログ(`logs\`)、管理役の環境(`.venv\`)は、すべてこの中にある。残したい生成物は、先に `outputs\` から出しておく。`studio.local.toml` の `dir` や `components_dir` で別の場所を指した人は、そこも消す。
+2. フォルダの外に残るものは、要らなければ自分で消す。
+   - **uv**(Python の道具): Linux は `~/.local/bin/uv`、Windows は winget で入れたもの(`winget uninstall --id astral-sh.uv`)か `%USERPROFILE%\.local\bin\uv.exe`。uv が入れた Python とキャッシュの場所は `uv python dir` と `uv cache dir` で分かる(キャッシュは `uv cache clean`)。
+   - **Hugging Face のキャッシュ**: 動画・画像のエンジンがモデルを取得するときに使う。Linux は `~/.cache/huggingface`、Windows は `%USERPROFILE%\.cache\huggingface`。
+   - **Demucs の重み**(MV の音声処理): torch のキャッシュ。Linux は `~/.cache/torch`、Windows は `%USERPROFILE%\.cache\torch`。
+   - Git・Python・ffmpeg(winget で入れたもの)は一般の道具。ほかで使わないなら `winget uninstall` で消す。
 
 ## 構成
 
 ```
 h3-creator-studio/
+├── README.md / README.en.md  この説明(日本語 / 英語)
+├── docs/USAGE.md / docs/USAGE.en.md  使い方(画面の「使い方」の窓にも出る。日本語 / 英語)
+├── docs/img/              説明の画像(画面の例と作例の GIF)
 ├── setup.bat / setup.sh   セットアップ(uv を入れ、scripts/setup.py を呼ぶ)
 ├── run.bat / run.sh       管理役の起動
 ├── scripts/setup.py       エンジンの取り込み、環境とモデルの準備(エンジン自身のスクリプトを呼ぶ)
@@ -519,8 +544,8 @@ h3-creator-studio/
 ├── studio.local.toml      自分の設定(git の管理外)
 ├── studio.local.toml.example  自分の設定の見本
 ├── pyproject.toml / requirements.txt  管理役の Python の依存
-├── LICENSE / NOTICE       Apache-2.0 と、移植したファイルの記録
-├── components/            取り込んだエンジン(それぞれ独立した git リポジトリ。git の管理外)と、mvtools(MV の音声処理の環境)
+├── LICENSE / NOTICE       Apache-2.0 と、移植したファイル・使う第三者のソフトウェアの記録
+├── components/            取り込んだエンジン(それぞれ独立した git リポジトリ。git の管理外)と、llm(同梱 LLM)、mvtools(MV の音声処理の環境)
 ├── outputs/               生成物と台帳(studio.db)(git の管理外)
 ├── logs/                  エンジンのログ(git の管理外)
 ├── tests/                 テスト(`python -m unittest discover -s tests -t .`)
@@ -533,7 +558,7 @@ h3-creator-studio/
 - **[MiniMax-H3 / MiniMax-H3-Image](https://huggingface.co/MiniMaxAI)**(MiniMax): 動画・音声・静止画・画像のモデル。モデルの重みは MiniMax Community License(非商用は無料、商用は年商 $20M 未満まで、要クレジット。本家のモデルカードを確認)。このアプリは [Diffusers_minimax-h3](https://github.com/animede/Diffusers_minimax-h3) と [minimax-h3-image-server](https://github.com/animede/minimax-h3-image-server)(Diffusers_minimax-h3 は Apache-2.0、minimax-h3-image-server は MIT)をエンジンとして動かす。
 - **[ACE-Step](https://github.com/ace-step/ACE-Step)**(ACE Studio / StepFun): 音楽のモデル(MIT)。エンジンは [ACE-Step-1.5-fast](https://github.com/animede/ACE-Step-1.5-fast)(MIT)。
 - **[AivisSpeech-Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)**(Aivis Project): 読み上げ(LGPL-3.0。別プロセスとして HTTP で呼ぶだけで、組み込まない)。音声モデル(aivm)は、それぞれの作者の利用規約に従う。
-- そのほか: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)と Google の Gemma 4(ライセンスはモデルカード [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) を確認)、[Demucs](https://github.com/facebookresearch/demucs)(MIT)、[librosa](https://librosa.org/)(ISC)、[ffmpeg](https://ffmpeg.org/)(LGPL/GPL。PATH のものを使う)。
+- そのほか: [llama.cpp](https://github.com/ggml-org/llama.cpp)(MIT)と Google の Gemma 4(同梱 LLM。GGUF(Gemma 4 E4B)は `setup --llm` か、最初に使うときに [ggml-org/gemma-4-E4B-it-GGUF](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF) から取得する。[Gemma Terms of Use](https://ai.google.dev/gemma/terms) と、その禁止用途の方針(Prohibited Use Policy)に従うもので、取得して使うことはそれらに同意することになる)、[Demucs](https://github.com/facebookresearch/demucs)(MIT)、[librosa](https://librosa.org/)(ISC)、[ffmpeg](https://ffmpeg.org/)(LGPL/GPL。PATH のものを使う)。
 
 画面の下にも、著作権と主なエンジンのクレジットを出している。
 

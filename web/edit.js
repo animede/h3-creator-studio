@@ -330,7 +330,7 @@ const EDIT_LOGIC = (() => {
     const name = prompt(t("編集プロジェクトの名前"), "");
     if (name === null) return;
     try {
-      const v = await api("/api/edit", "POST", { name: name.trim() || "無題" });      // i18n-skip サーバへ送る既定の名前
+      const v = await api("/api/edit", "POST", { name: name.trim() || t("無題") });      // 空なら画面の言語の「無題」(サーバの既定名は日本語なので、ここで決める)
       current = v.id;
       remember(v.id);
       await loadList();
@@ -1014,6 +1014,7 @@ const EDIT_LOGIC = (() => {
 
   function projectNode(p) {
     const tile = el("div", "thumb");
+    keyClickable(tile, p.name || t("無題"));      // キーボードでも開ける(web/gallery.js)
     if (p.thumb_url) {
       const img = el("img");
       img.src = p.thumb_url;

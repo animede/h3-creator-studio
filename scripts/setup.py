@@ -5,7 +5,7 @@
 それぞれ自分のセットアップスクリプトで環境とモデルを用意する。何度実行してもよく、済んでいる所は飛ばし、
 途中で止まっても再実行で続きから進む。
 
-  python scripts/setup.py                 # 取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 160GB)
+  python scripts/setup.py                 # 取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 175GB)
   python scripts/setup.py --no-models     # 環境だけ(モデルは後で)
   python scripts/setup.py --only h3,ace   # 指定したエンジンだけ
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
@@ -184,12 +184,27 @@ def looks_installed(name: str, d: Path, plat: str = None) -> bool:
         return False
 
 
+def toml_string(value) -> str:
+    """TOML の文字列リテラル。' を含まなければ '...'(Windows のパスの \\ をそのまま書ける)、含めば "..." で \\ と " を逃がす
+    (O'Brien のようなフォルダ名で、読めない studio.local.toml を書いて管理役が起動しなくなっていた)。"""
+    s = str(value)
+    if "'" not in s:
+        return f"'{s}'"
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _bare(line: str) -> str:
+    """節の見出しの比較用: 後ろのコメントを外す([components.h3]  # メモ)。"""
+    s = line.strip()
+    return s.split("#", 1)[0].strip() if s.startswith("[") else s
+
+
 def write_local_dir(local_toml: Path, name: str, path: Path) -> None:
     """studio.local.toml に [components.<name>] dir = '...' を足す(無ければ作る)。同じ節があれば、その節の dir の行を置き換える。"""
     lines = local_toml.read_text(encoding="utf-8").splitlines() if local_toml.is_file() else []
-    head, entry = f"[components.{name}]", f"dir = '{path}'"
-    if head in (ln.strip() for ln in lines):
-        i = next(k for k, ln in enumerate(lines) if ln.strip() == head)
+    head, entry = f"[components.{name}]", f"dir = {toml_string(path)}"
+    if head in (_bare(ln) for ln in lines):
+        i = next(k for k, ln in enumerate(lines) if _bare(ln) == head)
         j = next((k for k in range(i + 1, len(lines)) if lines[k].lstrip().startswith("[")), len(lines))
         body = [ln for ln in lines[i + 1:j] if not re.match(r"\s*dir\s*=", ln)]
         lines = lines[:i + 1] + [entry] + body + lines[j:]
@@ -198,6 +213,30 @@ def write_local_dir(local_toml: Path, name: str, path: Path) -> None:
             lines.append("")
         lines += [head, entry]
     local_toml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_local_env(local_toml: Path, name: str, key: str, value: str) -> bool:
+    """studio.local.toml の [components.<name>.env] に key = '...' を書く(節が無ければ作る。同じキーがあれば置き換える)。
+    [components.<name>] の中に env = {...} の形で書いてあると節を足せない(TOML の重複)ので、書かずに False。"""
+    lines = local_toml.read_text(encoding="utf-8").splitlines() if local_toml.is_file() else []
+    comp, head, entry = f"[components.{name}]", f"[components.{name}.env]", f"{key} = {toml_string(value)}"
+    stripped = [_bare(ln) for ln in lines]
+    if comp in stripped:
+        i = stripped.index(comp)
+        j = next((k for k in range(i + 1, len(lines)) if stripped[k].startswith("[")), len(lines))
+        if any(re.match(r"env\s*=", ln) for ln in stripped[i + 1:j]):
+            return False
+    if head in stripped:
+        i = stripped.index(head)
+        j = next((k for k in range(i + 1, len(lines)) if stripped[k].startswith("[")), len(lines))
+        body = [ln for ln in lines[i + 1:j] if not re.match(rf"\s*{re.escape(key)}\s*=", ln)]
+        lines = lines[:i + 1] + [entry] + body + lines[j:]
+    else:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines += [head, entry]
+    local_toml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
 
 
 def ask_yes(question: str, default: bool = True) -> bool:
@@ -386,6 +425,37 @@ def plan_existing_h3(h3_dir: Path, want_ref: bool = True, env: dict = None, plat
     return h3_cache_step(h3_dir, st["venv"], want_ref, env, plat)
 
 
+# ---- 画像のエンジン(h3image)のテキストエンコーダ: 動画のエンジン(h3)が作った量子化済みを使う ----
+# 両エンジンのテキストエンコーダは同じもの(MiniMax-H3 の Qwen3-VL-32B を 51 層にして nf4 にしたもの。開発の PC では 1 つを共有して動いている)。
+# h3 は 32gb / 48gb 級(およそ VRAM 20〜48GB のカード、またはスタジオの共有モード)で動いたときに保存する(studio/h3cache.py shared_te)。
+# あれば h3image はそれを指し(H3IMG_TE_DIR)、prepare_models.py の 66.7GB の取得と量子化を省く。8〜16GB の PC の h3 は小さい代わりの
+# エンコーダを使うので、これは無い。書いた H3IMG_TE_DIR は、h3image の準備を流すたびに渡す(cfg.component_env。2 回目の setup で
+# 渡し忘れ、省くはずの 67GB の取得が始まっていた。2026-11-26 のレビュー)。
+
+def share_h3_te(cfg: Settings, h3_dir: Optional[Path], img_dir: Path, local_toml: Path) -> dict:
+    """h3image にテキストエンコーダが無く、h3 が作った量子化済みのものがあれば、それを使う(studio.local.toml の
+    [components.h3image.env] に H3IMG_TE_DIR を書く)。prepare_models.py に渡す環境変数を返す(設定に書いてある分は、呼ぶ側が
+    cfg.component_env で重ねる)。使わないなら {}。"""
+    env = h3imgcache.engine_env(cfg)
+    if h3imgcache.te_ready(img_dir, env):
+        return {}
+    configured = str(cfg.component_env("h3image").get("H3IMG_TE_DIR") or "").strip()
+    shared = h3cache.shared_te(h3_dir, h3cache.engine_env(cfg)) if h3_dir is not None and Path(h3_dir).is_dir() else None
+    if shared is None:
+        if configured:
+            say(f"  studio.local.toml の [components.h3image.env] H3IMG_TE_DIR({configured})にテキストエンコーダがありません。"
+                "準備はそこに作ります(動画のエンジンのものを使わないなら、その行を消してください)")
+        return {}
+    shared = shared.resolve()
+    if not write_local_env(local_toml, "h3image", "H3IMG_TE_DIR", str(shared)):
+        say(f"  動画のエンジンのテキストエンコーダ({shared})を使えますが、studio.local.toml の [components.h3image] に env = {{...}} が"
+            " あるので書けませんでした。そこに H3IMG_TE_DIR を足すと、約 67GB の取得を省けます")
+        return {}
+    say(f"  テキストエンコーダは、動画のエンジンが作った量子化済みのものを使います: {shared}"
+        "(約 67GB の取得と量子化を省きます。studio.local.toml の [components.h3image.env] に H3IMG_TE_DIR を書きました)")
+    return {"H3IMG_TE_DIR": str(shared)}
+
+
 # ---- 既に入れてあるエンジン(h3image)の本体のキャッシュ ----
 # setup は既存のエンジンのモデルの準備をしないが、キャッシュ(models/cache/ckw4a8_adaln_table_pdmd3 など)が無いと、最初の画像の生成で
 # bf16 の本体 62GB を取得して作るので 1 時間以上かかる(2026-11-26、Windows の実機 8GB VRAM / 16GB RAM の報告)。判定は studio/h3imgcache.py。
@@ -401,44 +471,54 @@ def h3image_cache_status(img_dir: Path, steps: int = None, env: dict = None, pla
     return {"steps": steps, "ready": st["ready"][steps], "dir": st["dir"], "venv": venv}
 
 
-def plan_existing_h3image(img_dir: Path, steps: int = None, env: dict = None, plat: str = None) -> Optional[Step]:
-    """既に入れてあるエンジン(h3image)の本体のキャッシュを確かめ、無ければ作るか聞く(既定は「はい」)。作るなら手順を返す。
-    venv が無い・端末でない・「いいえ」なら、作るコマンドを出して None。"""
-    env = os.environ if env is None else env
+def plan_existing_h3image(img_dir: Path, steps: int = None, env: dict = None, plat: str = None,
+                          extra_env: dict = None) -> Optional[Step]:
+    """既に入れてあるエンジン(h3image)の本体のキャッシュとテキストエンコーダを確かめ、無ければ作るか聞く(既定は「はい」)。作るなら手順を返す。
+    venv が無い・端末でない・「いいえ」なら、作るコマンドを出して None。extra_env は prepare_models.py に渡す環境変数
+    (動画のエンジンのテキストエンコーダを使うときの H3IMG_TE_DIR。env にも重ねて確かめる)。"""
+    extra_env = extra_env or {}
+    env = {**(os.environ if env is None else env), **extra_env}
     st = h3image_cache_status(img_dir, steps, env, plat)
-    if st["ready"]:
-        say(f"  本体のキャッシュ(ステップ数 {st['steps']}): ✓")
+    te_ok = h3imgcache.te_ready(img_dir, env)
+    if st["ready"] and te_ok:
+        say(f"  本体のキャッシュ(ステップ数 {st['steps']}): ✓  テキストエンコーダ: ✓")
         return None
-    say(f"  MiniMax-H3-Image の本体のキャッシュ(ステップ数 {st['steps']}、約 11GB)がありません(場所: {st['dir']})。"
-        "初回の生成で 62GB をダウンロードして作るため 1 時間以上かかります")
-    command = h3imgcache.prepare_command(img_dir, st["steps"], plat)
+    if not te_ok:
+        # 「既存を使う」と答えたが、モデルの準備がされていないエンジン(2026-11-26、Windows の実機。生成で text_encoder キャッシュが無いと失敗)
+        say(f"  MiniMax-H3-Image のテキストエンコーダ(約 17GB。作るときに 66.7GB を取得)がありません(場所: {h3imgcache.te_dir(img_dir, env)})。"
+            "このままでは画像を生成できません")
+    if not st["ready"]:
+        say(f"  MiniMax-H3-Image の本体のキャッシュ(ステップ数 {st['steps']}、約 11GB)がありません(場所: {st['dir']})。"
+            "初回の生成で 62GB をダウンロードして作るため 1 時間以上かかります")
+    command = h3imgcache.prepare_command(img_dir, st["steps"], plat, env)
     if st["venv"] is None:
         say("  エンジンの venv がありません。環境を作ってから、次で作れます:")
         say("    " + command)
         return None
-    say("  いま作ると、ここで 1 時間ほどかかります(GPU を使います。取得した bf16 のシャードは 1 つずつ消すので、ディスクの空きは約 20GB で足ります)")
+    say("  いま作ると、ここで 1 時間ほど(テキストエンコーダも作るなら、さらに 67GB の取得)かかります"
+        "(GPU を使います。取得した bf16 のシャードは 1 つずつ消すので、ディスクの空きは約 40GB で足ります)")
     if not ask_yes("  いま作りますか?"):
         say("  作らずに進みます。後で作るなら(スタジオを止めてから):")
         say("    " + command)
         return None
     script = "scripts\\prepare_models.py" if is_win(plat) else "scripts/prepare_models.py"
-    step_env = {"HF_HUB_DISABLE_SYMLINKS": "1"} if is_win(plat) else {}
-    return Step(f"h3image: 本体のキャッシュの作成(scripts/prepare_models.py --build-cache {st['steps']})",
+    step_env = {**({"HF_HUB_DISABLE_SYMLINKS": "1"} if is_win(plat) else {}), **extra_env}
+    return Step(f"h3image: モデルの準備と本体のキャッシュ(scripts/prepare_models.py --build-cache {st['steps']})",
                 [str(st["venv"]), script, "--build-cache", str(st["steps"])], env=step_env)
 
 
 # ---- 状態の確認(まとめの表) ----
 
-def component_status(name: str, d: Path, plat: str = None) -> tuple:
-    """(環境あり, モデルあり or None=不要)。"""
+def component_status(name: str, d: Path, plat: str = None, env: dict = None) -> tuple:
+    """(環境あり, モデルあり or None=不要)。env はエンジンの環境変数(h3image のテキストエンコーダの場所 H3IMG_TE_DIR を見る。
+    動画のエンジンのものを使う設定では models/te が無いので、そこだけ見ると「モデル: 未」と出て再実行を促してしまう)。"""
     def exists(*parts):
         return Path(d, *parts).exists()
     sub = "Scripts/python.exe" if is_win(plat) else "bin/python"
     if name == "h3":
         return exists("venv", sub) or exists(".venv", sub), exists("models", "prequant", "transformer_int8")
     if name == "h3image":
-        te = Path(d, "models", "te")
-        return exists(".venv", sub) or exists("venv", sub), te.is_dir() and any(te.iterdir())
+        return exists(".venv", sub) or exists("venv", sub), h3imgcache.te_ready(d, env or {})
     if name == "ace":
         script = "run_api_server_fast.bat" if is_win(plat) else "run_api_server_fast.sh"
         return exists(".venv", sub) and exists(script), exists("checkpoints", "acestep-v15-turbo")
@@ -790,7 +870,7 @@ def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> N
     say("\n== まとめ ==")
     for name in selected:
         d = cfg.component_dir(name)
-        env_ok, models_ok = component_status(name, d)
+        env_ok, models_ok = component_status(name, d, env=h3imgcache.engine_env(cfg))
         say(f"  {name:8} {COMPS[name].label}")
         say(f"           場所: {d}")
         say(f"           環境: {'あり' if env_ok else '未'}    モデル: "
@@ -802,7 +882,7 @@ def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> N
         say(f"           環境: {'あり' if mv else '未'}")
     start = ".\\run.bat" if is_win() else "./run.sh"
     say(f"\n起動: {start}   → ブラウザで http://{cfg.host}:{cfg.port}")
-    if any(component_status(n, cfg.component_dir(n))[1] is False for n in selected):
+    if any(component_status(n, cfg.component_dir(n), env=h3imgcache.engine_env(cfg))[1] is False for n in selected):
         say("モデルが「未」のエンジンは、setup(--no-models なし)をもう一度実行すると続きから用意します。")
 
 
@@ -852,6 +932,7 @@ def main(argv: list = None) -> int:
             say("\n== エンジンの取り込み ==")
         sources = {}
         img_build = None         # 既に入れてあるエンジン(h3image)で、本体のキャッシュを作る手順(作ると答えたときだけ)
+        img_env = {}             # h3image の準備に渡す環境変数(動画のエンジンのテキストエンコーダを使うときの H3IMG_TE_DIR)
         h3_build = None          # 既に入れてあるエンジン(h3)で、足りない量子化キャッシュを作る手順(作ると答えたときだけ。走らせるのは 2. で)
         for name in selected:
             src = decide_source(name, cfg, Path.home(), args.clone_anyway)
@@ -864,8 +945,13 @@ def main(argv: list = None) -> int:
             say(f"[{name}] {src.message}")
             if name == "h3" and src.action == "existing" and models:
                 h3_build = plan_existing_h3(src.path, want_ref=not args.no_ref, env=h3cache.engine_env(cfg))
+            if name == "h3image" and models and src.action in ("existing", "present", "clone"):
+                h3_src = sources.get("h3")
+                h3_dir = h3_src.path if h3_src is not None and h3_src.action in ("existing", "present") else cfg.component_dir("h3")
+                img_env = share_h3_te(cfg, h3_dir, src.path, Path(cfg.root) / "studio.local.toml")
             if name == "h3image" and src.action == "existing" and models:
-                img_build = plan_existing_h3image(src.path, env=h3imgcache.engine_env(cfg))
+                img_build = plan_existing_h3image(src.path, env=h3imgcache.engine_env(cfg),
+                                                  extra_env={**cfg.component_env("h3image"), **img_env})
             if src.action == "clone":
                 if not git_clone(COMPS[name].url, src.path):
                     return 1
@@ -891,7 +977,8 @@ def main(argv: list = None) -> int:
             if models and COMPS[name].notice:
                 say(f"  ※ {COMPS[name].notice}")
             ensure_uv_on_path()
-            extra_env = python312_env() if name == "h3" else {}
+            # h3image の準備には、設定の [components.h3image.env](H3IMG_TE_DIR / H3IMG_STEPS など)も渡す(エンジンの起動と同じ環境で作る)
+            extra_env = python312_env() if name == "h3" else {**cfg.component_env("h3image"), **img_env} if name == "h3image" else {}
             have_venv = (d / ".venv" / ("Scripts/python.exe" if is_win() else "bin/python")).exists()
             for step in component_steps(name, models=models, ace_xl=args.ace_xl, h3_ref=not args.no_ref, have_venv=have_venv,
                                         h3image_steps=h3imgcache.default_steps(h3imgcache.engine_env(cfg))):
