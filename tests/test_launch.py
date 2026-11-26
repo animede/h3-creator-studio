@@ -34,5 +34,18 @@ class LaunchTest(unittest.TestCase):
         self.assertEqual(len(opened), 1)
 
 
+class VersionTest(unittest.TestCase):
+    def test_one_version_everywhere(self):
+        import re
+        from studio import __version__
+        from studio.config import REPO_ROOT
+        pyproject = (REPO_ROOT / "pyproject.toml").read_text("utf-8")
+        self.assertEqual(re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1), __version__)
+        self.assertEqual(main.app.version, __version__)
+        self.assertIn(f"v{__version__}", (REPO_ROOT / "README.md").read_text("utf-8").splitlines()[6])     # 最新版の行
+        self.assertIn('"version": __version__', (REPO_ROOT / "studio" / "main.py").read_text("utf-8"))
+        self.assertIn('$("app-version")', (REPO_ROOT / "web" / "app.js").read_text("utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

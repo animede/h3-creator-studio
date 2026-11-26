@@ -188,6 +188,7 @@ function summarize(s) {
 
 function updateParts(s) {
   lastStatus = s;
+  if (s.version) $("app-version").textContent = "v" + s.version;      // 版(問題の報告のときに分かるように)
   const sum = summarize(s);
   $("parts-summary").textContent = sum.text;
   $("parts-summary").classList.toggle("err", sum.error);

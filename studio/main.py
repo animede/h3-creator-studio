@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from . import angles, editclip, genres, h3cache, h3imgcache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
 from .components import ComponentNotInstalled, all_specs
+from . import __version__
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
 from .enhance import EnhanceError, enhance_prompt
@@ -98,7 +99,7 @@ async def lifespan(app: FastAPI):
     ledger.close()
 
 
-app = FastAPI(title="YUZU Creator Studio", lifespan=lifespan)
+app = FastAPI(title="YUZU Creator Studio", version=__version__, lifespan=lifespan)
 
 
 def _comp(name: str):
@@ -116,7 +117,8 @@ def api_status():
             "warning": snap["warning"], "operation": sched.current_operation(), "busy": sched.is_busy(), "ts": time.time(),
             "jobs_done_counter": app.state.jobs.done_counter,
             "gpu_mode": sched.mode, "residents": sched.resident_status(), "lanes": app.state.jobs.lane_status(),
-            "llm": app.state.llm.panel() if getattr(app.state, "llm", None) is not None else None}          # 同梱 LLM(llama-server)の状態。エンジンの欄に出す(止めるのは /api/llm/stop)
+            "llm": app.state.llm.panel() if getattr(app.state, "llm", None) is not None else None,
+            "version": __version__}          # 同梱 LLM(llama-server)の状態。エンジンの欄に出す(止めるのは /api/llm/stop)
 
 
 @app.post("/api/components/{name}/{action}")

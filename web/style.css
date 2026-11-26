@@ -18,6 +18,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 syst
 .credits { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; padding: 8px 16px 12px; border-top: 1px solid var(--line);
   font-size: 12px; color: var(--muted); }
 .credits .cr { color: var(--text); }
+.credits .ver { font-variant-numeric: tabular-nums; }
 .credits a { color: #c9d4e6; }
 .gauges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; }
 .lanes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-left: auto; min-height: 18px; font-size: 12px; }
