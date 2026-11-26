@@ -494,7 +494,8 @@ What you put in decides the video's length and how scenes are cut.
 
 | Input | Length | How scenes are cut | Scene audio |
 |---|---|---|---|
-| With narration (song optional) | Length of the speech | Grouped into 5–10 seconds at sentence breaks | The character lip-syncs to the speech. The song plays underneath as background music |
+| With narration + a person image (song optional) | Length of the speech | Grouped into 5–10 seconds at sentence breaks | The character lip-syncs to the speech. The song plays underneath as background music |
+| With narration, no person image (voice-over) | Length of the speech | Same | An off-screen voice. Scenery scenes are made silent; the speech (+ the song as background music) is laid on at assembly |
 | Song only | Length of the song | Same as music videos (separate vocals, cut at silences, breaths, and bars) | Made without passing audio; replaced by the song during assembly |
 | Neither | The length you set | The LLM divides the story into 5–10 second scenes | The sound H3 makes (ambience, sound effects) is kept as is |
 
@@ -504,14 +505,14 @@ The length field appears or disappears and the hint (such as "Length: song lengt
 
 - **Story / visual idea** (物語・映像のイメージ): what to show. Required when there's no song and no narration (the hint becomes "Required: with no song or narration, this is the basis" (必須: 曲もセリフも無いので、これが元になります)). Optional otherwise.
 - **Song** (optional): a song from the Music tab, the gallery, or an audio file from your PC. With narration, "With narration, the song plays underneath as background music" (セリフがあるので、曲は BGM として下に敷きます) appears.
-- **Narration** (セリフ・ナレーション) (optional): if present, it's read aloud with AivisSpeech and the character lip-syncs to it. Left empty, the video has no narration.
+- **Narration** (セリフ・ナレーション) (optional): if present, it's read aloud with AivisSpeech. With a person image the character lip-syncs to it; without one it plays as an off-screen voice-over over the scenery. Left empty, the video has no narration.
   - **📝 From story** (📝 物語から作る): the bundled LLM drafts narration from the story text (it also uses the song's content if there is one). About 20–60 seconds on CPU. Check and edit it before making the video.
 - **Voice**: required when there's narration. The list loads when you enter narration (AivisSpeech is started if it's stopped). It carries over the voice chosen in the Video tab's text-to-speech.
 - **Burn in narration captions (subtitles)** (セリフのテロップ(字幕)を焼き込む): burns white captions at the bottom of the screen (a little higher for portrait), timed to the speech. An SRT with the same content is also saved next to the final video (for subtitles on video sites). Does nothing in projects without narration.
 - **Reference images** (参照画像) (0–4): choose a **Role** (役割) for each.
-  - **Person** (人物): appears as the same person in every scene. **One at most** (multiple cast members aren't supported). The first image you drop becomes the person.
-  - **Scenery / object** (景色・物): a reference for scenes showing that place or object. From the second image on, they become scenery / object (you can change the role).
-- **Character description**: appears when you add a person image. As in music videos, if empty the image's prompt is used, or the image is looked at. **🔍 From image** works the same as in music videos.
+  - **Scenery / object** (景色・物): a reference for scenes showing that place or object. Dropped images start with this role.
+  - **Person** (人物): appears as the same person in every scene. **One at most** (multiple cast members aren't supported). Switch a person image's role to Person (so a landscape is never made to lip-sync).
+- **Character description**: appears when you add a person image. As in music videos, if empty the image's prompt is used, or the image is looked at. The prompt of an image made with the Image tab edit is an edit instruction (such as "extend the surroundings"), so it is not used (the image is looked at instead); the Music Video tab does the same. **🔍 From image** works the same as in music videos.
 - **Length (s)** (長さ(秒)): shown only when there's no song and no narration. 30 seconds or more, up to 3600 seconds (1 hour). Default 60 seconds.
 - **Aspect** / **Quality** / **Background text** / **Min scene length (s)** / **Max scene length (s)** / **Seed**: same as music videos (see the tables in "[Music Video tab](#music-video-tab)"). Subtitles and captions are never drawn by the model (burned-in captions are separate).
 - **Final audio** (最終の音声): **Auto** / **No audio (video only)** (音声なし(映像だけ)).
@@ -524,9 +525,11 @@ Same as the Music Video tab. A **Visual style** keeps every scene's direction in
 
 ### Rules for the person and narration
 
-- **With narration, a person image is required** (someone to lip-sync). Without one, "With narration, add an image of the person to lip-sync and set its role to Person" (セリフがあるときは、口を合わせる人物の画像を入れて、役割を「人物」にしてください) appears.
-- The speech runs through the whole video, so videos with narration **can't have scenes without the person (scenery only)**.
-- For stories that need cuts without the person, make the video with no narration plus a song, or with no audio, and add the narration in another tool.
+- **Narration without a person image** becomes an **off-screen voice-over**. "There is no person image, so the narration plays as an off-screen voice over the scenery. To lip-sync, add an image with the role "Person"" (人物の画像が無いので、ナレーション(画面の外の声)として景色に載せます…) appears.
+  - Length and scene cuts are the same as with lip-sync (speech length, sentence breaks).
+  - Scenes use the scenery / object images as references (or none) and are made silent with the scene length given. The direction follows the narration sentences and shows no people.
+  - The speech is laid on at assembly (mixed with the song as background music if there is one). Captions and SRT work the same.
+- With a person image, the speech runs through the whole video, so **scenes without the person (scenery only) can't be made**.
 
 ### Length warning
 
@@ -781,6 +784,7 @@ The quickest way is to copy the built-in `samples/mv-starry-night/sample.json` a
 - **Stop**: stops it. External engines and busy engines can't be stopped.
 - **Prepare**: loads it onto the GPU so it's ready to use (unloading others if needed).
 - **Log**: opens the latest 100 lines. The same content is in `logs/<name>.log`.
+- **Bundled LLM** row: the supervisor's LLM (llama-server). Shows its state (Stopped / Starting / Ready (GPU) / Ready (CPU)) and RAM, with a **Stop** button (disabled while in use; it restarts automatically the next time the LLM is needed).
 - **External** badge: an engine that was already listening on its port rather than started by the supervisor. The supervisor uses it as is and doesn't stop it. Prompt enhancement may not work with external engines (it works if the supervisor restarts them).
 
 ### One engine at a time (under 40GB) vs. several at once (40GB or more)
@@ -841,6 +845,8 @@ When VRAM overflows, Windows starts using CPU memory in place of GPU memory. It 
 
 ### Common issues
 
+- **"Video (MiniMax-H3) had exited (possibly out of RAM). Last log lines: …"**: the engine process ended in the middle of a job (usually the OS killed it for lack of RAM). The supervisor marks it stopped and **restarts it and tries once more automatically** (Music Video / Short Video scenes, Image / Video / Music jobs). If it exits again, the job fails. Close other apps, then retry or resume.
+- **PCs with little RAM (under 32GiB)**: before a GPU job starts, idle AivisSpeech (started by the supervisor, not speaking) and the bundled LLM (not in use) are stopped automatically (the job shows "Freeing memory (stopping text-to-speech and the bundled LLM)"; both restart when next needed). `[gpu] free_cpu_engines` = `"auto"` (default) / `"always"` / `"never"`.
 - **The first image takes over an hour / downloads keep going** (RAM fills up repeatedly): MiniMax-H3-Image's main-model cache (per step count, about 11GB) is missing, so the first generation fetches the bf16 model (about 62GB) one shard at a time and quantizes it (earlier setup did not build it). If you wait, it is fast afterwards. To build it ahead, stop the studio and run in PowerShell `cd <h3image folder>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 3` (uses the GPU). `.\setup.bat --only h3image` also checks and builds it.
 - **"The Python environment of ... is incomplete (module uvicorn is missing)"**: that engine's virtual environment was only partly installed (its log has `No module named ...`). Stop the studio, then run `.\setup.bat --only <name>` (Linux: `./setup.sh --only <name>`). The name (h3 / h3image / ace, etc.) is in the message.
 - **An engine shows "Error"**: open **Log** on that engine's row in the engine panel. The same content is in `logs\<name>.log` (`logs/h3.log`, etc.). If a model or environment is missing, run setup again.

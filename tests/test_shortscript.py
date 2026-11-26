@@ -284,6 +284,25 @@ class GenerateScenarioTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("はじめの文", "".join(it["prompt"] for it in (await self.gen(
             FakeChat([[item(1), item(2)]]), [scene(1), scene(2)], timeline="speech", narration_sentences=sentences))["scenes"]))
 
+    async def test_voiceover_has_no_lip_sync_and_keeps_the_sentences(self):
+        """人物の画像が無いセリフ(voiceover): 口の規則も <Audio 1> も無く、読み上げの文(SPOKEN)で景色を描く。景色の参照は使える。"""
+        sentences = [{"text": "海が見えた。", "start": 0.0, "end": 4.0}, {"text": "風が吹く。", "start": 8.0, "end": 12.0}]
+        chat = FakeChat([[item(1), item(2, refs=[0])]])
+        result = await self.gen(chat, [scene(1), scene(2)], timeline="speech", roles=["scenery"], descs=DESCS[1:2], character={},
+                                narration_sentences=sentences, voiceover=True)
+        user = chat.calls[0]["user"]
+        self.assertIn("off-screen voice-over", user)
+        self.assertNotIn("lips move naturally", user)
+        self.assertNotIn("CHARACTER_REFERENCE_FACTS", user)
+        briefs = json.loads(re.search(r"SCENES: (\[.*\])\nReturn", user).group(1))
+        self.assertEqual((briefs[0]["spoken"], briefs[1]["spoken"]), (["海が見えた。"], ["風が吹く。"]))
+        self.assertEqual([it["refs"] for it in result["scenes"]], [[], [0]])
+        for it in result["scenes"]:
+            self.assertNotIn("<Audio 1>", it["prompt"])
+            self.assertNotIn("synchroniz", it["prompt"])
+        voiceless = await self.gen(FakeChat([[item(1)]]), [scene(1)], timeline="speech", roles=[], descs=[], character={}, voiceover=True)
+        self.assertTrue(voiceless["scenes"][0]["prompt"].startswith("integrated_multimodal_description: [Shot 1]"))      # 画像が無ければ t2va
+
     async def test_narration_sentences_only_for_speech(self):
         chat = FakeChat([[item(1)]])
         await self.gen(chat, [scene(1)], timeline="music", narration_sentences=[{"text": "x", "start": 0, "end": 1}])

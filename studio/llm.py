@@ -456,6 +456,26 @@ class Llm:
         await asyncio.to_thread(procman.stop, proc)
         return True
 
+    def idle_stoppable(self) -> bool:
+        """止めてよい待機中の子プロセスか(自分で起動した・使っている chat が無い・起動中でも止めている最中でもない)。RAM の少ない PC で、
+        GPU の仕事の前に止めるのに使う(次の chat で起動し直す)。"""
+        return (self._proc is not None and not self._external and self._users == 0 and not self._starting and not self._releasing
+                and procman.is_alive(self._proc))
+
+    def panel(self) -> dict:
+        """エンジンの欄に出す軽い状態(nvidia-smi を呼ばない): state = stopped / starting / ready-gpu / ready-cpu、RAM(プロセスの RSS)、VRAM(分からないので null)。"""
+        running = self.running()
+        if self._starting:
+            state = "starting"
+        elif running:
+            state = "ready-gpu" if self._gpu and not self._cpu_only else "ready-cpu"
+        else:
+            state = "stopped"
+        rss = procman.rss_bytes(self._proc) if self._proc is not None and running else None
+        return {"label": "同梱 LLM", "state": state, "external": self._external, "port": self.port, "in_use": self._users,
+                "rss_mib": round(rss / 1048576) if rss else None, "vram_mib": None, "can_stop": bool(self._proc is not None and not self._external),
+                "error": self._error}
+
     async def release_before_gpu(self) -> bool:
         """GPU エンジンを載せる直前に呼ぶ。GPU を使っている子プロセスが居れば止めて VRAM を返す(次の chat で、CPU 専用の子として起こし直す)。
 

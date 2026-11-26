@@ -47,6 +47,10 @@ mode = "auto"
 #   "1" など = その番号の GPU を管理し、エンジンもそこへ寄せる
 # 管理役を起動する環境や [components.<name>.env] に CUDA_VISIBLE_DEVICES を書いたときは、そちらが優先(上書きしない)。
 devices = "auto"
+# free_cpu_engines = GPU の仕事(画像・動画・音楽・MV・ショート動画のシーン)を始める前に、待機中の CPU の手伝い
+#   (管理役が起動した AivisSpeech と同梱 LLM。使っている最中のものは止めない)を止めて RAM を空けるか。止めたものは次に使うときに起動し直す。
+#   "auto" = 搭載 RAM が 32GiB 未満のときだけ / "always" = いつも / "never" = 止めない
+free_cpu_engines = "auto"
 
 # MV・ショート動画タブの音声処理(Demucs のボーカル分離、シーン分割、読み上げの分割)を動かす Python。
 # 空なら setup --mv が作る components/mvtools/.venv を使う。すでに Demucs と librosa の入った環境があれば、その python を書く。

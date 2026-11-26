@@ -129,8 +129,37 @@ function render(s) {
     r.bEnsure.disabled = s.busy;
     if (openLogs.has(name)) refreshLog(name);
   }
+  if (s.llm) renderLlm(s.llm);
   showOp(s.operation);
   updateParts(s);
+}
+
+// 同梱 LLM(llama-server)の行: 状態(停止 / 起動中 / GPU で準備完了 / CPU で準備完了)・RAM・停止ボタン。止めても、次に LLM を使うときに起動し直す
+const LLM_STATE = { stopped: t("停止"), starting: t("起動中"), "ready-gpu": t("準備完了(GPU)"), "ready-cpu": t("準備完了(CPU)") };
+let llmRow = null;
+function renderLlm(l) {
+  if (!llmRow) {
+    const row = el("div", "row");
+    llmRow = { label: el("span", "label", t("同梱 LLM")), badge: el("span", "badge"), ext: el("span", "tag ext", t("外部")),
+      port: el("span", "meta"), rss: el("span", "meta"), btns: el("span", "btns") };
+    llmRow.bStop = el("button", "", LANG === "en" ? "Stop" : "停止");      // i18n-skip エンジンの行と同じ(状態の「停止」と鍵を分ける)
+    llmRow.bStop.title = t("止めても、次に LLM を使うときに自動で起動し直します");
+    llmRow.bStop.onclick = async () => {
+      try { await post("/api/llm/stop"); } catch (e) { showOp({ steps: [], error: String(e.message || e) }); }
+      poll();
+    };
+    llmRow.btns.append(llmRow.bStop);
+    row.append(llmRow.label, llmRow.badge, llmRow.ext, llmRow.port, llmRow.rss, llmRow.btns);
+    $("rows").append(row);
+  }
+  const state = l.state || "stopped";
+  llmRow.badge.textContent = LLM_STATE[state] || state;
+  llmRow.badge.className = "badge " + (state.startsWith("ready") ? "ready" : state);
+  llmRow.ext.hidden = !l.external;
+  llmRow.port.textContent = l.port ? `:${l.port}` : "";
+  llmRow.rss.textContent = l.rss_mib != null ? `RSS ${gib(l.rss_mib)} GiB` : "";
+  llmRow.rss.title = l.error || "";
+  llmRow.bStop.disabled = !l.can_stop || state === "stopped" || state === "starting" || l.in_use > 0;
 }
 
 // エンジンパネル: 準備が整ったら自動で畳み、見出しに 1 行で状況を出す(利用者が開閉したら以後は自動にしない)

@@ -23,6 +23,7 @@ from .. import config, media, mv_audio, mvclip, mvdescribe, mvscript
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from ..ledger import THUMB_WIDTH
 from ..llm import LlmError
+from ..mv import description_prompt as mv_description_prompt
 from ..mv import make_scenes, scene_clip_name, scene_thumb_name, scene_vocals_name, work_dir
 from . import h3
 from .common import download
@@ -205,7 +206,7 @@ async def _describe_image(job: Job, ctx: Ctx, proj: dict, image_id: str = None) 
     if rec is None:
         return ""
     job.message = "画像を見て、人物の見た目を調べています"
-    res = await mvdescribe.describe_character(ctx.llm, ctx.ledger.abs_path(rec["path"]), str(rec["params"].get("prompt") or ""))
+    res = await mvdescribe.describe_character(ctx.llm, ctx.ledger.abs_path(rec["path"]), mv_description_prompt(rec["params"]))
     source = {"vision": "vision", "prompt": "image"}.get(res["source"], "none")        # none: 読めなかった(再開しても、また頼まない)
     ctx.ledger.update_mv_project(proj["id"], params_patch={"character": res["text"], "character_source": source, "character_note": res["note"]})
     log.info("MV %s: 人物の説明を自動で作りました(%s): %s", proj["id"], res["source"], res["text"] or res["note"])

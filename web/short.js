@@ -45,7 +45,7 @@
   }
 
   const busy = { char: false, narr: false };
-  const hasPrompt = (item) => !!(item && item.params && String(item.params.prompt || "").trim());      // 画像タブで作った画像か(台帳に画像のプロンプトがある)
+  const hasPrompt = (item) => !!descPrompt(item);      // 画像タブで作った画像か(台帳に画像のプロンプトがある)
 
   function setNote(which, text) {
     sh(which + "-note").hidden = !text;
@@ -154,7 +154,7 @@
     if (id === charFor) return;
     charFor = id;
     setNote("char", "");
-    fill(sh("char"), p ? String((p.item.params && p.item.params.prompt) || "").trim().slice(0, CHAR_MAX) : "");
+    fill(sh("char"), p ? descPrompt(p.item).slice(0, CHAR_MAX) : "");
   }
 
   // role は、サンプルなど役割が決まっているときだけ渡す(人物は 1 枚までなので、2 枚目の人物は景色・物にする)
@@ -162,7 +162,7 @@
     if (item.kind !== "image") { showMsg(t("参照画像には画像を落としてください")); return false; }
     if (images.some((r) => r.item.id === item.id)) { showMsg(t("その画像はもう入っています")); return false; }
     if (images.length >= IMAGES_MAX) { showMsg(t("参照画像は {n} 枚までです", { n: IMAGES_MAX })); return false; }
-    images.push({ item, role: (role || "person") === "person" && !person() ? "person" : "scenery" });      // 最初の 1 枚は人物、2 枚目からは景色・物(役割は選び直せる)
+    images.push({ item, role: role === "person" && !person() ? "person" : "scenery" });      // 既定は景色・物(人物は役割を選び直す。風景を人物として口を合わせようとしていた、2026-11-26 の実機)。人物は 1 枚まで
     showMsg("");
     renderImages();
     changed();
@@ -287,6 +287,7 @@
     syncPerson();
     sh("story-req").textContent = tl === "free" ? t("(必須: 曲もセリフも無いので、これが元になります)") : t("(任意)");
     sh("bgm-note").hidden = !(tl === "speech" && song);
+    sh("vo-note").hidden = !(tl === "speech" && !person());      // 人物の画像が無いセリフは、画面の外の声(ナレーション)になる
     sh("length-fld").hidden = tl !== "free";
     const sec = expectedSeconds();
     const note = sh("len-note");
@@ -349,7 +350,6 @@
     const tl = timeline();
     const story = sh("story").value.trim(), narration = sh("narr").value.trim();
     if (!story && !song && !narration) { showMsg(t("物語・映像のイメージを書いてください(曲もセリフも無いときは必須です)")); return; }
-    if (narration && !person()) { showMsg(t("セリフがあるときは、口を合わせる人物の画像を入れて、役割を「人物」にしてください")); return; }
     if (narration && !speakers) { speakersFailed = false; loadSpeakers(); showMsg(t("話者の一覧を読めていません。読み込んでから、話者を選んでください")); return; }      // 読めていなければ読み直す
     if (narration && !sh("speaker").value) { showMsg(t("セリフを読み上げる話者を選んでください")); return; }
     const min = +sh("min").value, max = +sh("max").value;

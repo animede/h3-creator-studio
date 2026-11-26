@@ -41,6 +41,10 @@ class Tts:
         self.sched, self.ledger, self.outputs_dir, self.transport = sched, ledger, Path(outputs_dir), transport
         self._speakers: list = []
         self._speakers_at = 0.0
+        self._active = 0             # 合成・一覧の最中の数(RAM の少ない PC で、GPU の仕事の前に AivisSpeech を止めてよいかの判定)
+
+    def in_use(self) -> bool:
+        return self._active > 0
 
     async def _ready(self) -> httpx.AsyncClient:
         """AivisSpeech を使える状態にして、その API 用のクライアントを返す。"""
@@ -84,6 +88,13 @@ class Tts:
         if len(text) > MAX_TEXT:
             raise TtsError(f"読み上げる文は {MAX_TEXT} 文字までです(いま {len(text)} 文字)", 400)
         speed = min(MAX_SPEED, max(MIN_SPEED, float(speed or 1.0)))
+        self._active += 1
+        try:
+            return await self._synthesize_wav(text, style_id, speed)
+        finally:
+            self._active -= 1
+
+    async def _synthesize_wav(self, text: str, style_id: int, speed: float) -> bytes:
         async with await self._ready() as c:
             try:
                 r = await c.post("/audio_query", params={"text": text, "speaker": style_id})

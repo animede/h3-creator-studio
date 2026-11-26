@@ -115,6 +115,7 @@ class Component:
         self.last_error: Optional[str] = None
         self.budget_mib: Optional[int] = None    # share で起動したときの利用枠。止めるまで変えない(エンジンは起動時の利用枠のまま動く)
         self.since = time.time()
+        self.died_at: Optional[float] = None     # 自分で起動したプロセスが、止めていないのに終わっていたのを見つけた時刻(ジョブの失敗の理由とやり直しに使う)
 
 
 @dataclass
@@ -551,9 +552,24 @@ class Scheduler:
         if c is not None:
             self._check_alive(c)
 
+    def engine_died(self, name: str, since: float) -> Optional[bool]:
+        """エンジン name(自分で起動したもの)のプロセスが、時刻 since 以降に終わっていたか(落ちていれば、ここで stopped に戻す)。
+        ジョブがエンジンと通信できなくなったとき、エンジンが死んだのか(RAM 不足で OS に止められた、など)を見分けるのに使う。
+        割り当ての見直し(plan)が先に落ちたのを見つけていても、その時刻(died_at)で分かる。
+        終わっていれば True、まだ動いていれば False。見張れるプロセスが無い(外部で動いていたもの・起動していない)なら None(待っても分からない)。"""
+        c = self.comps.get(name)
+        if c is None:
+            return None
+        self._check_alive(c)
+        if c.died_at is not None and c.died_at >= since:
+            return True
+        return False if c.proc is not None and not c.external else None
+
     def _check_alive(self, c: Component) -> None:
-        """自分で起動したエンジンが落ちていたら stopped に戻す。"""
+        """自分で起動したエンジンが落ちていたら stopped に戻す(見つけた時刻を died_at に残す)。"""
         if c.proc is not None and not c.external and not procman.is_alive(c.proc):
+            log.warning("%s のプロセスが終了していました", c.spec.label)
+            c.died_at = time.time()
             c.proc = None
             self.residents.pop(c.spec.name, None)
             if c.state in ("ready", "unloaded", "starting"):

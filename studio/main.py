@@ -30,6 +30,7 @@ from .jobs import TERMINAL, Ctx, JobRunner
 from .ledger import Ledger
 from .llm import Llm, LlmError
 from .mv import Director, concept_from_song, pick_image, pick_song, song_has_info
+from .mv import description_prompt as mv_description_prompt
 from .mvdescribe import describe_character, listen_song, propose_concept
 from .presets import PresetError
 from .samples import SampleError
@@ -69,7 +70,8 @@ async def lifespan(app: FastAPI):
         logging.getLogger("studio.main").info("作りかけのファイル(*.part)を %d 個消しました", stale)
     app.state.tts = Tts(sched, ledger, OUTPUTS_DIR)
     app.state.llm = llm = Llm(settings)
-    app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm, tts=app.state.tts), HANDLERS)
+    app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm, tts=app.state.tts,
+                                                 free_cpu_engines=settings.free_cpu_engines), HANDLERS)
     app.state.mv = director = Director(runner, ledger, OUTPUTS_DIR)
     director.restore()       # 再起動で途切れた MV の制作は、一時停止にして残す
     app.state.short = short_director = ShortDirector(runner, ledger, OUTPUTS_DIR)
@@ -110,7 +112,8 @@ def api_status():
             "shared_gpu_total_mib": snap.get("shared_gpu_total_mib"),          # 共有 GPU メモリの上限(Windows だけ。RAM の半分。他は null)
             "warning": snap["warning"], "operation": sched.current_operation(), "busy": sched.is_busy(), "ts": time.time(),
             "jobs_done_counter": app.state.jobs.done_counter,
-            "gpu_mode": sched.mode, "residents": sched.resident_status(), "lanes": app.state.jobs.lane_status()}
+            "gpu_mode": sched.mode, "residents": sched.resident_status(), "lanes": app.state.jobs.lane_status(),
+            "llm": app.state.llm.panel() if getattr(app.state, "llm", None) is not None else None}          # 同梱 LLM(llama-server)の状態。エンジンの欄に出す(止めるのは /api/llm/stop)
 
 
 @app.post("/api/components/{name}/{action}")
@@ -206,6 +209,15 @@ async def api_job_cancel(job_id: str):
 
 
 # ---- LLM(プロンプト強化・作詞) ----
+
+@app.post("/api/llm/stop")
+async def api_llm_stop():
+    """同梱 LLM(自分で起動した llama-server)を止める。次に LLM を使うときに起動し直す。使っている最中なら断る。"""
+    llm = app.state.llm
+    if llm.panel()["in_use"]:
+        raise HTTPException(409, "同梱 LLM は使用中です。終わってからもう一度押してください")
+    return {"stopped": await llm.stop()}
+
 
 @app.get("/api/llm/status")
 def api_llm_status():
@@ -529,7 +541,7 @@ async def api_mv_describe_image(body: DescribeImageIn):
     with _mv_errors():
         rec = pick_image(app.state.ledger, body.image_id)
     try:
-        return await describe_character(app.state.llm, app.state.ledger.abs_path(rec["path"]), str(rec["params"].get("prompt") or ""))
+        return await describe_character(app.state.llm, app.state.ledger.abs_path(rec["path"]), mv_description_prompt(rec["params"]))
     except LlmError as e:
         raise HTTPException(503, e.message)
 
@@ -676,7 +688,7 @@ def api_short_list(limit: int = 100):
 @app.post("/api/short")
 async def api_short_create(body: ShortIn):
     with _mv_errors():
-        if body.images or body.narration.strip():       # 参照画像かセリフがあると、シーンを Ref2VA で作る(どちらも無ければ T2VA だけ)
+        if body.images:       # 参照画像があると、シーンを Ref2VA で作る(画像が無ければ、セリフがあっても画面の外の声なので T2VA だけ)
             h3cache.check_ref_cache()
         return _mv_public(app.state.short.create(body.model_dump()))
 

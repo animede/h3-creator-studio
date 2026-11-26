@@ -13,6 +13,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+import httpx
+import psutil
+
+from . import procman
 from .ledger import Ledger
 from .scheduler import Scheduler, SwitchError
 
@@ -24,6 +28,14 @@ CPU_LANE = "cpu"
 CPU_SLOTS = 2                         # CPU のレーンで同時に走らせる数
 WAIT_ORDER = "順番を待っています"
 WAIT_PREPARE = "エンジンを準備しています"
+LOW_RAM_BYTES = 32 * 1024 ** 3        # 搭載 RAM がこれ未満なら、GPU の仕事の前に、待機中の CPU の手伝い(読み上げ・同梱 LLM)を止める([gpu] free_cpu_engines = auto)
+FREE_CPU_SETTINGS = ("auto", "always", "never")
+MSG_FREE_CPU = "メモリを空けています(読み上げ・同梱 LLM を止めます)"
+RETRY_COMPONENTS = ("h3", "h3image", "ace")    # エンジンが途中で終了していたら、1 回だけ起動し直してやり直すジョブのエンジン
+DEATH_GRACE_S = 30.0                  # 通信が途切れたとき、エンジンのプロセスが終わったと分かるまで待つ上限。GPU を使うプロセスは、ソケットが閉じてから
+                                      # OS が片づけ終わる(poll で終了が見える)まで数秒かかる(2026-11-26 の実機: すぐ確かめると、まだ生きて見えた)
+DEATH_POLL_S = 0.5
+DIED_TAIL_LINES = 3                   # 失敗の理由に入れる、エンジンのログの末尾の行数(log_tail にはもっと入れる)
 DISPATCH_POLL_S = 2.0                 # 状態の通知が無くても、この間隔で割り当てを見直す(外部のエンジンが止まって VRAM が空いた、など)
 
 
@@ -37,6 +49,46 @@ class JobFailed(Exception):
 
 class JobCancelled(Exception):
     """エンジンが中断(interrupted)を報告した。"""
+
+
+class EngineDied(JobFailed):
+    """ジョブの最中に、自分で起動したエンジンのプロセスが終わっていた(RAM 不足で OS に止められた、など。2026-11-26 の Windows の実機)。"""
+
+
+def transport_error(e: Optional[BaseException]) -> bool:
+    """失敗の元(__cause__ / __context__ をたどる)に、通信の途切れ(httpx.TransportError: 接続できない・応答の途中で切れた、など)があるか。
+    ハンドラは httpx の例外を JobFailed に包み直すので、包んだ側だけを見ても分からない。"""
+    seen: set = set()
+    while e is not None and id(e) not in seen:
+        if isinstance(e, httpx.TransportError):
+            return True
+        seen.add(id(e))
+        e = e.__cause__ or e.__context__
+    return False
+
+
+def should_free_cpu(setting, total_bytes) -> bool:
+    """GPU の仕事の前に、待機中の CPU の手伝いを止めるか。always / never はそのまま、auto(と読めない値)は搭載 RAM が 32GiB 未満のとき。"""
+    value = str(setting or "auto").strip().lower()
+    if value == "always":
+        return True
+    if value == "never":
+        return False
+    return total_bytes is not None and total_bytes < LOW_RAM_BYTES
+
+
+def total_ram_bytes():
+    try:
+        return psutil.virtual_memory().total
+    except Exception:  # noqa: BLE001  分からなければ止めない
+        return None
+
+
+def died_message(label: str, tail: str) -> str:
+    """エンジンが終了していたときの、利用者向けの文(ログの末尾の数行を 1 行にして添える)。"""
+    lines = [ln.strip() for ln in (tail or "").splitlines() if ln.strip()][-DIED_TAIL_LINES:]
+    last = " / ".join(lines)[-400:] or "(ログがありません)"
+    return f"{label} が終了していました(RAM 不足の可能性があります)。ログの最後: {last}"
 
 
 @dataclass
@@ -74,6 +126,7 @@ class Ctx:
     transport: object = None
     llm: object = None            # studio.llm.Llm(歌詞づくりなど、LLM を使う prepare が使う)
     tts: object = None            # studio.tts.Tts(ショート動画が、セリフ・ナレーションの読み上げに使う)
+    free_cpu_engines: str = "never"   # [gpu] free_cpu_engines(auto / always / never)。main は studio.toml の値(既定 auto)を入れる
 
 
 @dataclass
@@ -327,14 +380,28 @@ class JobRunner:
                 self._gpu_claimed.add(job.id)
                 if self.ctx.llm is not None:
                     await self.ctx.llm.release_before_gpu()
-            if handler.component:
-                await self._prepare(job, handler.component)
-                if job.cancel_requested:
-                    raise JobCancelled()
-            if self._reserved.pop(job.id, None):
-                self.wake()           # 載せ終わった: 降ろす予定で待たせていたエンジンの仕事も始められる
-            job.status, job.message, job.wait_reason = "running", "生成を始めます", None
-            await handler.run(job, self.ctx)
+                if handler.component and str(self.ctx.free_cpu_engines or "").lower() != "never":
+                    await self._free_cpu_helpers(job)
+            retried = False
+            while True:
+                if handler.component:
+                    await self._prepare(job, handler.component)
+                    if job.cancel_requested:
+                        raise JobCancelled()
+                if self._reserved.pop(job.id, None):
+                    self.wake()           # 載せ終わった: 降ろす予定で待たせていたエンジンの仕事も始められる
+                job.status, job.message, job.wait_reason = "running", "生成を始めます", None
+                try:
+                    await self._run_watching(job, handler)
+                    break
+                except EngineDied as e:
+                    # エンジンが途中で終了していた: 1 回だけ、起動し直して(次の ensure が起こす)やり直す。2 回目は普通に失敗にする
+                    if retried or job.cancel_requested or handler.component not in RETRY_COMPONENTS:
+                        raise
+                    retried = True
+                    log.warning("ジョブ %s: %s。エンジンを起動し直して、1 回だけやり直します", job.id, e.message)
+                    job.log_tail, job.progress, job.remote_id = e.log_tail, 0.0, None
+                    job.status, job.message, job.wait_reason = "preparing", "エンジンが終了していたので、起動し直してやり直します", WAIT_PREPARE
             self._finish(job, "completed", "完了しました")
         except JobCancelled:
             self._finish(job, "cancelled", "中止しました")
@@ -362,6 +429,84 @@ class JobRunner:
                 still = self.running()
                 self.current = still[-1] if still else None
             self.wake()
+
+    async def _run_watching(self, job: Job, handler: Handler) -> None:
+        """handler.run を走らせる。失敗したとき(エンジンと通信できない・応答が途切れた、など)、そのエンジンのプロセスが走り始めてから
+        終わっていたなら、EngineDied(「〜が終了していました(RAM 不足の可能性があります)」+ ログの末尾)に置き換える(停止扱いは scheduler がする)。
+        中止は置き換えない。エンジンが生きていれば、元の失敗のまま。"""
+        since = time.time()
+        try:
+            await handler.run(job, self.ctx)
+        except (JobCancelled, asyncio.CancelledError, EngineDied):
+            raise
+        except Exception as e:
+            died = await self._engine_died(job, handler.component, since, wait=transport_error(e))
+            if died is None:
+                raise
+            raise died from e
+
+    async def _engine_died(self, job: Job, component: Optional[str], since: float, wait: bool = False) -> Optional[EngineDied]:
+        """エンジンのプロセスが since 以降に終わっていたら EngineDied を返す。wait(通信が途切れた)なら、終わったと分かるまで
+        DEATH_GRACE_S まで待つ(中止が来たら待つのをやめる)。それ以外の失敗は、その場で 1 回だけ確かめる。"""
+        check = getattr(self.ctx.sched, "engine_died", None)
+        if not component or check is None:
+            return None
+        deadline = time.monotonic() + (DEATH_GRACE_S if wait else 0.0)
+        while True:
+            try:
+                dead = check(component, since)
+            except Exception:  # noqa: BLE001  調べられなければ、元の失敗のまま
+                log.exception("エンジンの生存を確かめられません: %s", component)
+                return None
+            if dead:
+                break
+            if dead is None or job.cancel_requested or time.monotonic() >= deadline:     # None: 見張れるプロセスが無い(外部のエンジン)
+                return None
+            await asyncio.sleep(DEATH_POLL_S)
+        comps = getattr(self.ctx.sched, "comps", None) or {}
+        spec = getattr(comps.get(component), "spec", None)
+        label = getattr(spec, "label", None) or COMPONENT_NAMES.get(component, component)
+        tail = procman.log_tail(component, 40)
+        return EngineDied(died_message(label, tail), tail)
+
+    # ---- RAM の少ない PC: GPU の仕事の前に、待機中の CPU の手伝いを止める ----
+
+    def _tts_job_running(self) -> bool:
+        """読み上げを使うジョブ(ショート動画の音声の準備)が走っているか。"""
+        return any(j.kind == "short.analyze" and j.status in ("preparing", "running") for j in self.running())
+
+    async def _free_cpu_helpers(self, job: Job) -> list:
+        """搭載 RAM が少ない(または always)とき、待機中の AivisSpeech(管理役が起動したもの・読み上げ中でない)と同梱 LLM(使用中でない)を止める。
+        どちらも次に使うときに起動し直す。止めたものの名前を返す。止められなくてもジョブは続ける。"""
+        if not should_free_cpu(self.ctx.free_cpu_engines, total_ram_bytes()):      # psutil は速いので、そのまま(待ちを挟むとジョブの始まる順が変わる)
+            return []
+        targets = []
+        sched, tts, llm = self.ctx.sched, self.ctx.tts, self.ctx.llm
+        aivis = (getattr(sched, "comps", None) or {}).get("aivis")
+        if (aivis is not None and aivis.proc is not None and not aivis.external and aivis.state == "ready"
+                and not (tts is not None and getattr(tts, "in_use", lambda: False)()) and not self._tts_job_running()):
+            targets.append("aivis")
+        if llm is not None and getattr(llm, "idle_stoppable", lambda: False)():
+            targets.append("llm")
+        if not targets:
+            return []
+        job.message = MSG_FREE_CPU
+        log.info("RAM が少ないので、GPU の仕事の前に待機中の %s を止めます", "・".join({"aivis": "AivisSpeech", "llm": "同梱 LLM"}[t] for t in targets))
+        stopped = []
+        for name in targets:
+            try:
+                if name == "aivis":
+                    op = sched.new_operation("stop", "aivis")
+                    try:
+                        await sched.stop("aivis", op)
+                    finally:
+                        op.done = True
+                elif await llm.stop():
+                    pass
+                stopped.append(name)
+            except Exception:  # noqa: BLE001  止められなくても、仕事は続ける
+                log.exception("待機中の %s を止められません", name)
+        return stopped
 
     async def _prepare(self, job: Job, component: str) -> None:
         """scheduler.ensure を走らせ、その経過(Operation の steps)をジョブの message に写す。"""

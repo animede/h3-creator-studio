@@ -184,6 +184,19 @@ def resolve_format(params: dict) -> dict:
             "background_text": background_text, "style": style}
 
 
+def is_edit_params(params) -> bool:
+    """台帳の画像の params が、参照画像を直したもの(画像タブの edit・参照つきの生成)か。そのプロンプトは「周囲を広げる」のような直し方の指示で、
+    人物の見た目ではない(2026-11-26、Windows の実機の報告: 景色の画像の説明が編集の指示になっていた)。"""
+    params = params if isinstance(params, dict) else {}
+    return params.get("kind") == "h3image.edit" or bool(params.get("references"))
+
+
+def description_prompt(params) -> str:
+    """人物・画像の説明に使ってよい台帳のプロンプト(edit の出力なら "")。"""
+    params = params if isinstance(params, dict) else {}
+    return "" if is_edit_params(params) else str(params.get("prompt") or "").strip()
+
+
 def resolve_params(ledger, params: dict) -> dict:
     """画面・API から来た入力を検証し、曲・画像の生成物の中身で既定を埋めて、制作の params にする。不正なら ValueError(日本語)。
     人物の説明・曲の内容の出どころは character_source(typed / image)・concept_source(typed / song)に残す(空は ""。制作の中で、画像を見る・曲を聞いて
@@ -195,7 +208,7 @@ def resolve_params(ledger, params: dict) -> dict:
     lipsync = params.get("lipsync", True)
     if not isinstance(lipsync, bool):
         raise ValueError("lipsync は true / false で指定してください")
-    typed_character, image_prompt = _clip(str(params.get("character") or ""), CHARACTER_MAX), _clip(str(image["params"].get("prompt") or ""), CHARACTER_MAX)
+    typed_character, image_prompt = _clip(str(params.get("character") or ""), CHARACTER_MAX), _clip(description_prompt(image["params"]), CHARACTER_MAX)
     typed_concept, song_concept = _clip(str(params.get("concept") or ""), CONCEPT_MAX), concept_from_song(song["params"])
     character, concept = typed_character or image_prompt, typed_concept or song_concept
     title = _clip(str(song["params"].get("theme") or Path(song.get("filename") or "").stem or "MV"), 60) or "MV"

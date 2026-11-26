@@ -9,7 +9,7 @@ mv_projects(kind = "short")に書く。ジョブの params は {"project_id", ("
   plan     : CPU(管理役の LLM)。free だけ。筋(人物の見た目の整理 + 物語の筋)を作り、シーンの秒数と場面を決めて、コマの格子に載せる
   script   : CPU(管理役の LLM)。筋(plan で作っていなければここで作る)をもとに、シーンごとの使う参照(refs)と演出(6 セクション形式。参照なしは t2va 用)を書く
   scene    : H3。参照が無ければ /api/t2va、あれば /api/ref2va(画像は refs の順、speech なら最後にそのシーンの読み上げの切り出し)。
-             speech: vocal_lock、seconds は送らない / music: seconds + mute / free: seconds だけ(H3 の音を残す)
+             speech: vocal_lock、seconds は送らない / music・voiceover: seconds + mute / free: seconds だけ(H3 の音を残す)
   assemble : CPU。クリップをつなぎ、最終の音声(final_audio と時間軸)を付けた MP4 を作ってギャラリーに載せる
 作業のファイルは outputs/short/<制作の ID>/ に置く(narration.wav・sentences.json・scene_NNN.mp4 など)。
 """
@@ -129,7 +129,7 @@ async def _analyze(job: Job, ctx: Ctx) -> None:
         plan = plan_speech_scenes(sentences, p["min_s"], p["max_s"])
         for s in plan:
             s["text"] = sentence_text(sentences, s["start"], s["end"], last=s["index"] == len(plan))
-        scenes = make_scenes(mvclip.quantize_scene_plan(plan), timeline, person_index(p))
+        scenes = make_scenes(mvclip.quantize_scene_plan(plan), timeline, person_index(p), voiceover=bool(p.get("voiceover")))
         analysis = {"duration": round(sentences[-1]["end"], 3), "sentences": len(sentences), "scenes": len(scenes)}
     elif timeline == "music":
         planned, analysis = await mvh.analyze_song(job, ctx, proj, work)
@@ -234,7 +234,7 @@ async def _script(job: Job, ctx: Ctx) -> None:
             ctx.llm.chat, scenes, outline, character, [it.get("description") or "" for it in images], timeline=p["timeline"],
             frame=mvscript.frame_kind(p["width"], p["height"]), background_text=p.get("background_text") or "auto",
             roles=[it.get("role") for it in images], narration_sentences=sentences, style=p.get("style") or "none",
-            on_progress=on_progress)
+            voiceover=bool(p.get("voiceover")), on_progress=on_progress)
     except LlmError as e:
         raise JobFailed(e.message) from e
     except mvscript.ScenarioError as e:
@@ -272,7 +272,8 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
     refs = [r for r in scene.get("refs") or []]
     if any(not isinstance(r, int) or not 0 <= r < len(images) for r in refs):
         raise JobFailed("このシーンの参照画像の指定が正しくありません(演出の作成からやり直してください)")
-    speech = bool(scene.get("speech")) and timeline == "speech"
+    voiceover = timeline == "speech" and bool(p.get("voiceover"))       # 画面の外の声: 口を合わせない。音は結合で narration.wav に差し替える
+    speech = bool(scene.get("speech")) and timeline == "speech" and not voiceover
     work = work_dir(ctx.outputs_dir, pid)
     vocals, raw, clip, thumb = work / "vocals.wav", work / f"scene_{index:03d}_raw.mp4", work / scene_clip_name(index), work / scene_thumb_name(index)
     if speech and not vocals.is_file():
@@ -295,7 +296,7 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
         # 尺は seconds で明示(H3 は 17n+5 コマに丸めて短く返すことがあり、足りない分は generate_clip が足す)。曲のときは H3 の音を使わない(mute)。
         # どちらも無いとき(free)は H3 が作る環境音・効果音を残す
         data["seconds"] = f"{min(h3.MAX_SECONDS, max(H3_MIN_AUDIO_S, float(scene['duration']))):g}"
-        if timeline == "music":
+        if timeline == "music" or voiceover:
             data["mute"] = "true"
     if scene.get("seed") is not None:
         data["seed"] = str(scene["seed"])

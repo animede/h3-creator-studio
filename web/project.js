@@ -4,6 +4,14 @@
 // 入力欄(左側)は各タブの js(mv.js / short.js)が持つ。ここは「作った後」だけ。
 
 // 画角 × 画質の寸法(サーバの SIZES、docs/SPEC.md の表と同じ。実際の寸法はサーバが決める)と、画質の説明。画角 custom は幅・高さの手動入力
+// 人物・画像の説明に使ってよい台帳のプロンプト(サーバの mv.description_prompt と同じ規則)。画像タブの edit(参照画像を直したもの)の
+// プロンプトは「周囲を広げる」のような直し方の指示で、見た目の説明ではないので使わない("" を返す。説明は「画像から作る」・制作の中で画像を見て作る)
+function descPrompt(item) {
+  const p = (item && item.params) || {};
+  if (p.kind === "h3image.edit" || (Array.isArray(p.references) && p.references.length)) return "";
+  return String(p.prompt || "").trim();
+}
+
 const VIDEO_SIZES = {
   "16:9": { low: [512, 288], fast: [768, 448], standard: [1024, 576], high: [1344, 768] },
   "9:16": { low: [288, 512], fast: [448, 768], standard: [576, 1024], high: [768, 1344] },

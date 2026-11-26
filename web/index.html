@@ -324,11 +324,12 @@
       <div class="fld" id="sh-song-fld"><span class="fl"><span data-i18n>曲</span> <small data-i18n>(任意)</small> <span class="note inl" id="sh-song-note" data-i18n>音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
         <div class="refs frame" id="sh-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div>
         <span class="note" id="sh-bgm-note" hidden data-i18n>セリフがあるので、曲は BGM として下に敷きます(長さは読み上げの長さに合わせます)</span></div>
-      <div class="fld"><div class="lhead"><label class="fl" for="sh-narr"><span data-i18n>セリフ・ナレーション</span> <small data-i18n>(任意。あれば読み上げて、人物が口を合わせます)</small></label>
+      <div class="fld"><div class="lhead"><label class="fl" for="sh-narr"><span data-i18n>セリフ・ナレーション</span> <small data-i18n>(任意。あれば読み上げます。人物の画像があれば口を合わせます)</small></label>
         <span class="mk"><button id="sh-narr-go" type="button" class="mini" disabled title="物語の文章から、管理役の LLM がナレーションの案を書きます(曲があれば、その内容も使います)。確かめて、直してから作れます。CPU では 20〜60 秒ほど" data-i18n-title data-i18n>📝 物語から作る</button></span></div>
         <textarea id="sh-narr" class="sm" rows="4" maxlength="4000" placeholder="例: 雨の音だけが、駅に残っていた。……" data-i18n-placeholder></textarea>
         <div class="uploading" id="sh-narr-busy" hidden><span class="spin"></span><span id="sh-narr-busy-text"></span></div>
         <span class="note" id="sh-narr-note" hidden></span>
+        <span class="note" id="sh-vo-note" hidden data-i18n>人物の画像が無いので、ナレーション(画面の外の声)として景色に載せます。口を合わせるには、役割『人物』の画像を入れてください</span>
         <span class="note" data-i18n>空のままなら、セリフなしの動画になります</span></div>
       <label class="fld" id="sh-speaker-fld"><span class="fl"><span data-i18n>話者</span> <small data-i18n>(セリフがあるときは必須。AivisSpeech)</small></span>
         <select id="sh-speaker" aria-label="話者" data-i18n-aria><option value="" data-i18n>話者を選ぶ(セリフを入れると読み込みます)</option></select>
@@ -340,7 +341,7 @@
           <div class="refs-empty" id="sh-images-empty"><span data-i18n>ここに画像をドロップ</span><br><small data-i18n>画像タブの画像・ギャラリー・PC の画像ファイル</small></div>
           <div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div>
         </div>
-        <span class="note" id="sh-images-note" data-i18n>人物は 1 枚まで(全シーンに同じ人物)。セリフがあるときは、人物の画像が必須です(口を合わせる相手)。景色・物は、その場所・物を出すシーンの参照になります</span></div>
+        <span class="note" id="sh-images-note" data-i18n>入れた画像は「景色・物」になります(人物なら役割を選び直す。人物は 1 枚まで、全シーンに同じ人物)。セリフがあって人物がいれば口を合わせ、人物がいなければ画面の外の声(ナレーション)になります。景色・物は、その場所・物を出すシーンの参照になります</span></div>
       <div class="fld" id="sh-char-fld" hidden><div class="lhead"><label class="fl" for="sh-char"><span data-i18n>人物の説明</span> <small data-i18n>(任意。空なら画像のプロンプト、無ければ画像を見て作ります)</small></label>
         <span class="mk"><button id="sh-char-go" type="button" class="mini" disabled title="画像を LLM(Gemma 4)が見て、人物の見た目(誰・顔・髪・服・画風)を書きます。場所・光・ポーズは入れません。CPU では 10〜60 秒ほど(初回は、画像・音声を読む投影ファイル 約 0.56GB を取得します)" data-i18n-title data-i18n>🔍 画像から作る</button></span></div>
         <textarea id="sh-char" class="sm" rows="3" maxlength="600" placeholder="例: 長い銀髪、青い瞳、青いセーラー服の少女。アニメ調" data-i18n-placeholder></textarea>

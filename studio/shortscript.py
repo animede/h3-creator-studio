@@ -319,6 +319,12 @@ RULE_NO_PERSON = (
     "There is no character in this video: describe only places, objects, nature, weather and atmosphere. No people, faces, hands or "
     "human figures appear in any scene. ")
 
+RULE_VOICEOVER = (
+    "The narration is an off-screen voice-over laid over the finished video: nobody on screen speaks, sings or mouths words, and "
+    "there is no lip-sync. Each scene illustrates what SPOKEN says at that moment (its places, objects, weather, light and mood) "
+    "without quoting it or showing it as text. There is no character in this video: describe only places, objects, nature, "
+    "weather and atmosphere; no people, faces, hands or human figures appear in any scene. ")
+
 
 def _brief(scene: dict, spoken: Optional[list]) -> dict:
     """LLM に見せるシーンの項目(番号・時刻・尺・あれば場面と要約。読み上げの文)。"""
@@ -375,23 +381,26 @@ def _truthy(value: Any) -> bool:
 
 async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: dict, sceneries: list, *, timeline: str, frame: str,
                             background_text: str, roles: Any = (), narration_sentences: Optional[list] = None,
-                            style: str = "none", on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
+                            style: str = "none", voiceover: bool = False,
+                            on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
     """シーンごとの演出を BATCH_SIZE 個ずつ頼み、使う参照(refs)と整形した最終プロンプトを返す。概要は渡された outline(追加の呼び出しは無い)。
     番号と個数が合わなければ 1 回だけ頼み直し、それでも合わなければ ScenarioError。on_progress(終わったシーン数, 全シーン数)は batch ごと。
 
     refs の規則(1 つに決める): 人物の画像があれば、人物を **常に先頭に入れる**(物語の主人公。speech では必須)。例外は timeline が "music" / "free"
     のとき LLM がそのシーンに "no_person": true を付けた場合だけで、そのシーンは人物を外す(景色・物だけのカット)。続く景色・物は、LLM が選んだ
     番号のうち roles が "scenery" の添字だけ(重複は 1 つに、書かれた順)。人物が無く景色も選ばなければ refs は空 = t2va。
-    sceneries[i] / roles[i] は params.images[i] の説明と役割。人物の見た目は character(辞書)。speech に人物の画像が無ければ ScenarioError。"""
+    sceneries[i] / roles[i] は params.images[i] の説明と役割。人物の見た目は character(辞書)。speech に人物の画像が無ければ ScenarioError
+    (voiceover = True のときを除く。画面の外の声: 口の規則は入れず、読み上げの文(SPOKEN)を手がかりに景色を描く。人物は映さない)。"""
     if timeline not in TIMELINES:
         raise ScenarioError(f"時間軸の指定が正しくありません: {timeline}")
     roles = list(roles or [])
     descriptions = list(sceneries or [])
     person_idx = roles.index(ROLE_PERSON) if ROLE_PERSON in roles else None
     scenery_idx = [i for i, r in enumerate(roles) if r != ROLE_PERSON]
-    if timeline == "speech" and person_idx is None:
+    voiceover = bool(voiceover) and timeline == "speech" and person_idx is None
+    if timeline == "speech" and person_idx is None and not voiceover:
         raise ScenarioError("セリフのある動画には、人物の画像が必要です(口を合わせる相手がいません)")
-    speech = timeline == "speech"
+    speech = timeline == "speech" and not voiceover          # 口を合わせる(voiceover は読み上げの文を見せるだけ)
     facts = json.dumps(character, ensure_ascii=False)
     scenery_list = [{"index": i, "description": (_clip(descriptions[i]) if i < len(descriptions) else "") or "(no description)"}
                     for i in scenery_idx]
@@ -399,10 +408,12 @@ async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: 
     briefs = []
     for pos, s in enumerate(scenes):
         spoken = (sentences_in_scene(narration_sentences, s.get("start"), s.get("end"), last=pos == len(scenes) - 1)
-                  if speech and narration_sentences else None)
+                  if timeline == "speech" and narration_sentences else None)
         briefs.append(_brief(s, spoken))
 
-    if person_idx is None:
+    if voiceover:
+        mouth_rule, person_block = RULE_VOICEOVER, ""
+    elif person_idx is None:
         mouth_rule, person_block = RULE_NO_PERSON, ""
     else:
         mouth_rule = MOUTH_RULE_SPEECH if speech else MOUTH_RULE_PERSON

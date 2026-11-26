@@ -73,6 +73,12 @@ EN = {
     "動画(MiniMax-H3)": "Video (MiniMax-H3)",
     "画像(MiniMax-H3-Image)": "Image (MiniMax-H3-Image)",
     "音楽(ACE-Step)": "Music (ACE-Step)",
+    "{} が終了していました(RAM 不足の可能性があります)。ログの最後: {}": "{0} had exited (possibly out of RAM). Last log lines: {1}",
+    "(ログがありません)": "(no log)",
+    "エンジンが終了していたので、起動し直してやり直します": "The engine had exited; restarting it and trying again",
+    "メモリを空けています(読み上げ・同梱 LLM を止めます)": "Freeing memory (stopping text-to-speech and the bundled LLM)",
+    "同梱 LLM は使用中です。終わってからもう一度押してください": "The bundled LLM is in use. Press again when it is done",
+    "同梱 LLM": "Bundled LLM",
     "未対応のジョブの種類です: {}": "Unsupported job kind: {0}",
     "{}のエンジンは無効になっているため使えません(studio.toml の [components.{}] の enabled)":
         "The {0} engine is disabled and cannot be used (enabled in [components.{1}] of studio.toml)",

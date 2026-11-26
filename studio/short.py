@@ -2,7 +2,7 @@
 MV と同じ mv.Director で、ここの ShortDirector は、その種類ごとの違い(kind = "short"、ジョブ short.*、入力の検証、次にやること、画面に出す項目)だけを持つ。
 
 流れ(それぞれが 1 つのジョブ。時間軸は作成時に決まる):
-  speech(セリフあり): short.analyze(読み上げを合成 → 文の切れ目で 5〜10 秒に束ねる)→ short.script → short.scene × N → short.assemble
+  speech(セリフあり。人物の画像が無ければ voiceover = 画面の外の声で、景色だけのシーン): short.analyze(読み上げを合成 → 文の切れ目で 5〜10 秒に束ねる)→ short.script → short.scene × N → short.assemble
   music(曲だけ)    : short.analyze(MV と同じ。Demucs で分離して曲を分ける)→ short.script → short.scene × N → short.assemble
   free(どちらも無し) : short.analyze(長さを置くだけ)→ short.plan(物語からシーンに割る)→ short.script → short.scene × N → short.assemble
 """
@@ -28,7 +28,7 @@ STORY_MAX, NARRATION_MAX = 4000, 4000
 STAGE_LABEL = {**mv.STAGE_LABEL, "analyze": "音声の準備"}
 TEXT = {"analyze": "音声を準備します", "plan": "物語からシーンに分けます", "script": "演出を書きます", "assemble": "シーンを結合します",
         "done": "ショート動画ができました"}
-PARAM_KEYS = ("kind", "story", "song_id", "narration", "speaker_id", "images", "length_s", "timeline", "aspect", "quality", "width", "height",
+PARAM_KEYS = ("kind", "story", "song_id", "narration", "speaker_id", "images", "length_s", "timeline", "voiceover", "aspect", "quality", "width", "height",
               "min_s", "max_s", "seed", "background_text", "style", "final_audio", "subtitles", "character", "character_source", "character_note", "title")
 SCENE_KEYS = (*Director.SCENE_KEYS, "place", "summary", "refs", "speech", "text")
 
@@ -58,7 +58,7 @@ def _images(ledger, raw) -> list:
         if role not in ROLES:
             raise ValueError(f"参照画像 {n} の役割は「{ROLE_LABEL['person']}」(person)か「{ROLE_LABEL['scenery']}」(scenery)で指定してください")
         rec = _output(ledger, it.get("id"), "image", f"参照画像 {n}", "画像")
-        typed, prompt = _clip(str(it.get("description") or ""), CHARACTER_MAX), _clip(str(rec["params"].get("prompt") or ""), CHARACTER_MAX)
+        typed, prompt = _clip(str(it.get("description") or ""), CHARACTER_MAX), _clip(mv.description_prompt(rec["params"]), CHARACTER_MAX)
         out.append({"id": rec["id"], "role": role, "description": typed or prompt, "_typed": bool(typed), "_prompt": prompt})
     if sum(1 for it in out if it["role"] == "person") > 1:
         raise ValueError("人物の画像は 1 枚までです(複数の出演者は扱いません)")
@@ -83,9 +83,9 @@ def resolve_params(ledger, params: dict) -> dict:
     story = _clip(str(params.get("story") or ""), STORY_MAX)
     person = next((it for it in images if it["role"] == "person"), None)
     speaker_id = params.get("speaker_id")
+    # 人物の画像が無いセリフは、画面の外の声(ボイスオーバー): 時間軸は speech のまま(長さ = 読み上げ、文の切れ目で切る)、シーンは景色だけで口を合わせない
+    voiceover = bool(narration) and person is None
     if narration:
-        if person is None:
-            raise ValueError("セリフ・ナレーションがあるときは、口を合わせる人物の画像(役割: 人物)を 1 枚入れてください")
         if speaker_id in (None, ""):
             raise ValueError("セリフ・ナレーションを読み上げる話者を選んでください")
     if speaker_id in (None, ""):
@@ -116,7 +116,7 @@ def resolve_params(ledger, params: dict) -> dict:
     title = (first_sentence(story) or _clip(str((song or {}).get("params", {}).get("theme") or Path((song or {}).get("filename") or "").stem), 24)
              or first_sentence(narration) or "ショート動画")
     return {"kind": KIND, "story": story, "song_id": song["id"] if song else None, "narration": narration, "speaker_id": speaker_id,
-            "images": [{k: it[k] for k in ("id", "role", "description")} for it in images], "length_s": length_s, "timeline": timeline, **fmt,
+            "images": [{k: it[k] for k in ("id", "role", "description")} for it in images], "length_s": length_s, "timeline": timeline, "voiceover": voiceover, **fmt,
             "final_audio": final_audio, "subtitles": subtitles, "character": character, "character_source": "typed" if typed_character else "image" if character else "",
             "character_note": "", "title": title}
 
@@ -187,13 +187,15 @@ def sentence_text(sentences: list, start: float, end: float, last: bool = False)
     return "".join(out)
 
 
-def make_scenes(plan_scenes: list, timeline: str, person: Optional[int] = None) -> list:
+def make_scenes(plan_scenes: list, timeline: str, person: Optional[int] = None, voiceover: bool = False) -> list:
     """量子化済みのシーンの並びを、制作が持つシーンの形(MV のシーン + place / summary / refs / speech)にする。
-    speech は全シーンが「読み上げに口を合わせる」(参照は人物)。それ以外の参照は short.script が決める(free の場面・要約は short.plan が書く)。"""
+    speech は全シーンが「読み上げに口を合わせる」(参照は人物)。ただしボイスオーバー(人物の画像が無い speech)は口を合わせない(speech = False)。
+    それ以外の参照は short.script が決める(free の場面・要約は short.plan が書く)。"""
     scenes = mv.make_scenes(plan_scenes)
+    lip = timeline == "speech" and not voiceover
     for scene, src in zip(scenes, plan_scenes, strict=True):
         scene.update({"place": str(src.get("place") or ""), "summary": str(src.get("summary") or ""), "text": str(src.get("text") or ""),
-                      "speech": timeline == "speech", "refs": [person] if timeline == "speech" and person is not None else []})
+                      "speech": lip, "refs": [person] if lip and person is not None else []})
     return scenes
 
 

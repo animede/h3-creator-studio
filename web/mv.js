@@ -91,7 +91,7 @@
     image = item;
     showMsg("");
     mvp("char-note").hidden = true;
-    fill(mvp("char"), String((item.params && item.params.prompt) || "").trim().slice(0, CHAR_MAX));
+    fill(mvp("char"), descPrompt(item).slice(0, CHAR_MAX));
     renderImage();
     return true;
   }
@@ -121,7 +121,7 @@
 
   const busy = { char: false, concept: false };
 
-  const hasPrompt = (item) => !!(item && item.params && String(item.params.prompt || "").trim());      // 画像タブで作った画像か(台帳に画像のプロンプトがある)
+  const hasPrompt = (item) => !!descPrompt(item);      // 画像タブで作った画像か(台帳に画像のプロンプトがある)
 
   // ボタン(落としたものがあって、通信中でないときだけ)と、「空のまま作ると、自動で入れます」の案内
   // (外から持ち込んだ=台帳に手がかりが無い画像・曲で、その欄がまだ空のときだけ)

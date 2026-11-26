@@ -157,7 +157,6 @@ class ShortApiTest(unittest.TestCase):
 
     def test_validation_errors_are_400_with_japanese_messages(self):
         for extra, word in (({"story": ""}, "物語・映像のイメージを書いてください"), ({"length_s": 10}, "長さは 30〜3600 秒"),
-                            ({"story": "", "narration": "話す。", "speaker_id": 1}, "口を合わせる人物の画像"),
                             ({"story": "", "narration": "話す。", "images": [self.person()]}, "話者を選んでください"),
                             ({"images": [self.person(), {"id": self.garden["id"], "role": "person"}]}, "人物の画像は 1 枚まで"),
                             ({"images": [self.scenery()] * 5}, "参照画像は 4 枚まで"), ({"images": [{"id": self.girl["id"], "role": "boss"}]}, "参照画像 1 の役割"),
@@ -175,14 +174,17 @@ class ShortApiTest(unittest.TestCase):
         message = h3cache.missing_message(REF_MISSING["command"])
         with mock.patch.object(h3cache, "ref_cache_state", return_value=REF_MISSING):
             for extra in ({"images": [self.scenery()]}, {"images": [self.person()], "song_id": self.song["id"]},
-                          {"story": "", "narration": "こんにちは。", "speaker_id": 4, "images": [self.person()]}):
+                          {"story": "", "narration": "こんにちは。", "speaker_id": 4, "images": [self.person()]},
+                          {"story": "", "narration": "こんにちは。", "speaker_id": 4, "images": [self.scenery()]}):
                 r = self.client.post("/api/short", json=self.body(**extra))
                 self.assertEqual((r.status_code, r.json()["detail"]), (400, message), extra)
             self.assertEqual(self.runner.jobs, {})
             free = self.create()                                               # 物語だけ(free)
             music = self.create(story="", song_id=self.song["id"])             # 曲だけ(music)
+            vo = self.create(story="", narration="こんにちは。", speaker_id=4)    # 画像の無いナレーション(画面の外の声。T2VA だけ)
         self.assertEqual((free["params"]["timeline"], music["params"]["timeline"]), ("free", "music"))
-        self.assertEqual(len(self.runner.jobs), 2)
+        self.assertEqual((vo["params"]["timeline"], vo["params"]["voiceover"]), ("speech", True))
+        self.assertEqual(len(self.runner.jobs), 3)
 
     def test_list_and_view_are_separate_from_mv(self):
         mv_r = self.client.post("/api/mv", json={"song_id": self.song["id"], "image_id": self.girl["id"]})

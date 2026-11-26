@@ -1002,3 +1002,66 @@ class AssembleTest(HandlerBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VoiceoverTest(HandlerBase):
+    """人物の画像が無いセリフ = 画面の外の声(voiceover)。長さとシーンの切り方は speech のまま、シーンは口を合わせない(vocal_lock も音声の参照も無し)。"""
+
+    def vo_project(self, images=(), **params) -> str:
+        return self.project("speech", images=list(images), **params)
+
+    async def test_analyze_makes_speech_scenes_without_lip_sync(self):
+        self.vo_project(analysis=False)
+        self.assertTrue(self.proj()["params"]["voiceover"])
+        await sh.run_analyze(self.job("short.analyze"), self.ctx())
+        scenes = self.proj()["scenes"]
+        self.assertTrue(scenes)
+        self.assertEqual({(s["speech"], tuple(s["refs"])) for s in scenes}, {(False, ())})
+        self.assertTrue((self.work() / "narration.wav").is_file())
+
+    async def test_script_gets_voiceover_and_the_sentences(self):
+        self.vo_project()
+        self.ledger.update_mv_project("proj1", scenes=self.scenes("speech", prompts=False))
+        self.script.refs = {1: [], 2: [], 3: []}
+        await sh.run_script(self.job("short.script"), self.ctx())
+        kw = self.script.calls["generate_scenario"][0][5]
+        self.assertEqual((kw["timeline"], kw["voiceover"], kw["roles"]), ("speech", True, []))
+
+    async def test_scene_is_t2va_with_seconds_and_mute(self):
+        self.vo_project()
+        self.ledger.update_mv_project("proj1", scenes=self.scenes("speech", refs={}))
+        self.work().mkdir(parents=True, exist_ok=True)
+        await sh.run_scene(self.job("short.scene", scene=1), self.ctx())
+        post = self.h3.posts[0]
+        self.assertEqual(post[0], "/api/t2va")
+        self.assertEqual(self.files(post), [])
+        self.assertEqual(self.form(post), {"prompt": "prompt 1", "width": "768", "height": "448", "seconds": "8", "mute": "true", "seed": "1001"})
+        self.assertFalse([c for c in self.audio.calls if c[0] == "cut"])         # 読み上げは切り出さない(音声の参照を送らない)
+
+    async def test_scene_with_scenery_is_ref2va_with_images_only(self):
+        self.vo_project(images=[{"id": self.garden["id"], "role": "scenery"}])
+        self.ledger.update_mv_project("proj1", scenes=self.scenes("speech", refs={1: [0]}))
+        self.work().mkdir(parents=True, exist_ok=True)
+        await sh.run_scene(self.job("short.scene", scene=1), self.ctx())
+        post = self.h3.posts[0]
+        self.assertEqual(post[0], "/api/ref2va")
+        self.assertEqual([fn for _, fn, _ in self.files(post)], ["garden.png"])
+        form = self.form(post)
+        self.assertNotIn("vocal_lock", form)
+        self.assertEqual((form["seconds"], form["mute"]), ("8", "true"))
+
+    async def test_assemble_puts_the_narration_and_the_bgm(self):
+        self.vo_project(song_id=self.song["id"])
+        scenes = self.scenes("speech")
+        self.work().mkdir(parents=True, exist_ok=True)
+        for s in scenes:
+            s["status"], s["clip"] = "done", f"scene_{s['index']:03d}.mp4"
+            (self.work() / s["clip"]).write_bytes(b"clip")
+        self.ledger.update_mv_project("proj1", scenes=scenes, params_patch={"analysis": {"duration": 20.5, "scenes": 3}})
+        (self.work() / "narration.wav").write_bytes(b"RIFFnarration")
+        await sh.run_assemble(self.job("short.assemble"), self.ctx())
+        concat, mix = self.ff.calls
+        argv = mix[0]
+        self.assertEqual(mix[2], "読み上げと曲の混合")
+        self.assertEqual([argv[i + 1] for i, a in enumerate(argv) if a == "-i"],
+                         [str(self.work() / "video_only.mp4"), str(self.work() / "narration.wav"), str(self.ledger.abs_path(self.song["path"]))])

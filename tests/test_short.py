@@ -115,9 +115,26 @@ class ResolveParamsTest(LedgerBase):
         self.resolve(song_id=self.song["id"])                                                    # 曲があれば物語は任意
         self.resolve(narration="話す。", speaker_id=1, images=[self.person()])                      # セリフがあれば物語は任意
 
-    def test_narration_needs_exactly_one_person_image_and_a_speaker(self):
-        self.assertRejects("口を合わせる人物の画像", narration="話す。", speaker_id=1)
-        self.assertRejects("口を合わせる人物の画像", narration="話す。", speaker_id=1, images=[self.scenery()])
+    def test_narration_without_a_person_is_a_voiceover(self):
+        """人物の画像が無いセリフは、画面の外の声(voiceover)。時間軸は speech のまま。人物がいれば口を合わせる(voiceover = False)。"""
+        alone = self.resolve(narration="話す。", speaker_id=1)
+        scenery = self.resolve(narration="話す。", speaker_id=1, images=[self.scenery()])
+        lip = self.resolve(narration="話す。", speaker_id=1, images=[self.person()])
+        self.assertEqual([(r["timeline"], r["voiceover"]) for r in (alone, scenery, lip)], [("speech", True), ("speech", True), ("speech", False)])
+        self.assertEqual((alone["character"], scenery["character_source"]), ("", ""))
+        self.assertFalse(self.resolve(story="x")["voiceover"])
+
+    def test_edit_output_prompt_is_not_a_description(self):
+        """画像タブの edit の出力のプロンプト(「周囲を広げる」のような直し方の指示)は、人物・景色の説明にしない(2026-11-26 の実機)。"""
+        edited = self.add("image", "wide.png", {"prompt": "周囲を広げる", "kind": "h3image.edit", "references": [self.garden["id"]]})
+        refd = self.add("image", "ref.png", {"prompt": "make it night", "references": [self.garden["id"]]})
+        r = self.resolve(narration="話す。", speaker_id=1, images=[{"id": edited["id"], "role": "person"}])
+        self.assertEqual((r["character"], r["character_source"], r["images"][0]["description"]), ("", "", ""))
+        r = self.resolve(story="x", images=[{"id": refd["id"], "role": "scenery"}])
+        self.assertEqual(r["images"][0]["description"], "")
+        self.assertEqual(self.resolve(story="x", images=[self.person()])["character"], "a girl with silver hair, anime style")
+
+    def test_narration_needs_a_speaker_and_at_most_one_person(self):
         self.assertRejects("話者を選んでください", narration="話す。", images=[self.person()])
         self.assertRejects("話者を選んでください", narration="話す。", speaker_id="", images=[self.person()])
         self.assertRejects("話者は整数", narration="話す。", speaker_id="abc", images=[self.person()])
