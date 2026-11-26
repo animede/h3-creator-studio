@@ -233,7 +233,8 @@ async def _script(job: Job, ctx: Ctx) -> None:
         result = await shortscript.generate_scenario(
             ctx.llm.chat, scenes, outline, character, [it.get("description") or "" for it in images], timeline=p["timeline"],
             frame=mvscript.frame_kind(p["width"], p["height"]), background_text=p.get("background_text") or "auto",
-            roles=[it.get("role") for it in images], narration_sentences=sentences, on_progress=on_progress)
+            roles=[it.get("role") for it in images], narration_sentences=sentences, style=p.get("style") or "none",
+            on_progress=on_progress)
     except LlmError as e:
         raise JobFailed(e.message) from e
     except mvscript.ScenarioError as e:

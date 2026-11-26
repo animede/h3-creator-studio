@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: 2026-11-26 14:00 JST** — On PCs where a pre-installed MiniMax-H3 lacks the reference-mode cache (transformer_ref_int8, ~32GB; Windows and hosts with <48GB RAM), music videos, short videos with reference images/narration and the Video tab's reference modes are refused up front with the build command shown on screen; setup also checks existing engines' caches and offers to build them. The MV audio tools are installed by setup by default (`--no-mv` to skip) or from the 「道具を入れる」 button. [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: 2026-11-26 JST** — The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -217,6 +217,7 @@ Pick the mode with the two buttons at the top (named as in MiniMax-H3-Image).
 - **edit (edit with reference images)**: drop in reference images (up to 16) and point to them by number in the prompt, like `<Picture 1>`.
 
 **Enhance prompt** (プロンプト強化) rewrites a short instruction into a detailed prompt (bundled LLM).
+**Visual style** (画風) adds an English style instruction at generation (not written into the prompt box; in edit mode the reference's look is kept and the background, lighting and materials follow the style).
 
 ### Video tab (MiniMax-H3)
 
@@ -231,6 +232,23 @@ The native resolution is 768 on the short side. On 6GB cards, 512² to 768×512 
 
 **Create audio (TTS)** (音声を作る(読み上げ)) has AivisSpeech read text aloud. Drop that into "from references" as **reference audio** to get a video with that voice.
 Check **Vocal Lock** to use the reference audio as the output audio as-is, with the mouth movement matched to it.
+
+**Visual style** (画風) is a setting that appends an English instruction to the prompt at generation (the prompt box is unchanged, and prompt enhancement does not include it).
+
+| Visual style | Instruction added (English) |
+|---|---|
+| None (match the reference) | (nothing; the default) |
+| Realistic | photorealistic, natural lighting, real camera, true-to-life skin and materials |
+| Cinematic | cinematic film look, anamorphic framing, shallow depth of field, graded color |
+| TV drama | TV drama look, naturalistic lighting, handheld-feel camera, everyday locations |
+| Anime | Japanese anime style, clean line art, flat cel shading, expressive eyes |
+| Illustration | digital illustration, clean shapes, bold colors, polished finish |
+| Sketch | pencil sketch, hand-drawn lines, hatching, paper texture, mostly monochrome |
+| Watercolor | watercolor painting, soft bleeding edges, paper texture, muted palette |
+| Oil painting | oil painting, visible brush strokes, rich impasto texture |
+| 3D CG | 3D CG render, stylized characters, soft global illumination |
+
+Without a reference, `Visual style: <instruction>.` is appended to the prompt; with one (Ref2VA / Ref2I / FL2VA, Image tab edit, music videos, short videos with images), `Keep the referenced subject exactly as in the reference image; render the scene, background, lighting and materials in <instruction>.`
 
 ### Music tab (ACE-Step)
 
@@ -253,6 +271,7 @@ While a song plays, a **spectrum** animates on the song card in the output viewe
 
 Make a music video with matching mouth movement from one character image and one song (setup installs the audio tools by default; without them, the tab shows a notice and an **Install tools** button). On Windows and on PCs with less than 48GB of RAM, it also needs MiniMax-H3's reference-mode cache (without it, a notice with the command to build it appears above the form and **Make music video** is disabled; see "Troubleshooting").
 Choosing "no singing (image MV)" under **Vocals** (歌わせ方) makes an image video where the character doesn't sing (a so-called image PV). The song is added at assembly (see "no singing" below).
+**Visual style** (画風) keeps every scene's direction in that style (the character keeps the look of the image).
 
 1. Drop in a **song** (from the Music tab, the gallery, or an audio file on your PC) and a **character image** (from the Image tab, the gallery, or an image on your PC).
    When dropped from the gallery, the image's prompt goes into **Character description** and the song's theme and caption go into **Song concept** (only if empty; feel free to rewrite them).
@@ -291,6 +310,7 @@ Time estimate: on an RTX A4000 (16GB), landscape Fast, a 30-second song is 5 sce
 ### Short Video tab
 
 Make a short video with a narrative from a story. It uses the same machinery as the Music Video tab (analysis → direction → per-scene generation → assembly), with H3 only. A video with only a song uses the same audio separation (Demucs) as Music Video, so only that case needs the audio tools (installed by setup by default; not needed with narration or with neither).
+**Visual style** (画風) keeps every scene's direction in that style (reference images keep their look).
 
 **Inputs** (left)
 

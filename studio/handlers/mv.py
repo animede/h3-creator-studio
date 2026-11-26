@@ -230,7 +230,8 @@ async def _script(job: Job, ctx: Ctx) -> None:
         job.message = f"演出を書いています 0 / {len(scenes)} シーン"
         result = await mvscript.generate_scenario(
             ctx.llm.chat, scenes, p.get("concept") or "", character, frame=mvscript.frame_kind(p["width"], p["height"]),
-            background_text=p.get("background_text") or "auto", lipsync=bool(p.get("lipsync", True)), on_progress=on_progress)
+            background_text=p.get("background_text") or "auto", lipsync=bool(p.get("lipsync", True)),
+            style=p.get("style") or "none", on_progress=on_progress)
     except LlmError as e:
         raise JobFailed(e.message) from e
     except mvscript.ScenarioError as e:

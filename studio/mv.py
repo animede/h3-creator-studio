@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 from .jobs import TERMINAL
+from .styles import check_style
 
 log = logging.getLogger("studio.mv")
 
@@ -58,7 +59,7 @@ RESTART_MESSAGE = "管理役の再起動で一時停止しました"
 # 全体の進みの重み(シーンの生成が、ほぼ全部)。シーンは尺に比例して分ける
 WEIGHT_ANALYZE, WEIGHT_SCRIPT, WEIGHT_SCENES, WEIGHT_ASSEMBLE = 0.04, 0.03, 0.90, 0.03
 INPUT_KEYS = ("song_id", "image_id", "character", "concept", "aspect", "quality", "width", "height", "min_s", "max_s", "seed",
-              "background_text", "lipsync")
+              "background_text", "lipsync", "style")
 
 
 # ---- 作業フォルダ・ファイル名 ----
@@ -174,12 +175,13 @@ def resolve_format(params: dict) -> dict:
     background_text = str(params.get("background_text") or "auto")
     if background_text not in ("auto", "large", "none"):
         raise ValueError("background_text は auto / large / none のいずれかです")
+    style = check_style(params.get("style"))            # 画風(none なら足さない。演出を書く LLM と最終のプロンプトに入る)
     if aspect == CUSTOM:
         width, height = (_custom_side(params.get(k), label) for k, label in (("width", "幅"), ("height", "高さ")))
     else:
         width, height = SIZES[aspect][quality]
     return {"aspect": aspect, "quality": quality, "width": width, "height": height, "min_s": min_s, "max_s": max_s, "seed": seed,
-            "background_text": background_text}
+            "background_text": background_text, "style": style}
 
 
 def resolve_params(ledger, params: dict) -> dict:

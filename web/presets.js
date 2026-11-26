@@ -31,6 +31,18 @@ function presetSetSeed(seed, random, value) {
   presetSet(random, !fixed);
 }
 
+// 画風の選択(画像・動画・MV・ショート動画タブ共通)。プロンプトには入れず、送る params の style になる。
+// なし以外を選んだら、プロンプト・物語の欄の下に「画風: アニメ(生成時に指示を足します)」と出す
+function wireStyleNote(sel, note) {
+  const render = () => {
+    const opt = sel.options[sel.selectedIndex];
+    note.hidden = !opt || sel.value === "none";
+    note.textContent = note.hidden ? "" : t("画風: {name}(生成時に指示を足します)", { name: opt.textContent.trim() });
+  };
+  sel.addEventListener("change", render);
+  render();
+}
+
 // box にプリセットの欄を組み立てる。tab は image / video / music / mv / short
 function wirePresets({ tab, box, get, apply }) {
   let list = [];                  // このタブのプリセット(同梱が先、自分のものが後)

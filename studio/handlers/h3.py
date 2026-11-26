@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from .. import h3cache
+from ..styles import apply_style, check_style
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from .common import download, error_text
 
@@ -74,7 +75,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     prompt = str(params.get("prompt") or "").strip()
     if not 1 <= len(prompt) <= 8000:
         raise ValueError("プロンプトは 1〜8000 文字で入力してください")
-    out = {"prompt": prompt, "seed": _int(params.get("seed"), "seed", allow_none=True)}
+    out = {"prompt": prompt, "seed": _int(params.get("seed"), "seed", allow_none=True), "style": check_style(params.get("style"))}
 
     if mode in REF_MODES:
         if params.get("width") not in (None, "") or params.get("height") not in (None, ""):
@@ -156,7 +157,8 @@ def _load_file(ctx: Ctx, field: str, oid: str, label: str) -> tuple:
 def _build_request(job: Job, ctx: Ctx) -> tuple[str, dict, list]:
     """(エンドポイント, フォームの値, ファイルの並び)を作る。ファイルを読むので別スレッドで呼ぶ。"""
     p, mode = job.params, job.kind.split(".", 1)[1]
-    data: dict = {"prompt": p["prompt"]}
+    # 画風は入力欄の文とは別の設定。送る直前に英語の文を足す(参照のモードと fl2va は、参照・フレームの見た目を保つ文)
+    data: dict = {"prompt": apply_style(p["prompt"], p.get("style"), mode in REF_MODES or mode == "fl2va")}
     files: list = []
     if p.get("seed") is not None:
         data["seed"] = str(p["seed"])

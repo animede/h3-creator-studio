@@ -50,7 +50,10 @@
       <label class="fld"><span class="fl" data-i18n>プロンプト</span>
         <textarea id="im-prompt" rows="5" maxlength="8000" placeholder="作りたい画像を日本語や英語で書きます" data-i18n-placeholder></textarea></label>
       <div class="enh"><button id="im-enh" type="button" title="H3-Image の公式ルールで、短い指示を詳しいプロンプトに書き直します(管理役の LLM を使います)" data-i18n-title data-i18n>プロンプト強化</button>
-        <a href="#" id="im-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="im-enh-note"></span></div>
+        <a href="#" id="im-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="im-enh-note"></span>
+        <span class="note stylenote" id="im-style-note" hidden></span></div>
+      <label class="fld"><span class="fl"><span data-i18n>画風</span> <small data-i18n>(プロンプトには入れず、生成のときに指示を足します)</small></span>
+        <select id="im-style" class="stylesel" title="参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せます" data-i18n-title><option value="none" data-i18n>なし(参照画像に合わせる)</option><option value="real" data-i18n>リアル</option><option value="cinema" data-i18n>映画</option><option value="drama" data-i18n>ドラマ</option><option value="anime" data-i18n>アニメ</option><option value="illust" data-i18n>イラスト</option><option value="sketch" data-i18n>スケッチ</option><option value="watercolor" data-i18n>水彩</option><option value="oil" data-i18n>油彩</option><option value="cg3d" data-i18n>3DCG</option></select></label>
       <div class="fld"><span class="fl" data-i18n>サイズ</span>
         <div class="inline">
           <select id="im-size">
@@ -90,7 +93,10 @@
       <label class="fld"><span class="fl"><span data-i18n>プロンプト</span> <span id="vd-mode-tag" class="modetag"></span></span>
         <textarea id="vd-prompt" rows="5" maxlength="8000" placeholder="作りたい動画の場面・動き・セリフ・音を、日本語や英語で書きます" data-i18n-placeholder></textarea></label>
       <div class="enh"><button id="vd-enh" type="button" title="MiniMax 公式のプロンプトの書き方に沿って書き直します(管理役の LLM を使います)" data-i18n-title data-i18n>プロンプト強化</button>
-        <a href="#" id="vd-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="vd-enh-note"></span></div>
+        <a href="#" id="vd-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="vd-enh-note"></span>
+        <span class="note stylenote" id="vd-style-note" hidden></span></div>
+      <label class="fld"><span class="fl"><span data-i18n>画風</span> <small data-i18n>(プロンプトには入れず、生成のときに指示を足します)</small></span>
+        <select id="vd-style" class="stylesel" title="参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せます" data-i18n-title><option value="none" data-i18n>なし(参照画像に合わせる)</option><option value="real" data-i18n>リアル</option><option value="cinema" data-i18n>映画</option><option value="drama" data-i18n>ドラマ</option><option value="anime" data-i18n>アニメ</option><option value="illust" data-i18n>イラスト</option><option value="sketch" data-i18n>スケッチ</option><option value="watercolor" data-i18n>水彩</option><option value="oil" data-i18n>油彩</option><option value="cg3d" data-i18n>3DCG</option></select></label>
       <div class="fld"><span class="fl" data-i18n>解像度</span>
         <select id="vd-res">
           <option value="768x768">768×768</option><option value="1344x768">1344×768</option><option value="768x1344">768×1344</option>
@@ -264,6 +270,7 @@
         <div class="uploading" id="mv-concept-busy" hidden><span class="spin"></span><span id="mv-concept-busy-text"></span></div>
         <span class="note" id="mv-concept-note" hidden></span>
         <span class="note" id="mv-concept-hint" hidden data-i18n>空のまま作ると、自動で入れます</span>
+        <span class="note stylenote" id="mv-style-note" hidden></span>
         <details class="adv" id="mv-listen-info" hidden>
           <summary data-i18n>曲の聞き取り(参考)</summary>
           <div class="adv-body">
@@ -288,6 +295,8 @@
         <label><span class="fl" data-i18n>高さ(px)</span><input id="mv-ch" type="number" min="256" max="1344" step="32" value="448"></label>
       </div>
       <span class="note mv-qnote" id="mv-qnote"></span>
+      <label class="fld"><span class="fl"><span data-i18n>画風</span> <small data-i18n>(プロンプトには入れず、生成のときに指示を足します)</small></span>
+        <select id="mv-style" class="stylesel" title="参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せます" data-i18n-title><option value="none" data-i18n>なし(参照画像に合わせる)</option><option value="real" data-i18n>リアル</option><option value="cinema" data-i18n>映画</option><option value="drama" data-i18n>ドラマ</option><option value="anime" data-i18n>アニメ</option><option value="illust" data-i18n>イラスト</option><option value="sketch" data-i18n>スケッチ</option><option value="watercolor" data-i18n>水彩</option><option value="oil" data-i18n>油彩</option><option value="cg3d" data-i18n>3DCG</option></select></label>
       <label class="fld"><span class="fl"><span data-i18n>背景の文字</span> <small data-i18n>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
         <select id="mv-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです" data-i18n-title><option value="auto" data-i18n>おまかせ</option>
           <option value="large" data-i18n>大きな文字だけ</option><option value="none" data-i18n>文字を出さない</option></select></label>
@@ -305,7 +314,8 @@
       <div class="presetbar" id="sh-presets"><div class="samplebox" id="sh-samples" hidden></div></div>
       <div class="msg" id="sh-tools" hidden><div id="sh-tools-main"><span id="sh-tools-text"></span> <button id="sh-tools-install" class="mini" type="button" hidden title="MV の音声処理の道具(Demucs・librosa)を、setup と同じ手順で入れます" data-i18n-title data-i18n>道具を入れる(約 1.3GB)</button> <span id="sh-tools-progress"></span></div><div class="refhint" id="sh-tools-ref" hidden></div></div>
       <div class="fld"><label class="fl" for="sh-story"><span data-i18n>物語・映像のイメージ</span> <small id="sh-story-req" data-i18n>(曲もセリフも無いときは必須)</small></label>
-        <textarea id="sh-story" rows="5" maxlength="4000" placeholder="例: 雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る" data-i18n-placeholder></textarea></div>
+        <textarea id="sh-story" rows="5" maxlength="4000" placeholder="例: 雨の駅で、旅立つ友人を見送る少女。最後に電車の窓越しに手を振る" data-i18n-placeholder></textarea>
+        <span class="note stylenote" id="sh-style-note" hidden></span></div>
       <div class="fld" id="sh-song-fld"><span class="fl"><span data-i18n>曲</span> <small data-i18n>(任意)</small> <span class="note inl" id="sh-song-note" data-i18n>音楽タブの曲・ギャラリー・PC の音声ファイル</span></span>
         <div class="refs frame" id="sh-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div>
         <span class="note" id="sh-bgm-note" hidden data-i18n>セリフがあるので、曲は BGM として下に敷きます(長さは読み上げの長さに合わせます)</span></div>
@@ -348,6 +358,8 @@
         <label><span class="fl" data-i18n>高さ(px)</span><input id="sh-ch" type="number" min="256" max="1344" step="32" value="448"></label>
       </div>
       <span class="note mv-qnote" id="sh-qnote"></span>
+      <label class="fld"><span class="fl"><span data-i18n>画風</span> <small data-i18n>(プロンプトには入れず、生成のときに指示を足します)</small></span>
+        <select id="sh-style" class="stylesel" title="参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せます" data-i18n-title><option value="none" data-i18n>なし(参照画像に合わせる)</option><option value="real" data-i18n>リアル</option><option value="cinema" data-i18n>映画</option><option value="drama" data-i18n>ドラマ</option><option value="anime" data-i18n>アニメ</option><option value="illust" data-i18n>イラスト</option><option value="sketch" data-i18n>スケッチ</option><option value="watercolor" data-i18n>水彩</option><option value="oil" data-i18n>油彩</option><option value="cg3d" data-i18n>3DCG</option></select></label>
       <label class="fld"><span class="fl"><span data-i18n>背景の文字</span> <small data-i18n>(看板・画面など。字幕・テロップはどれでも出しません)</small></span>
         <select id="sh-bgtext" title="動画は大きく短い文字なら描けますが、小さな文章は崩れがちです" data-i18n-title><option value="auto" data-i18n>おまかせ</option>
           <option value="large" data-i18n>大きな文字だけ</option><option value="none" data-i18n>文字を出さない</option></select></label>

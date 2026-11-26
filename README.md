@@ -4,7 +4,7 @@
 
 (リポジトリ名は `h3-creator-studio` のまま)
 
-**最新版: 2026-11-26 14:00 JST** — 既に入れてあった MiniMax-H3 に参照モード用のキャッシュ(transformer_ref_int8、約 32GB)が無い PC(Windows と RAM 48GB 未満)では、MV・参照画像やセリフを使うショート動画・動画タブの参照モードを始める前に断り、作るコマンドを画面に出す。setup も既存エンジンのキャッシュを確かめて、無ければ作るか聞く。MV の音声処理の道具を setup が既定で入れ(`--no-mv` で飛ばす)、画面の「道具を入れる」でも入れられる。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
+**最新版: 2026-11-26 JST** — 画像・動画・MV・ショート動画タブに **画風**(なし / リアル / 映画 / ドラマ / アニメ / イラスト / スケッチ / 水彩 / 油彩 / 3DCG)を追加。プロンプトの欄には入れず、生成のときに英語の画風の指示を足す(参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せる)。変更の履歴は [GitHub の commits](https://github.com/animede/h3-creator-studio/commits/main)。
 
 画面の言語は、右上の「使い方」の隣で **日本語 / English** を切り替えられる(選んだ言語はブラウザに覚える。最初はブラウザの言語に合わせる。サーバからの進み具合・エラー・エンジンの状況の文も、選んだ言語で返る。訳の無い文とエンジン自身のログは日本語・原文のまま)。
 
@@ -218,6 +218,7 @@ dir = "/home/you/ACE-Step-1.5-fast"
 - **edit(参照画像で編集)**: 参照画像(最大 16 枚)を落とし、プロンプトで `<Picture 1>` のように番号で指して編集する。
 
 「プロンプト強化」を押すと、短い指示を詳しいプロンプトに書き直してくれる(同梱 LLM)。
+**画風** を選ぶと、生成のときに英語の画風の指示を足す(プロンプトの欄には入れない。edit では参照画像の見た目を保ち、背景・光・質感を画風に寄せる)。
 
 ### 動画タブ(MiniMax-H3)
 
@@ -232,6 +233,23 @@ dir = "/home/you/ACE-Step-1.5-fast"
 
 「音声を作る(読み上げ)」で、AivisSpeech が文章を読み上げた音声を作れる。それを**参照音声**として「参照から」に落とせば、声を指定した動画になる。
 **Vocal Lock** にチェックすると、参照の音声をそのまま出力の音声にして、口の動きを合わせる。
+
+**画風** は、生成のときにプロンプトの後ろに英語の指示を足す設定(欄の文は変わらない。プロンプト強化にも入らない)。
+
+| 画風 | 足す指示(英語) |
+|---|---|
+| なし(参照画像に合わせる) | (足さない。既定) |
+| リアル | photorealistic, natural lighting, real camera, true-to-life skin and materials |
+| 映画 | cinematic film look, anamorphic framing, shallow depth of field, graded color |
+| ドラマ | TV drama look, naturalistic lighting, handheld-feel camera, everyday locations |
+| アニメ | Japanese anime style, clean line art, flat cel shading, expressive eyes |
+| イラスト | digital illustration, clean shapes, bold colors, polished finish |
+| スケッチ | pencil sketch, hand-drawn lines, hatching, paper texture, mostly monochrome |
+| 水彩 | watercolor painting, soft bleeding edges, paper texture, muted palette |
+| 油彩 | oil painting, visible brush strokes, rich impasto texture |
+| 3DCG | 3D CG render, stylized characters, soft global illumination |
+
+参照なしは `Visual style: <指示>.`、参照あり(Ref2VA / Ref2I / FL2VA、画像タブの edit、MV、画像を使うショート動画)は `Keep the referenced subject exactly as in the reference image; render the scene, background, lighting and materials in <指示>.` をプロンプトの後ろに足す。
 
 ### 音楽タブ(ACE-Step)
 
@@ -254,6 +272,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 キャラクター画像 1 枚と曲 1 つから、口の合った MV を作る(音声処理の道具は setup が既定で入れる。無ければタブに案内と「道具を入れる」ボタンが出る)。Windows と RAM 48GB 未満の PC では、MiniMax-H3 の参照モード用のキャッシュも要る(無ければタブの上に作るコマンドつきの案内が出て、**MV を作る** が押せない。作り方は「トラブルシューティング」)。
 **歌わせ方** で「歌わせない(イメージ MV)」を選ぶと、キャラクターが歌わないイメージ映像(いわゆるイメージ PV)になる。曲は結合で付く(下の「歌わせない」を参照)。
+**画風** を選ぶと、全シーンの演出をその画風にそろえる(キャラクターの見た目は画像のまま)。
 
 1. **曲**(音楽タブの曲・ギャラリー・PC の音声ファイル)と **キャラクター画像**(画像タブの画像・ギャラリー・PC の画像)を落とす。
    ギャラリーから落とすと、画像のプロンプトが「人物の説明」に、曲のテーマとキャプションが「曲の内容」に入る(空のときだけ。自分で書き直してよい)。
@@ -292,6 +311,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 ### ショート動画タブ
 
 物語の文章から、物語性のある短い動画を作る。MV タブと同じ仕組み(分析 → 演出 → シーンごとの生成 → 結合)で、H3 だけを使う。曲だけの動画は MV と同じ音声分離(Demucs)を使うので、その場合だけ音声処理の道具が要る(setup が既定で入れる。セリフあり・どちらも無しなら要らない)。
+**画風** を選ぶと、全シーンの演出をその画風にそろえる(参照画像があれば、その見た目は保つ)。
 
 **入力**(左)
 

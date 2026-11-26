@@ -799,7 +799,7 @@ class ViewTest(MvBase):
         v = self.director.view(pid)
         self.assertEqual(v["params"], {"song_id": self.song["id"], "image_id": self.image["id"], "character": "a girl", "concept": "dawn",
                                        "aspect": "9:16", "quality": "standard", "width": 576, "height": 1024, "min_s": 5.0, "max_s": 10.0,
-                                       "seed": 5, "background_text": "auto", "lipsync": True})
+                                       "seed": 5, "background_text": "auto", "lipsync": True, "style": "none"})
         self.assertEqual((v["state"], v["error"], v["title"], v["output"], v["assembled"]), ("generating", None, "夜明けの駅", None, False))
         self.assertEqual(v["analysis"], {"duration": 21.0, "bpm": 120.0, "has_vocals": True, "scenes": 3})
         self.assertEqual(v["script"], {"title": "T"})

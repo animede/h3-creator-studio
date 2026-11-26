@@ -168,6 +168,10 @@ MiniMax-H3-Image で画像を作る。上の 2 つのボタンで作り方を選
 - edit のときは、参照画像も見て書き直す。
 - エンジンと LLM を起こすので、数分かかることがある。
 
+### 画風
+
+**画風**(なし / リアル / 映画 / ドラマ / アニメ / イラスト / スケッチ / 水彩 / 油彩 / 3DCG)を選ぶと、生成のときにプロンプトの後ろへ英語の画風の指示を足す。プロンプトの欄には入れず(欄の下に「画風: アニメ(生成時に指示を足します)」と出る)、プロンプト強化にも入らない。edit では参照画像の見た目を保ち、背景・光・質感を画風に寄せる。足す文は「[動画タブ](#動画タブ)」の表と同じ。プリセットにも入る。
+
 ### サイズ
 
 - 選ぶ欄: **1024×1024** / **1344×768** / **768×1344** / **1536×1536** / **2048×2048** / **自由入力**。横の 2 つの欄に幅と高さを直接入れてもよい。
@@ -214,6 +218,25 @@ MiniMax-H3 で、音声つきの動画を作る。上の 4 つのボタンで作
 - 書く順の目安: 場面 → 人物 → 動き → カメラ → 音 → 終わり方。
 - **プロンプト強化** は MiniMax 公式の書き方に沿って書き直す(T2VA / FL2VA / Ref2VA のとき)。静止画では押せない(静止画のプロンプトは画像タブの強化を使う)。**元に戻す** で元の文に戻る。
 - セリフをはっきり話させたいときは、文に書くより、下の「音声を作る」で声を作って参照にするほうが確実。
+
+### 画風
+
+画像タブと同じ **画風** の選択。生成のときにプロンプトの後ろへ英語の指示を足す(欄の文は変わらない)。Ref2VA / Ref2I / FL2VA は、参照・フレームの見た目を保つ形の文になる。
+
+| 画風 | 足す指示(英語) |
+|---|---|
+| なし(参照画像に合わせる) | (足さない。既定) |
+| リアル | photorealistic, natural lighting, real camera, true-to-life skin and materials |
+| 映画 | cinematic film look, anamorphic framing, shallow depth of field, graded color |
+| ドラマ | TV drama look, naturalistic lighting, handheld-feel camera, everyday locations |
+| アニメ | Japanese anime style, clean line art, flat cel shading, expressive eyes |
+| イラスト | digital illustration, clean shapes, bold colors, polished finish |
+| スケッチ | pencil sketch, hand-drawn lines, hatching, paper texture, mostly monochrome |
+| 水彩 | watercolor painting, soft bleeding edges, paper texture, muted palette |
+| 油彩 | oil painting, visible brush strokes, rich impasto texture |
+| 3DCG | 3D CG render, stylized characters, soft global illumination |
+
+参照なしは `Visual style: <指示>.`、参照あり(Ref2VA / Ref2I / FL2VA、画像タブの edit、MV、画像を使うショート動画)は `Keep the referenced subject exactly as in the reference image; render the scene, background, lighting and materials in <指示>.` をプロンプトの後ろに足す。
 
 ### 解像度と長さ
 
@@ -378,6 +401,10 @@ Windows と RAM 48GB 未満の PC では、MiniMax-H3 の参照モード用の�
 - **手動入力**: **幅(px)** と **高さ(px)** を直接入れる(256〜1344、32 の倍数に丸める)。画質の欄は使わない。
 - 同梱のプリセットに、YouTube・TikTok・Instagram 向けの画角と画質の組み合わせがある。
 
+### 画風
+
+**画風** を選ぶと、演出を書く LLM に「全シーンをこの画風に」と指示し、各シーンの最終のプロンプトの画風の文(既定は cinematic music-video style)をその画風の文に替える。キャラクターの見た目は画像のまま保つ。なしなら従来どおり。
+
 ### そのほかの欄
 
 - **背景の文字**: 看板や画面に描く文字。**おまかせ** / **大きな文字だけ** / **文字を出さない**。動画は大きく短い文字なら描けるが、小さな文章は崩れがち。字幕・テロップ・歌詞の文字・タイトル・ロゴは、どれを選んでも出さない。
@@ -470,6 +497,10 @@ Windows と RAM 48GB 未満の PC では、MiniMax-H3 の参照モード用の�
 - **最終の音声**: **自動** / **音声なし(映像だけ)**。
   - 自動: セリフがあれば読み上げ(曲は小さく混ぜ、読み上げの長さで切る。曲が短ければ繰り返さない)、曲だけなら曲、どちらも無ければ H3 の音。
   - 音声なし: 映像だけの MP4。他のツールで音を付けたい人向け。
+
+### 画風
+
+MV タブと同じ。**画風** を選ぶと全シーンの演出をその画風にそろえる。参照画像(人物・景色)が 1 枚でもあれば、参照の見た目を保つ形の文になる。物語の欄の下に「画風: …(生成時に指示を足します)」と出る。
 
 ### 人物とセリフの決まり
 

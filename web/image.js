@@ -116,7 +116,7 @@ async function generate() {
   if (mode === "edit" && !refs.length) { showMsg(t("edit は参照画像が要ります。画像を参照欄に落としてください")); return; }
   tracker.submit(mode === "edit" ? "h3image.edit" : "h3image.t2i", {
     prompt, width: +im("w").value, height: +im("h").value, seed, steps: im("steps").value ? +im("steps").value : null,
-    references: mode === "edit" ? refs.map((r) => r.id) : [],
+    references: mode === "edit" ? refs.map((r) => r.id) : [], style: im("style").value,
   });
 }
 
@@ -132,7 +132,8 @@ wireEnhance({ tab: "image", ta: im("prompt"), btn: im("enh"), undo: im("enh-undo
 
 function getPresetValues() {
   return { mode, prompt: im("prompt").value.trim(), width: +im("w").value, height: +im("h").value,
-    steps: im("steps").value ? +im("steps").value : null, seed: presetGetSeed(im("seed"), im("random")) };
+    steps: im("steps").value ? +im("steps").value : null, seed: presetGetSeed(im("seed"), im("random")),
+    style: im("style").value };
 }
 
 // 書かれている項目だけ反映する(知らない項目は無視)。プロンプトは空でなければ置き換える(サイズだけのプリセットで、書きかけの文を消さない)
@@ -143,8 +144,10 @@ function applyPresetValues(v) {
   for (const [key, id] of [["width", "w"], ["height", "h"]]) if (Number.isFinite(v[key])) presetSet(im(id), v[key]);      // change で 32 の倍数に丸め、サイズの選択も合う
   if ("steps" in v && !presetSet(im("steps"), v.steps == null ? "" : v.steps)) skipped.push(t("ステップ数"));
   if ("seed" in v) presetSetSeed(im("seed"), im("random"), v.seed);
+  if ("style" in v && !presetSet(im("style"), v.style || "none")) skipped.push(t("画風"));
   return skipped;
 }
+wireStyleNote(im("style"), im("style-note"));
 wirePresets({ tab: "image", box: $("im-presets"), get: getPresetValues, apply: applyPresetValues });
 
 tracker.resume();

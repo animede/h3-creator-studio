@@ -21,6 +21,8 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Optional
 
+from .styles import STYLES, style_phrase
+
 log = logging.getLogger("studio.mvscript")
 
 # chat(system, user, max_tokens, temperature) -> 応答の文字列(Llm.chat と同じ形)
@@ -209,8 +211,22 @@ FRAME_SHOT_PREFIX = {
 
 # ---- H3 公式の Ref2VA 6 セクション形式 ----
 
+DEFAULT_STYLE_SENTENCE = "The target video uses a coherent cinematic music-video style while fully preserving the reference character."
+
+
+def style_rule(style) -> str:
+    """演出を書く LLM への画風の規則(none なら "")。全シーンで同じ画風にさせる。"""
+    phrase = STYLES.get(str(style or "none"), STYLES["none"])["phrase"]
+    return f"STYLE: All scenes share this visual style: {phrase}; never contradict it.\n" if phrase else ""
+
+
+def style_sentence(style, default: str = DEFAULT_STYLE_SENTENCE, with_reference: bool = True) -> str:
+    """最終のプロンプトの画風の文。画風を選んだら、既定の「cinematic ... style」の文をその画風の文に差し替える。"""
+    return style_phrase(style, with_reference) or default
+
+
 def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, character: dict, frame: str = "landscape",
-                                     lipsync: bool = True) -> str:
+                                     lipsync: bool = True, style: str = "none") -> str:
     """1 つのクリップを、MiniMax H3 公式の Ref2VA の 6 セクション形式に包む。
 
     参照画像は「キーフレーム」ではなく再利用する被写体なので、公式の指針どおり <Picture 1> の単独の保持項目にはせず、
@@ -222,7 +238,7 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
     identity = _single_line(identity_instruction(character))
     direction = _single_line(visual_direction)
     if not lipsync:
-        return _format_image_mv_prompt(subject, identity, direction, frame)
+        return _format_image_mv_prompt(subject, identity, direction, frame, style)
     singing = float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO
 
     if singing:
@@ -256,8 +272,7 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
         "<Audio 1>: fully_copy - <Audio 1> is reused 1:1 as the target clip's complete synchronized "
         "audio track.\n\n"
         "detailed_description:\n"
-        "The target video uses a coherent cinematic music-video style while fully preserving the "
-        f"reference character. It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
+        f"{style_sentence(style)} It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
         f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{scrub_overlay_text(direction)} {performance} No text overlay.\n\n"
         "overall_soundscape:\n"
         "No additional dialogue, ambience, crowd voices, or sound effects are introduced; the "
@@ -267,7 +282,7 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
     )
 
 
-def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: str) -> str:
+def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: str, style: str = "none") -> str:
     """歌わせない(イメージ MV)クリップの 6 セクション形式。参照は <Picture 1> だけで、音声の参照は無い。
     H3 が作る音声は使わない(mute で頼み、結合で曲に差し替える)ので、音の欄は「声も歌も無い」とだけ書く。"""
     return (
@@ -281,8 +296,7 @@ def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: 
         "<Subject 1> (appears in [Shot 1]): fully_preserved - the referenced character's identity, "
         f"face, hair, clothing, and visual style are retained exactly: {identity}.\n\n"
         "detailed_description:\n"
-        "The target video uses a coherent cinematic music-video style while fully preserving the "
-        f"reference character. It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
+        f"{style_sentence(style)} It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
         f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{scrub_overlay_text(direction)} "
         "<Subject 1> (S1) does not sing or speak; the mouth stays naturally closed and relaxed. No text overlay.\n\n"
         "overall_soundscape:\n"
@@ -395,7 +409,7 @@ MOUTH_RULE_IMAGE_MV = (
 
 
 async def generate_scenario(chat: Chat, scenes: list, concept: str, character: dict, *, frame: str = "landscape",
-                            background_text: str = "auto", lipsync: bool = True,
+                            background_text: str = "auto", lipsync: bool = True, style: str = "none",
                             on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
     """全体の構成(overview)を 1 回、シーンごとの演出を BATCH_SIZE 個ずつ頼み、整形した最終プロンプトを返す。
     番号と個数が合わなければ 1 回だけ頼み直し、それでも合わなければ ScenarioError。
@@ -433,6 +447,7 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             "Use restrained camera motion and avoid cuts inside a generated clip. " + NO_OVERLAY_RULE + "\n"
             + FRAME_LLM_GUIDANCE.get(frame, "")
             + BACKGROUND_TEXT_GUIDANCE.get(background_text, "")
+            + style_rule(style)
             + f"CHARACTER_REFERENCE_FACTS: {facts}\n"
             f"TREATMENT: {json.dumps(overview, ensure_ascii=False)}\n"
             f"PREVIOUS: {json.dumps(previous, ensure_ascii=False)}\n"
@@ -455,7 +470,8 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
         previous = dict(result[-1])          # 整形前の項目(下で prompt を書き換えても、次の batch に渡す内容は変わらない)
         for scene, item in zip(batch, result, strict=True):
             direction = enforce_reference_and_lipsync(scene, str(item.get("prompt") or ""), character, lipsync=lipsync)
-            item["prompt"] = format_h3_official_ref2va_prompt(scene, direction, character, frame=frame, lipsync=lipsync)
+            item["prompt"] = format_h3_official_ref2va_prompt(scene, direction, character, frame=frame, lipsync=lipsync,
+                                                              style=style)
         outputs.extend(result)
         if on_progress is not None:
             on_progress(len(outputs), len(scenes))

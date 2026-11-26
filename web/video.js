@@ -265,7 +265,7 @@
   function generate() {
     const prompt = vd("prompt").value.trim();
     if (!prompt) { showMsg(t("プロンプトを入力してください")); vd("prompt").focus(); return; }
-    const params = { prompt, resolution: vd("res").value,
+    const params = { prompt, resolution: vd("res").value, style: vd("style").value,
       seed: vd("random").checked || vd("seed").value === "" ? null : parseInt(vd("seed").value, 10) };
     let kind;
     if (mode === "still") {
@@ -303,7 +303,8 @@
 
   function getPresetValues() {
     return { mode, prompt: vd("prompt").value.trim(), resolution: vd("res").value, seconds: +vd("secs").value,
-      match_audio: vd("match").checked, vocal_lock: vd("vocal").checked, seed: presetGetSeed(vd("seed"), vd("random")) };
+      match_audio: vd("match").checked, vocal_lock: vd("vocal").checked, seed: presetGetSeed(vd("seed"), vd("random")),
+      style: vd("style").value };
   }
 
   // 書かれている項目だけ反映する(知らない項目は無視)。プロンプトは空でなければ置き換える。作り方を先に合わせ、欄の出し入れは render が追従する
@@ -316,8 +317,10 @@
     if ("match_audio" in v) presetSet(vd("match"), v.match_audio);
     if ("vocal_lock" in v) presetSet(vd("vocal"), v.vocal_lock);
     if ("seed" in v) presetSetSeed(vd("seed"), vd("random"), v.seed);
+    if ("style" in v && !presetSet(vd("style"), v.style || "none")) skipped.push(t("画風"));
     return skipped;
   }
+  wireStyleNote(vd("style"), vd("style-note"));
   wirePresets({ tab: "video", box: $("vd-presets"), get: getPresetValues, apply: applyPresetValues });
 
   tracker.resume();

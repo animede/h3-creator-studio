@@ -168,6 +168,10 @@ Pressing **Enhance prompt** (プロンプト強化) rewrites a short instruction
 - In edit mode, it also looks at the reference images when rewriting.
 - It wakes up the engine and the LLM, so it can take a few minutes.
 
+### Visual style
+
+Choosing a **Visual style** (画風: None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG) appends an English style instruction to the prompt at generation. It is not written into the prompt box (a note such as "Visual style: Anime (an instruction is added at generation)" appears under it) and prompt enhancement does not include it. In edit mode the reference's look is kept and the background, lighting and materials follow the style. The sentences are in the table under "Video tab". Presets store it too.
+
 ### Size
 
 - The picker: **1024×1024** / **1344×768** / **768×1344** / **1536×1536** / **2048×2048** / **Custom** (自由入力). You can also type the width and height directly into the two fields next to it.
@@ -214,6 +218,25 @@ Makes videos with audio using MiniMax-H3. Choose the mode with the four buttons 
 - A rough order: scene → characters → motion → camera → sound → how it ends.
 - **Enhance prompt** rewrites the text following MiniMax's official prompting style (in T2VA / FL2VA / Ref2VA). It can't be used for still images (use the Image tab's enhancement for still image prompts). **Undo** restores the original text.
 - If you want dialogue spoken clearly, making a voice with "Make audio" below and using it as a reference is more reliable than writing it in the text.
+
+### Visual style
+
+The same **Visual style** selector as the Image tab: an English instruction is appended to the prompt at generation (the prompt box is unchanged). Ref2VA / Ref2I / FL2VA use the form that keeps the look of the references or frames.
+
+| Visual style | Instruction added (English) |
+|---|---|
+| None (match the reference) | (nothing; the default) |
+| Realistic | photorealistic, natural lighting, real camera, true-to-life skin and materials |
+| Cinematic | cinematic film look, anamorphic framing, shallow depth of field, graded color |
+| TV drama | TV drama look, naturalistic lighting, handheld-feel camera, everyday locations |
+| Anime | Japanese anime style, clean line art, flat cel shading, expressive eyes |
+| Illustration | digital illustration, clean shapes, bold colors, polished finish |
+| Sketch | pencil sketch, hand-drawn lines, hatching, paper texture, mostly monochrome |
+| Watercolor | watercolor painting, soft bleeding edges, paper texture, muted palette |
+| Oil painting | oil painting, visible brush strokes, rich impasto texture |
+| 3D CG | 3D CG render, stylized characters, soft global illumination |
+
+Without a reference, `Visual style: <instruction>.` is appended to the prompt; with one (Ref2VA / Ref2I / FL2VA, Image tab edit, music videos, short videos with images), `Keep the referenced subject exactly as in the reference image; render the scene, background, lighting and materials in <instruction>.`
 
 ### Resolution and length
 
@@ -378,6 +401,10 @@ Even with no singing, the LLM writing the direction may pick a microphone or sta
 - **Custom**: enter **Width (px)** (幅(px)) and **Height (px)** (高さ(px)) directly (256–1344, rounded to a multiple of 32). The quality field isn't used.
 - The built-in presets include aspect and quality combinations for YouTube, TikTok, and Instagram.
 
+### Visual style
+
+Choosing a **Visual style** tells the direction-writing LLM to keep every scene in that style, and replaces the style sentence of each scene's final prompt (by default "cinematic music-video style") with that style's sentence. The character keeps the look of the image. None works as before.
+
 ### Other fields
 
 - **Background text** (背景の文字): text drawn on signs and screens. **Auto** / **Large text only** / **No text**. Video can render large, short text, but small sentences tend to break up. Subtitles, captions, lyric text, titles, and logos are never drawn, whichever you choose.
@@ -470,6 +497,10 @@ The length field appears or disappears and the hint (such as "Length: song lengt
 - **Final audio** (最終の音声): **Auto** / **No audio (video only)** (音声なし(映像だけ)).
   - Auto: with narration, the speech (the song mixed in quietly and cut to the speech length; a short song isn't looped); with only a song, the song; with neither, H3's sound.
   - No audio: a video-only MP4. For people who want to add sound in another tool.
+
+### Visual style
+
+Same as the Music Video tab. A **Visual style** keeps every scene's direction in that style; if there is at least one reference image (person or scenery), the form that keeps the references' look is used. A note appears under the story box.
 
 ### Rules for the person and narration
 

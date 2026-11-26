@@ -824,7 +824,21 @@ const I18N_EN = {
   "🔥 激しい": "🔥 Intense",
   "😊 明るい": "😊 Bright",
   "😎 クール": "😎 Cool",
-  "😢 切ない": "😢 Bittersweet",
+  "😢 切ない": "😢 Bittersweet",  // 画風(studio/styles.py の STYLES と同じ名前)
+  "画風": "Visual style",
+  "(プロンプトには入れず、生成のときに指示を足します)": "(not written into the prompt; the instruction is added at generation)",
+  "参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せます": "With a reference image, the person or object keeps its reference look; the scene, background, lighting and materials follow the style",
+  "画風: {name}(生成時に指示を足します)": "Visual style: {name} (an instruction is added at generation)",
+  "なし(参照画像に合わせる)": "None (match the reference)",
+  "リアル": "Realistic",
+  "映画": "Cinematic",
+  "ドラマ": "TV drama",
+  "アニメ": "Anime",
+  "イラスト": "Illustration",
+  "スケッチ": "Sketch",
+  "水彩": "Watercolor",
+  "油彩": "Oil painting",
+  "3DCG": "3D CG",
 };
 
 // 読み込んだら、すぐ画面の文字を訳す(スクリプトは body の最後にあるので、要素はもうある)。上の「日本語 / English」の切り替えもつなぐ

@@ -24,6 +24,7 @@ import math
 from typing import Any, Callable, Optional
 
 from studio import mvscript as M
+from studio.styles import style_phrase
 from studio.mvscript import BATCH_SIZE, ScenarioError, _index_of, _items, _single_line, scenario_request
 
 log = logging.getLogger("studio.shortscript")
@@ -206,7 +207,7 @@ def _soundscape(speech: bool, timeline: str) -> str:
 
 
 def format_h3_prompt(scene: dict, direction: str, character: dict, sceneries: list, roles: list, *, frame: str = "landscape",
-                     timeline: str = "free") -> str:
+                     timeline: str = "free", style: str = "none", with_reference: Optional[bool] = None) -> str:
     """1 つのクリップを H3 公式の形に包む。scene["refs"] が空なら t2va、あれば ref2va(人物は <Subject k>、景色・物も <Subject k>)。
     speech(timeline == "speech" で人物が refs にある)のシーンだけ <Audio 1>(読み上げの切り出し)を持つ。字幕を出さない文は必ず入れる。"""
     entries = _entries(scene, sceneries, list(roles or []))
@@ -219,10 +220,13 @@ def format_h3_prompt(scene: dict, direction: str, character: dict, sceneries: li
     else:
         shot_prefix = FRAME_SHOT_PREFIX_NO_PERSON.get(frame, "")
     soundscape = _soundscape(speech, timeline)
+    # 画風の文(none なら "")。参照画像を 1 枚でも持つ制作は、このシーンが参照を使わなくても、参照の見た目を保つ文にする
+    styled = style_phrase(style, bool(entries) if with_reference is None else with_reference)
 
     if not entries:
         # t2va: 公式 base-en.txt の 3 項目。[Shot 1] はタイムスタンプなしで、文頭にスタイルと構図
-        return (f"integrated_multimodal_description: [Shot 1] {shot_prefix}Cinematic, coherent short-film style in one continuous shot "
+        look = f"{styled} One continuous shot" if styled else "Cinematic, coherent short-film style in one continuous shot"
+        return (f"integrated_multimodal_description: [Shot 1] {shot_prefix}{look} "
                 f"with no internal cut. {NO_PEOPLE_TEXT} {direction}{M.NO_OVERLAY_TEXT}\n\n"
                 f"overall_soundscape: {soundscape}\n\n"
                 "non_diegetic_music: N/A")
@@ -259,10 +263,13 @@ def format_h3_prompt(scene: dict, direction: str, character: dict, sceneries: li
                f"which {who} {action}" + (", while <Audio 1> is reused for synchronization." if speech else ".") + place_sentence)
 
     # detailed_description
-    style = "The target video uses a coherent cinematic short-film style"
-    if person is not None:
-        style += f" while fully preserving the reference character <Subject {person[0]}>"
-    style += ". It contains one continuous shot with no internal cut."
+    if styled:
+        style = f"{styled} It contains one continuous shot with no internal cut."
+    else:
+        style = "The target video uses a coherent cinematic short-film style"
+        if person is not None:
+            style += f" while fully preserving the reference character <Subject {person[0]}>"
+        style += ". It contains one continuous shot with no internal cut."
     if labels:
         style += (f" The setting follows {', '.join(labels)}: {PARTIAL_RETENTION}.")
     if person is None:
@@ -368,7 +375,7 @@ def _truthy(value: Any) -> bool:
 
 async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: dict, sceneries: list, *, timeline: str, frame: str,
                             background_text: str, roles: Any = (), narration_sentences: Optional[list] = None,
-                            on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
+                            style: str = "none", on_progress: Optional[Callable[[int, int], None]] = None) -> dict:
     """シーンごとの演出を BATCH_SIZE 個ずつ頼み、使う参照(refs)と整形した最終プロンプトを返す。概要は渡された outline(追加の呼び出しは無い)。
     番号と個数が合わなければ 1 回だけ頼み直し、それでも合わなければ ScenarioError。on_progress(終わったシーン数, 全シーン数)は batch ごと。
 
@@ -429,6 +436,7 @@ async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: 
             "scene follows the story. " + M.NO_OVERLAY_RULE + "\n"
             + M.FRAME_LLM_GUIDANCE.get(frame, "")
             + M.BACKGROUND_TEXT_GUIDANCE.get(background_text, "")
+            + M.style_rule(style)
             + f"TREATMENT: {json.dumps(outline, ensure_ascii=False)}\n"
             f"CONTINUITY_RULES: {json.dumps(outline.get('continuity_rules') or [], ensure_ascii=False)}\n"
             f"PREVIOUS: {json.dumps(previous, ensure_ascii=False)}\n"
@@ -467,7 +475,8 @@ async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: 
             outputs.append({"index": _index_of(item), "emotion": _single_line(item.get("emotion")),
                             "place": _single_line(item.get("place")) or _single_line(scene.get("place")), "refs": refs,
                             "shot": _single_line(item.get("shot")), "camera": _single_line(item.get("camera")),
-                            "prompt": format_h3_prompt(placed, direction, character, descriptions, roles, frame=frame, timeline=timeline)})
+                            "prompt": format_h3_prompt(placed, direction, character, descriptions, roles, frame=frame, timeline=timeline,
+                                                     style=style, with_reference=bool(roles))})
         if on_progress is not None:
             on_progress(len(outputs), len(scenes))
     return {"prompt_format": "MiniMax H3 official format (t2va: three fields, ref2va: six sections)",

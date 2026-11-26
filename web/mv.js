@@ -272,7 +272,7 @@
     try {
       const js = await api("/api/mv", "POST", { song_id: song.id, image_id: image.id, character: mvp("char").value.trim(), concept: mvp("concept").value.trim(),
         aspect: mvp("aspect").value, quality: mvp("quality").value, width: customSize() ? +mvp("cw").value : null, height: customSize() ? +mvp("ch").value : null,
-        min_s: min, max_s: max, seed, background_text: mvp("bgtext").value,
+        min_s: min, max_s: max, seed, background_text: mvp("bgtext").value, style: mvp("style").value,
         lipsync: mvp("lipsync").value !== "false" });
       await select(js.id);
     } catch (e) {
@@ -293,7 +293,7 @@
     return { character: typed(mvp("char")), concept: typed(mvp("concept")), aspect: mvp("aspect").value, quality: mvp("quality").value,
       ...(customSize() ? { width: +mvp("cw").value, height: +mvp("ch").value } : {}),
       min_s: +mvp("min").value, max_s: +mvp("max").value, seed: presetGetSeed(mvp("seed"), mvp("random")), background_text: mvp("bgtext").value,
-      lipsync: mvp("lipsync").value !== "false" };
+      style: mvp("style").value, lipsync: mvp("lipsync").value !== "false" };
   }
 
   // 書かれている項目だけ反映する(知らない項目は無視)。人物の説明・曲の内容は空でなければ置き換える(自分で書いた扱いなので、曲や画像を落としても消えない)
@@ -303,17 +303,20 @@
     for (const [key, label] of [["aspect", t("画角")], ["quality", t("画質")]]) if (key in v && !presetSet(mvp(key), v[key])) skipped.push(label);      // change で寸法の表示が合う
     for (const [key, id] of [["width", "cw"], ["height", "ch"]]) if (Number.isFinite(v[key])) presetSet(mvp(id), v[key]);
     if ("background_text" in v && !presetSet(mvp("bgtext"), v.background_text)) skipped.push(t("背景の文字"));
+    if ("style" in v && !presetSet(mvp("style"), v.style || "none")) skipped.push(t("画風"));
     presetSet(mvp("lipsync"), String(v.lipsync !== false));      // 無ければ歌わせる(歌わせ方はプリセットが必ず決める。イメージ MV の後に別のを選んだら戻る)
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(mvp(id), v[key]);
     if ("seed" in v) presetSetSeed(mvp("seed"), mvp("random"), v.seed);
     return skipped;
   }
+  wireStyleNote(mvp("style"), mvp("style-note"));
   wirePresets({ tab: "mv", box: mvp("presets"), get: getPresetValues, apply: applyPresetValues });
 
   // ---- サンプル(samples/<id>/ の入力欄の値と素材。読み込むと、いまの曲・キャラクター画像・説明は、サンプルのものに置き換わる。生成はしない) ----
 
   // values = プリセットと同じ項目(character / concept を含む)。assets = [{role: song | person, output(ギャラリーの生成物)}]
   function applySample(values, assets) {
+    values = { style: "none", ...values };    // 画風はサンプルに無ければ「なし」
     song = null;
     image = null;
     for (const id of ["char", "concept"]) { mvp(id).dataset.auto = ""; presetSet(mvp(id), ""); }      // 自動で入れた文の印も消す

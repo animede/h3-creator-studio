@@ -191,7 +191,7 @@ class MvApiTest(unittest.TestCase):
         self.assertEqual((js["state"], js["error"], js["scenes"], js["output"], js["job_status"]), ("analyzing", None, [], None, "queued"))
         self.assertEqual(js["params"], {"song_id": self.song["id"], "image_id": self.image["id"], "character": "a girl",
                                         "concept": "夜明けの駅\nBallad", "aspect": "9:16", "quality": "standard", "width": 576, "height": 1024,
-                                        "min_s": 6.0, "max_s": 9.0, "seed": 3, "background_text": "auto", "lipsync": True})
+                                        "min_s": 6.0, "max_s": 9.0, "seed": 3, "background_text": "auto", "lipsync": True, "style": "none"})
         (job,) = self.runner.jobs.values()
         self.assertEqual((job.tab, job.kind, job.params, js["job_id"]), ("mv", "mv.analyze", {"project_id": js["id"]}, job.id))
         self.assertEqual(self.client.get(f"/api/mv/{js['id']}").json()["id"], js["id"])

@@ -29,7 +29,7 @@ STAGE_LABEL = {**mv.STAGE_LABEL, "analyze": "音声の準備"}
 TEXT = {"analyze": "音声を準備します", "plan": "物語からシーンに分けます", "script": "演出を書きます", "assemble": "シーンを結合します",
         "done": "ショート動画ができました"}
 PARAM_KEYS = ("kind", "story", "song_id", "narration", "speaker_id", "images", "length_s", "timeline", "aspect", "quality", "width", "height",
-              "min_s", "max_s", "seed", "background_text", "final_audio", "subtitles", "character", "character_source", "character_note", "title")
+              "min_s", "max_s", "seed", "background_text", "style", "final_audio", "subtitles", "character", "character_source", "character_note", "title")
 SCENE_KEYS = (*Director.SCENE_KEYS, "place", "summary", "refs", "speech", "text")
 
 

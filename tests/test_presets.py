@@ -77,17 +77,20 @@ class BuiltinFilesTest(unittest.TestCase):
         """値が、そのタブの入力欄に入れられるものか(入れられないものの項目名を返す)。"""
         f, opt = self.form, self.form.options
         seed_ok = v.get("seed") is None or (isinstance(v["seed"], int) and v["seed"] >= 0)
+        px = {"image": "im", "video": "vd", "mv": "mv", "short": "sh"}.get(tab)
+        style_ok = px is not None and v.get("style") in opt[f"{px}-style"]          # 画風(4 つのタブ共通の選択肢)
         if tab == "image":
             checks = {
                 "mode": v.get("mode") in self.modes("im-modes"), "prompt": self.text_ok(v.get("prompt"), "im-prompt"),
                 "width": self.number_ok(v.get("width"), "im-w", True) and v.get("width", 0) % 32 == 0,
                 "height": self.number_ok(v.get("height"), "im-h", True) and v.get("height", 0) % 32 == 0,
-                "steps": v.get("steps") is None or str(v.get("steps")) in opt["im-steps"], "seed": seed_ok}
+                "steps": v.get("steps") is None or str(v.get("steps")) in opt["im-steps"], "seed": seed_ok, "style": style_ok}
         elif tab == "video":
             checks = {
                 "mode": v.get("mode") in self.modes("vd-modes"), "prompt": self.text_ok(v.get("prompt"), "vd-prompt"),
                 "resolution": v.get("resolution") in opt["vd-res"], "seconds": self.number_ok(v.get("seconds"), "vd-secs", True),
-                "match_audio": isinstance(v.get("match_audio"), bool), "vocal_lock": isinstance(v.get("vocal_lock"), bool), "seed": seed_ok}
+                "match_audio": isinstance(v.get("match_audio"), bool), "vocal_lock": isinstance(v.get("vocal_lock"), bool), "seed": seed_ok,
+                "style": style_ok}
         elif tab == "music":
             checks = {
                 "mode": v.get("mode") in self.modes("mu-modes"),
@@ -109,7 +112,7 @@ class BuiltinFilesTest(unittest.TestCase):
                 "aspect": v.get("aspect") in opt["sh-aspect"], "quality": v.get("quality") in opt["sh-quality"],
                 "min_s": self.number_ok(v.get("min_s"), "sh-min"), "max_s": self.number_ok(v.get("max_s"), "sh-max"), "seed": seed_ok,
                 "background_text": v.get("background_text") in opt["sh-bgtext"], "final_audio": v.get("final_audio") in opt["sh-final"],
-                "subtitles": isinstance(v.get("subtitles"), bool),
+                "subtitles": isinstance(v.get("subtitles"), bool), "style": style_ok,
                 "length_s": isinstance(v.get("length_s"), (int, float)) and not isinstance(v.get("length_s"), bool)
                 and v.get("length_s", 0) >= float(f.attrs["sh-length"]["min"]),             # 長さは下限だけ(上限は設けない)
                 "speaker_id": v.get("speaker_id") is None or (isinstance(v.get("speaker_id"), int) and not isinstance(v.get("speaker_id"), bool))}
@@ -118,7 +121,7 @@ class BuiltinFilesTest(unittest.TestCase):
                 "character": self.text_ok(v.get("character"), "mv-char"), "concept": self.text_ok(v.get("concept"), "mv-concept"),
                 "aspect": v.get("aspect") in opt["mv-aspect"], "quality": v.get("quality") in opt["mv-quality"],
                 "min_s": self.number_ok(v.get("min_s"), "mv-min"), "max_s": self.number_ok(v.get("max_s"), "mv-max"), "seed": seed_ok,
-                "lipsync": isinstance(v.get("lipsync"), bool)}
+                "lipsync": isinstance(v.get("lipsync"), bool), "style": style_ok}
         # 書かれている項目だけを確かめる(プリセットは、一部の項目だけを持ってよい)
         bad = [k for k in v if k in checks and not checks[k]] + [k for k in v if k not in checks]
         if tab in ("mv", "short") and "min_s" in v and "max_s" in v and v["min_s"] > v["max_s"]:
@@ -155,16 +158,21 @@ class BuiltinFilesTest(unittest.TestCase):
         self.assertEqual(self.problems("short", {"min_s": 9, "max_s": 6}), ["min_s > max_s"])
         self.assertEqual(self.problems("short", {"final_audio": "mute", "length_s": 20, "aspect": "2:1", "speaker_id": "a"}), ["final_audio", "length_s", "aspect", "speaker_id"])
         self.assertEqual(self.problems("short", {"length_s": 600, "speaker_id": 3, "background_text": "none", "seed": None}), [])
-        self.assertEqual(self.problems("short", {"story": "あ"}), ["story"])                       # 物語・セリフ・曲・画像はプリセットに入れない
+        self.assertEqual(self.problems("short", {"story": "あ"}), ["story"])
+        self.assertEqual(self.problems("image", {"style": "anime"}), [])
+        for tab in ("image", "video", "mv", "short"):
+            self.assertEqual(self.problems(tab, {"style": "pixel"}), ["style"], tab)             # 画風の選択肢に無い値
+        self.assertEqual(self.problems("music", {"style": "anime"}), ["style"])                 # 音楽タブに画風は無い                       # 物語・セリフ・曲・画像はプリセットに入れない
 
     def test_each_tab_script_saves_and_applies_every_field(self):
         """プリセットの項目の一覧(この検査の field 一覧)が、各タブの getPresetValues と applyPresetValues の両方に出てくる。"""
-        fields = {"image": ("mode", "prompt", "width", "height", "steps", "seed"),
-                  "video": ("mode", "prompt", "resolution", "seconds", "match_audio", "vocal_lock", "seed"),
+        fields = {"image": ("mode", "prompt", "width", "height", "steps", "seed", "style"),
+                  "video": ("mode", "prompt", "resolution", "seconds", "match_audio", "vocal_lock", "seed", "style"),
                   "music": ("mode", "genre_mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
                             "vocal", "model", "steps", "batch_size", "thinking", "seed", "negative_prompt", "shift", "infer_method"),
-                  "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed", "lipsync"),
-                  "short": ("aspect", "quality", "min_s", "max_s", "seed", "background_text", "final_audio", "length_s", "speaker_id", "subtitles")}
+                  "mv": ("character", "concept", "aspect", "quality", "min_s", "max_s", "seed", "lipsync", "style"),
+                  "short": ("aspect", "quality", "min_s", "max_s", "seed", "background_text", "final_audio", "length_s", "speaker_id", "subtitles",
+                            "style")}
         files = {"image": "image.js", "video": "video.js", "music": "music.js", "mv": "mv.js", "short": "short.js"}
         for tab, keys in fields.items():
             src = (WEB / files[tab]).read_text(encoding="utf-8")

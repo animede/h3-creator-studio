@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import editclip, genres, h3cache, i18n, mv_audio, mvinstall, presets, procman, samples
+from . import editclip, genres, h3cache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
@@ -381,6 +381,12 @@ class TtsIn(BaseModel):
     speed: float = 1.0
 
 
+@app.get("/api/styles")
+def api_styles():
+    """画風の一覧(id と画面の名前 ja / en)。画面の選択肢はここから作る(唯一の出どころは studio/styles.py)。"""
+    return {"styles": styles.public_list(), "default": styles.STYLE_NONE}
+
+
 @app.get("/api/tts/speakers")
 async def api_tts_speakers():
     try:
@@ -412,6 +418,7 @@ class MvIn(BaseModel):
     max_s: float = 10.0
     seed: Optional[int] = None
     background_text: str = "auto"  # 背景の文字の扱い: auto / large / none(画面には出さない)
+    style: str = "none"            # 画風(studio/styles.py の id。none は足さない)
     lipsync: bool = True           # 歌わせる(リップシンク)か、歌わせない(イメージ MV。H3 に音声を渡さない)か
 
 
@@ -607,6 +614,7 @@ class ShortIn(BaseModel):
     max_s: float = 10.0
     seed: Optional[int] = None
     background_text: str = "auto"
+    style: str = "none"            # 画風(studio/styles.py の id)
     final_audio: str = "auto"      # auto / none(映像だけ)
     subtitles: bool = False        # セリフのテロップ(字幕)を焼き込む(セリフがあるときだけ意味がある)
     character: str = ""            # 人物の説明(空なら、画像のプロンプト → 画像を見て作る)

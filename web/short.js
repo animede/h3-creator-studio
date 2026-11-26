@@ -366,7 +366,7 @@
         images: images.map((r) => ({ id: r.item.id, role: r.role, description: "" })), length_s: tl === "free" ? length : null,
         character: person() ? sh("char").value.trim() : "", aspect: sh("aspect").value, quality: sh("quality").value,
         width: customSize() ? +sh("cw").value : null, height: customSize() ? +sh("ch").value : null, min_s: min, max_s: max, seed,
-        background_text: sh("bgtext").value, final_audio: sh("final").value, subtitles: sh("subs").checked });
+        background_text: sh("bgtext").value, style: sh("style").value, final_audio: sh("final").value, subtitles: sh("subs").checked });
       await select(js.id);
     } catch (e) {
       showMsg(t("ショート動画を始められませんでした: {error}", { error: e.message || e }));
@@ -382,7 +382,7 @@
   function getPresetValues() {
     return { aspect: sh("aspect").value, quality: sh("quality").value, ...(customSize() ? { width: +sh("cw").value, height: +sh("ch").value } : {}),
       min_s: +sh("min").value, max_s: +sh("max").value,
-      seed: presetGetSeed(sh("seed"), sh("random")), background_text: sh("bgtext").value, final_audio: sh("final").value,
+      seed: presetGetSeed(sh("seed"), sh("random")), background_text: sh("bgtext").value, style: sh("style").value, final_audio: sh("final").value,
       length_s: +sh("length").value >= LENGTH_MIN && +sh("length").value <= LENGTH_MAX ? +sh("length").value : 60, speaker_id: sh("speaker").value === "" ? null : +sh("speaker").value,
       subtitles: sh("subs").checked };
   }
@@ -395,6 +395,7 @@
     }
     for (const [key, id] of [["width", "cw"], ["height", "ch"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
     if ("background_text" in v && !presetSet(sh("bgtext"), v.background_text)) skipped.push(t("背景の文字"));
+    if ("style" in v && !presetSet(sh("style"), v.style || "none")) skipped.push(t("画風"));
     if (typeof v.subtitles === "boolean") presetSet(sh("subs"), v.subtitles);
     for (const [key, id] of [["min_s", "min"], ["max_s", "max"]]) if (Number.isFinite(v[key])) presetSet(sh(id), v[key]);
     if (Number.isFinite(v.length_s) && v.length_s >= LENGTH_MIN && v.length_s <= LENGTH_MAX) presetSet(sh("length"), v.length_s);      // input で警告が合う
@@ -405,12 +406,14 @@
     }
     return skipped;
   }
+  wireStyleNote(sh("style"), sh("style-note"));
   wirePresets({ tab: "short", box: sh("presets"), get: getPresetValues, apply: applyPresetValues });
 
   // ---- サンプル(samples/<id>/ の入力欄の値と素材。読み込むと、いまの曲・参照画像・物語・セリフ・人物の説明は、サンプルのものに置き換わる。生成はしない) ----
 
   // values = サンプルの入力欄の値(プリセットと同じ項目 + story / narration / character)。assets = [{role: song | person | scenery, output(ギャラリーの生成物)}]
   function applySample(values, assets) {
+    values = { style: "none", ...values };    // 画風はサンプルに無ければ「なし」
     song = null;                              // 前の入力を引きずらない(サンプルの条件で作れるように)
     images = [];
     charFor = null;

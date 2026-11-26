@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 
+from ..styles import apply_style, check_style
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from .common import download as _download, error_text as _error_text
 
@@ -66,7 +67,8 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
             if rec is None or rec["kind"] != "image":
                 raise ValueError(f"参照画像が見つかりません: {r}")
     return {"prompt": prompt, "width": _snap(params.get("width", 1024), "width"),
-            "height": _snap(params.get("height", 1024), "height"), "seed": seed, "steps": steps, "references": refs}
+            "height": _snap(params.get("height", 1024), "height"), "seed": seed, "steps": steps, "references": refs,
+            "style": check_style(params.get("style"))}
 
 
 def _client(ctx: Ctx, timeout: float = 60.0) -> httpx.AsyncClient:
@@ -100,7 +102,8 @@ async def run(job: Job, ctx: Ctx) -> None:
             if job.cancel_requested:
                 raise JobCancelled()
 
-            body = {"mode": mode, "prompt": p["prompt"], "width": p["width"], "height": p["height"]}
+            # 画風は入力欄の文とは別の設定。送る直前に英語の文を足す(edit は参照画像があるので、被写体を参照のまま保つ文)
+            body = {"mode": mode, "prompt": apply_style(p["prompt"], p.get("style"), mode == "edit"), "width": p["width"], "height": p["height"]}
             for key in ("seed", "steps"):
                 if p.get(key) is not None:
                     body[key] = p[key]
