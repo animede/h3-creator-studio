@@ -316,7 +316,19 @@ Every scene is instructed to show no subtitles, captions, lyric text, titles or 
 
 You can pause / resume / cancel, and per scene **Redo** (changes the seed) and **Edit prompt**. After a redo it re-assembles automatically. An unfinished MV survives a supervisor restart as paused.
 
-Time estimate: on an RTX A4000 (16GB), landscape Fast, a 30-second song is 5 scenes and about 17 minutes (about 3 minutes per scene). On an RTX 4060 Laptop (8GB) with 16GB RAM and a SATA-class SSD (~400MB/s), the same settings take about 31 minutes for 5 scenes (5.5–6.5 minutes per scene; VRAM 7–7.7GB, shared GPU memory steady at 0.8GB, with `H3_REF_IMAGE_SHORT_EDGE=768`). Longer songs take proportionally longer.
+Time estimates (the bundled sample "Singing on a starry night": 30-second song, landscape, singing, 5 scenes of 6.3 / 5.4 / 6.5 / 6.5 / 5.2 seconds; measured 2026-11-26):
+
+| GPU | Quality (size) | Time per scene | Scenes total |
+|---|---|---|---|
+| RTX PRO 6000 96GB (Linux, share mode) | Fast (768x448) | 1:33 / 1:12 / 1:13 / 1:14 / 1:12 | 6:25 (7:30 including analysis, script and assembly) |
+| RTX 3080 Ti 12GB (Windows) | Fast (768x448) | 2:12 / 1:43 / 1:58 / 2:01 / 1:45 | 9:39 |
+| RTX A4000 16GB (Linux) | Fast (768x448) | about 3 min each | about 17 min |
+| RTX 4060 8GB (Windows) | Fast (768x448) | 5:23 / 3:48 / 4:09 / 4:05 / 3:36 | 21:01 |
+| RTX 3060 12GB (Windows) | Fast (768x448) | 4:43 / 3:58 / 4:31 / 4:31 / 3:58 | 21:41 |
+| RTX 3050 6GB (Windows) | Low VRAM (512x288) | 4:14 / 3:36 / 3:06 / 3:59 / 3:39 | 18:34 |
+| RTX 4060 Laptop 8GB (Windows, 16GB RAM, SATA-class SSD) | Fast (768x448) | 5.5–6.5 min each | about 31 min |
+
+The first scene includes loading the model, so it takes longer. Longer songs take proportionally longer. On cards under 14GB and on Windows the studio lowers the reference-image size (`H3_REF_IMAGE_SHORT_EDGE`) by itself (the RTX 4060 Laptop stayed at 7–7.7GB VRAM with shared GPU memory steady at 0.8GB).
 
 ### Short Video tab
 
