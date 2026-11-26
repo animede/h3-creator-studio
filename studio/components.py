@@ -124,21 +124,25 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
 
 
 H3_REF_SHORT_EDGE_LOW_VRAM = "768"
-REF_EDGE_MAX_MIB = 14 * 1024          # これ未満(8GB・12GB のカード)は参照画像を短辺 768 で読む。16GB(A4000)は既定の 2048 で MV が通っている
+H3_REF_SHORT_EDGE_WINDOWS = "1024"
+REF_EDGE_MAX_MIB = 14 * 1024          # これ未満(8GB・12GB のカード)は、OS を問わず参照画像を短辺 768 で読む
 
 
-def h3_gpu_env(total_mib: Optional[int]) -> dict:
-    """VRAM が 14GiB 未満(8GB・12GB のカード)のときだけ、参照画像を読む大きさを短辺 768 にする(H3_REF_IMAGE_SHORT_EDGE)。
+def h3_gpu_env(total_mib: Optional[int], plat: str = None) -> dict:
+    """参照画像を読む大きさ(H3_REF_IMAGE_SHORT_EDGE)。VRAM 14GiB 未満は 768。それ以上は、Windows だけ 1024(Linux はエンジンの既定 2048)。
 
-    エンジンの既定は短辺 2048 で、参照画像をそこまで拡大してから 32B のテキストエンコーダの視覚部分に通す。その注意の計算が
-    1 回で約 6.9GB を確保するので、8GB のカードでは参照モード(MV・ショート動画のシーン、参照から)が CUDA out of memory になる
-    (2026-11-26、RTX 4060 8GB のデスクトップの実機: 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」)。12GB(RTX 3060)も同じ:
-    エンジンは 16gb 級(4B の代わりのエンコーダ 約 3GB を常駐)になり、Windows の上限(約 10.9GiB)を超えた(同日の実機)。
-    768 は RTX 4060 Laptop 8GB で MV を通した値(README の時間の目安)。studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
+    エンジンの既定は短辺 2048 で、参照画像をそこまで拡大してから 32B のテキストエンコーダの視覚部分に通す。Windows では、その注意の
+    計算が 1 回で約 6.9GB を確保し、参照モード(MV・ショート動画のシーン、参照から)が CUDA out of memory になった(2026-11-26 の実機:
+    RTX 4060 8GB 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」、RTX 3060 12GB、RTX 4060 Ti 16GB)。Linux では同じ条件
+    (16GB の Windows 相当の上限、16gb 級)でも最大 7GB で通り、A4000 16GB・RTX PRO 6000 も既定のまま MV が通っているので、
+    Windows 版の PyTorch の注意の計算(省メモリの経路が無い)によると見ている。拡大の量の 2 乗で効くので、1024 なら約 1/16。
+    768 は RTX 4060 Laptop 8GB(Windows)で MV を通した値。studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
     """
-    if total_mib is None or total_mib >= REF_EDGE_MAX_MIB:
-        return {}
-    return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_LOW_VRAM}
+    if total_mib is not None and total_mib < REF_EDGE_MAX_MIB:
+        return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_LOW_VRAM}
+    if (plat or sys.platform) == "win32":
+        return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_WINDOWS}
+    return {}
 
 
 # ---- share のときの VRAM の利用枠 ----

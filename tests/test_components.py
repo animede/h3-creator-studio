@@ -91,12 +91,14 @@ class ComponentsTest(unittest.TestCase):
         self.assertTrue(sp.health_ok({"data": {"models_initialized": True}}))
         self.assertFalse(sp.health_ok({"data": {"models_initialized": False}}))
 
-    def test_h3_gpu_env_below_14gib(self):
-        # 8GB・12GB のカード: 参照画像を短辺 768 で読む(既定の 2048 は 1 回の確保で約 6.9GB 要り、ref2va が VRAM 不足になる。2026-11-26 の実機 ×2)
-        self.assertEqual(h3_gpu_env(8188), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
-        self.assertEqual(h3_gpu_env(12288), {"H3_REF_IMAGE_SHORT_EDGE": "768"})         # RTX 3060 12GB
-        self.assertEqual(h3_gpu_env(14335), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
-        self.assertEqual((h3_gpu_env(14336), h3_gpu_env(16376), h3_gpu_env(None)), ({}, {}, {}))   # 16GB 以上は既定のまま
+    def test_h3_gpu_env_reference_edge(self):
+        # 参照画像を読む大きさ: 14GiB 未満は 768、それ以上は Windows だけ 1024(既定の 2048 は Windows で 1 回の確保が約 6.9GB。2026-11-26 の実機 ×3)
+        for plat in ("linux", "win32"):
+            self.assertEqual(h3_gpu_env(8188, plat), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
+            self.assertEqual(h3_gpu_env(12288, plat), {"H3_REF_IMAGE_SHORT_EDGE": "768"})      # RTX 3060 12GB
+            self.assertEqual(h3_gpu_env(14335, plat), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
+        self.assertEqual([h3_gpu_env(m, "win32") for m in (16380, 24564, 97887, None)], [{"H3_REF_IMAGE_SHORT_EDGE": "1024"}] * 4)
+        self.assertEqual([h3_gpu_env(m, "linux") for m in (16376, 97887, None)], [{}] * 3)     # Linux はエンジンの既定(2048)
         with mock.patch("studio.components.smi_mib", lambda field: 8188):
             env = get_spec("h3", Settings({}, Path("/r"))).env(Path("/x"), 8611)
             self.assertEqual(env["H3_REF_IMAGE_SHORT_EDGE"], "768")
