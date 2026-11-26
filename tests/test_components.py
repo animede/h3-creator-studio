@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from studio.components import ComponentNotInstalled, ace_gpu_env, default_budget_gb, get_spec, h3_profile
+from studio.components import ComponentNotInstalled, ace_gpu_env, default_budget_gb, get_spec, h3_gpu_env, h3_profile
 from studio.config import Settings
 
 
@@ -87,6 +87,17 @@ class ComponentsTest(unittest.TestCase):
         self.assertFalse(sp.can_unload)
         self.assertTrue(sp.health_ok({"data": {"models_initialized": True}}))
         self.assertFalse(sp.health_ok({"data": {"models_initialized": False}}))
+
+    def test_h3_gpu_env_only_below_10gib(self):
+        # 8GB のカード: 参照画像を短辺 768 で読む(既定の 2048 は 1 回の確保で約 6.9GB 要り、ref2va が VRAM 不足になる。2026-11-26 の実機)
+        self.assertEqual(h3_gpu_env(8188), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
+        self.assertEqual(h3_gpu_env(10239), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
+        self.assertEqual((h3_gpu_env(10240), h3_gpu_env(12288), h3_gpu_env(None)), ({}, {}, {}))
+        with mock.patch("studio.components.smi_mib", lambda field: 8188):
+            env = get_spec("h3", Settings({}, Path("/r"))).env(Path("/x"), 8611)
+            self.assertEqual(env["H3_REF_IMAGE_SHORT_EDGE"], "768")
+        with mock.patch("studio.components.smi_mib", lambda field: 16376):
+            self.assertNotIn("H3_REF_IMAGE_SHORT_EDGE", get_spec("h3", Settings({}, Path("/r"))).env(Path("/x"), 8611))
 
     def test_ace_gpu_env_only_below_10gib(self):
         recipe = {"ACESTEP_GPU_PROFILE": "12gb", "ACESTEP_LM_OFFLOAD_TO_CPU": "1", "ACESTEP_RESIDENT_COMPONENTS": "none",

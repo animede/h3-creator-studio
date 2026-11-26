@@ -122,6 +122,22 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
             "ACESTEP_VAE_DECODE_CHUNK_SIZE": "128", "ACESTEP_QUANTIZATION": "int8_weight_only"}
 
 
+H3_REF_SHORT_EDGE_LOW_VRAM = "768"
+
+
+def h3_gpu_env(total_mib: Optional[int]) -> dict:
+    """VRAM が 10GiB 未満(8GB のカード)のときだけ、参照画像を読む大きさを短辺 768 にする(H3_REF_IMAGE_SHORT_EDGE)。
+
+    エンジンの既定は短辺 2048 で、参照画像をそこまで拡大してから 32B のテキストエンコーダの視覚部分に通す。その注意の計算が
+    1 回で約 6.9GB を確保するので、8GB のカードでは参照モード(MV・ショート動画のシーン、参照から)が CUDA out of memory になる
+    (2026-11-26、RTX 4060 8GB のデスクトップの実機: 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」)。768 は RTX 4060 Laptop 8GB で
+    MV を通した値(README の時間の目安)。studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
+    """
+    if total_mib is None or total_mib >= LOW_VRAM_MIB:
+        return {}
+    return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_LOW_VRAM}
+
+
 # ---- share のときの VRAM の利用枠 ----
 
 # H3 の H3_PROFILE が受ける級(GiB)。利用枠以下の最大の級を使う。H3 自身の自動選択(カードの総 VRAM で 32gb 級 ≥ 20GB、48gb 級 ≥ 40GB)より
@@ -184,7 +200,8 @@ def get_spec(name: str, cfg: Settings = None) -> ComponentSpec:
         spec.budget_env = h3_budget_env
         # エンジンの内蔵 LLM は使わず、管理役の LLM(llama-server)を使う
         spec.env = lambda dd, p: {"H3_LLM_LOCAL": "0", "H3_LLM_URL": f"http://127.0.0.1:{cfg.llm_port}",
-                                      "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True"}
+                                      "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True",
+                                      **h3_gpu_env(smi_mib("total"))}
     elif name == "h3image":
         spec = make("MiniMax-H3-Image(画像)", 8633, health_path="/api/health", health_ok=lambda j: True,
                     uses_gpu=True, can_unload=True, unload_path="/api/admin/unload", reload_path="/api/admin/load", vram_need_mib=13500,
