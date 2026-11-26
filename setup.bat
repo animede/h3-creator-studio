@@ -43,8 +43,13 @@ if not exist ".venv\Scripts\python.exe" (
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt || goto failed
 
 echo [3/3] エンジンの取り込みと準備
+rem While Python runs, go back to the original code page. Python writes Unicode to the console by itself, and the Windows 10
+rem console swaps to a font without Japanese under 65001 (the setup questions were unreadable, 2026-11-26). The lines up to
+rem the next "chcp 65001" are parsed with the original code page, so they must stay ASCII.
+if defined OLDCP chcp %OLDCP% >nul
 .venv\Scripts\python.exe scripts\setup.py %*
 set "RC=%ERRORLEVEL%"
+chcp 65001 >nul
 if "%UV_NEW%"=="1" call :notice_after
 chcp %OLDCP% >nul
 endlocal & exit /b %RC%
@@ -57,6 +62,7 @@ echo  この画面を閉じて、PowerShell を開き直し、
 echo      .\setup.bat
 echo  をもう一度実行してください。
 echo  ここまでで入れたのは uv だけです。本番の準備は 2 回目の実行で始まります。
+echo  (uv was installed. Close this window, open PowerShell again and run .\setup.bat once more.)
 echo ============================================================
 chcp %OLDCP% >nul
 endlocal & exit /b 1
@@ -64,6 +70,7 @@ endlocal & exit /b 1
 :failed
 echo.
 echo 管理役の環境を作れませんでした。上の出力を確認して、.\setup.bat をもう一度実行してください。
+echo (Could not create the studio environment. Check the output above and run .\setup.bat again.)
 chcp %OLDCP% >nul
 endlocal & exit /b 1
 
@@ -73,5 +80,6 @@ echo ============================================================
 echo  今回 uv を新しく入れました。
 echo  この画面で uv コマンドを自分で使うなら、PowerShell を
 echo  開き直してください。.\run.bat だけなら、このままで動きます。
+echo  (uv was newly installed. Reopen PowerShell to use uv yourself; .\run.bat works as it is.)
 echo ============================================================
 exit /b 0

@@ -755,3 +755,26 @@ class ExistingH3CacheTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SetupBatTest(unittest.TestCase):
+    """setup.bat の書き方(Windows の cmd は .bat を画面のコードページで 1 行ずつ読む)。"""
+
+    def lines(self):
+        raw = (_path.parent.parent / "setup.bat").read_bytes()
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))          # CRLF だけ
+        return raw.split(b"\r\n")
+
+    def test_japanese_only_while_utf8(self):
+        lines = self.lines()
+        first = lines.index(b"chcp 65001 >nul")
+        self.assertTrue(all(line.isascii() for line in lines[:first]))   # 切り替える前は ASCII だけ
+
+    def test_python_runs_with_the_original_code_page(self):
+        # Windows 10 のコンソールは 65001 で日本語の無い字体に替わり、setup.py の質問が読めなかった(2026-11-26)
+        lines = self.lines()
+        run = next(i for i, line in enumerate(lines) if line.startswith(b".venv\\Scripts\\python.exe scripts\\setup.py"))
+        back = max(i for i in range(run) if b"chcp %OLDCP%" in lines[i])
+        utf8 = next(i for i in range(run, len(lines)) if lines[i] == b"chcp 65001 >nul")
+        self.assertTrue(all(not line.strip() or line.startswith(b"rem ") for line in lines[back + 1:run]))
+        self.assertTrue(all(line.isascii() for line in lines[back:utf8 + 1]))   # 元のコードページで読む行は ASCII だけ
