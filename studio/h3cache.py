@@ -83,6 +83,107 @@ def cache_status(h3_dir, env: dict = None) -> dict:
     return {"base": cache_ready(d / BASE_CACHE), "ref": cache_ready(d / REF_CACHE), "dir": d}
 
 
+# ---- 準備(prepare_lowvram.py)で残った bf16 の原本 ----
+# prepare はシャードを 1 つずつ落として int8 化し、読み終わったら消すが、Windows では Defender の検査などがファイルを掴んでいて
+# 消せないことがあり、警告を出して残したまま続ける(1 本 約 4.6GB。2026-11-26、Windows 10 の実機でディスクが足りなくなった)。
+# 新しいエンジンは最後にもう一度消す(sweep_sources)が、古いエンジンで作った分と、それでも残った分を setup が片づける。
+# 消すのは、int8 キャッシュが完成していて、かつエンジンがそのキャッシュから流す構成(file streaming: Windows か RAM 48GB 未満)のときだけ。
+# bf16 を直接読む構成(RAM 48GB 以上の Linux、96GB 級)では原本をエンジンが使うので触らない。
+
+HF_MODEL_DIR = "models--MiniMaxAI--MiniMax-H3"
+SHARD_GLOB = "diffusion_pytorch_model-*-of-*.safetensors"
+TE_SHARD_GLOB = "model-*-of-*.safetensors"          # text_encoder(32B、14 本 66.7GB)。画像のエンジンの準備がここから量子化する
+BF16_TIER_MIB = 90 * 1024          # 96gb 級(エンジンの core/profile.py TIERS: 総 VRAM 90GB 以上)は量子化せず bf16 を読む
+PROJ_TE_MAX_MIB = 19073            # 16gb / 8gb 級(総 VRAM 20GB(10 進)未満)は 32B のテキストエンコーダを使わない(4B + 投影)
+
+
+def hf_hub_cache(env: dict = None) -> Path:
+    """Hugging Face のキャッシュ(hub)の場所。huggingface_hub と同じ: HF_HUB_CACHE → HF_HOME/hub → ~/.cache/huggingface/hub(Windows も同じ)。"""
+    env = os.environ if env is None else env
+    value = str(env.get("HF_HUB_CACHE") or "").strip()
+    if value:
+        return Path(value)
+    home = str(env.get("HF_HOME") or "").strip()
+    return (Path(home) if home else Path.home() / ".cache" / "huggingface") / "hub"
+
+
+def stale_snapshots(env: dict = None) -> list:
+    """いま使っていない版の snapshots/<コミット> フォルダ。Hugging Face は版ごとにフォルダを作り、refs/main がいまの版を指す。
+    Windows はリンクを使わず実体をコピーするので、配布元が更新されるたびに版ごと重複する(2026-11-26、Windows 10 の実機: 72GB × 2)。
+    refs/main が読めなければ [](どれが使われているか分からないので触らない)。"""
+    env = os.environ if env is None else env
+    root = hf_hub_cache(env) / HF_MODEL_DIR
+    try:
+        current = (root / "refs" / "main").read_text(encoding="utf-8").strip()
+    except OSError:
+        return []
+    if not current or not (root / "snapshots" / current).is_dir():
+        return []
+    return sorted(p for p in (root / "snapshots").iterdir() if p.is_dir() and p.name != current)
+
+
+def te_source_unused(h3_dir, env: dict = None, total_mib: Optional[int] = None) -> bool:
+    """動画のエンジンが 32B のテキストエンコーダの bf16 の原本を読まない構成か: 16gb / 8gb 級(4B + 投影を使う)か、
+    量子化済み(te_bnb-4bit_prune1)を持っている。それ以外(32gb / 48gb 級で量子化済みがまだ無い、80gb 以上)は原本を読むことがある。"""
+    env = os.environ if env is None else env
+    if total_mib is not None and total_mib < PROJ_TE_MAX_MIB:
+        return True
+    return shared_te(h3_dir, env) is not None
+
+
+def leftover_shards(h3_dir, env: dict = None, plat: str = None, total_mib: Optional[int] = None, te_ready: bool = False) -> dict:
+    """消してよい原本 {"transformer": [...], "transformer_ref": [...], "text_encoder": [...]}(完成したキャッシュがある分だけ。無ければ {})。
+    transformer / transformer_ref は int8 キャッシュ、text_encoder は画像のエンジンの量子化済み(te_ready)があり、かつ動画のエンジンが
+    原本を読まない構成(te_source_unused)のとき。エンジンが bf16 を直接読む構成(file streaming でない、または 96gb 級)では {}。
+    いまの版の snapshots だけを見る(使っていない版は stale_snapshots で丸ごと消す)。"""
+    env = os.environ if env is None else env
+    if not file_streaming(env, plat) or (total_mib is not None and total_mib >= BF16_TIER_MIB):
+        return {}
+    st = cache_status(h3_dir, env)
+    base = hf_hub_cache(env) / HF_MODEL_DIR / "snapshots"
+    stale = {p.name for p in stale_snapshots(env)}
+    out = {}
+    for sub, ok, glob in (("transformer", st["base"], SHARD_GLOB), ("transformer_ref", st["ref"], SHARD_GLOB),
+                          ("text_encoder", te_ready and te_source_unused(h3_dir, env, total_mib), TE_SHARD_GLOB)):
+        if not ok or not base.is_dir():
+            continue
+        files = sorted(p for p in base.glob(f"*/{sub}/{glob}") if (p.is_file() or p.is_symlink()) and p.parent.parent.name not in stale)
+        if files:
+            out[sub] = files
+    return out
+
+
+def sweep_leftovers(h3_dir, env: dict = None, plat: str = None, total_mib: Optional[int] = None, te_ready: bool = False) -> tuple:
+    """残った原本(symlink と実体の両方)と、使っていない版のフォルダを消す。(空けた GB, 消せなかったパス)。"""
+    import shutil
+
+    freed, failed = 0.0, []
+    for snap in stale_snapshots(env):
+        size = sum(f.stat().st_size for f in snap.rglob("*") if f.is_file() and not f.is_symlink())    # リンクの先(blob)は数えない
+        shutil.rmtree(snap, ignore_errors=True)
+        if snap.exists():
+            failed.append(snap)
+        else:
+            freed += size / 1e9
+    for files in leftover_shards(h3_dir, env, plat, total_mib, te_ready).values():
+        for p in files:
+            real = Path(os.path.realpath(p))
+            size = real.stat().st_size if real.exists() else 0
+            ok = True
+            for q in (p, real):
+                try:
+                    q.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    ok = False
+            if ok:
+                freed += size / 1e9
+            else:
+                failed.append(p)
+    return freed, failed
+
+
 # ---- 参照モードにキャッシュが要る構成か ----
 
 def total_ram_gb() -> Optional[float]:

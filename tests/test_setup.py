@@ -785,6 +785,32 @@ class SetupBatTest(unittest.TestCase):
         self.assertTrue(all(line.isascii() for line in lines[back:utf8 + 1]))   # 元のコードページで読む行は ASCII だけ
 
 
+class SweepLeftoversTest(unittest.TestCase):
+    def test_reports_and_deletes(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            hub = root / "hub"
+            snap = hub / S.h3cache.HF_MODEL_DIR / "snapshots" / "r" / "transformer_ref"
+            p = touch(snap / "diffusion_pytorch_model-00013-of-00014.safetensors")
+            p.write_bytes(b"z" * 500)
+            for f in ("config.json", "meta.json"):
+                touch(root / "h3" / "models" / "prequant" / "transformer_ref_int8" / f)
+                touch(root / "h3" / "models" / "prequant" / "transformer_int8" / f)
+            cfg = Settings({"components": {"h3": {"env": {"HF_HUB_CACHE": str(hub), "H3_GROUP_STREAM_HOST": "file"}}}}, root)
+            touch(hub / S.h3cache.HF_MODEL_DIR / "refs" / "main").write_text("r\n")
+            old = touch(hub / S.h3cache.HF_MODEL_DIR / "snapshots" / "old" / "transformer" / "x.safetensors")
+            old.write_bytes(b"o" * 300)
+            lines = []
+            with mock.patch.object(S, "say", lines.append):
+                freed = S.sweep_h3_leftovers(root / "h3", cfg, "win32", 12288)
+                self.assertEqual(S.sweep_h3_leftovers(root / "h3", cfg, "win32", 12288), 0.0)       # もう無い: 何も言わない
+            self.assertEqual(round(freed * 1e9), 800)
+            self.assertFalse(p.exists() or old.exists())
+            self.assertIn("使っていない版のフォルダが 1 つあります", lines[0])
+            self.assertIn("準備で残っていた bf16 の原本が 1 本あります", lines[1])
+            self.assertEqual(len(lines), 3)
+
+
 class SharedTextEncoderTest(unittest.TestCase):
     """画像のエンジンのテキストエンコーダ: 動画のエンジンが作った量子化済みを使う(share_h3_te)、既存の画像のエンジンの確認(plan_existing_h3image)。"""
 

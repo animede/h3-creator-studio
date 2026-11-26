@@ -100,6 +100,84 @@ class SharedTextEncoderTest(unittest.TestCase):
             self.assertEqual(h3cache.shared_te(d, {"H3_TE_PREQUANT_DIR": str(other)}), other / "te_bnb-4bit_prune1")
 
 
+class LeftoverShardTest(unittest.TestCase):
+    """準備で HF キャッシュに残った bf16 の原本: 見つけ方と消し方(file streaming の構成で、int8 キャッシュが完成した分だけ)。"""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = Path(self._t.name)
+        self.h3 = self.root / "minimax-h3"
+        self.hub = self.root / "hf" / "hub"
+        self.snap = self.hub / h3cache.HF_MODEL_DIR / "snapshots" / "abc"
+        self.env = {"HF_HUB_CACHE": str(self.hub), "H3_GROUP_STREAM_HOST": "file"}
+
+    def shard(self, sub, n, link=True):
+        name = f"diffusion_pytorch_model-{n:05d}-of-00014.safetensors"
+        blob = touch(self.hub / h3cache.HF_MODEL_DIR / "blobs" / f"sha{sub}{n}")
+        blob.write_bytes(b"x" * 1000)
+        p = self.snap / sub / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if link:
+            p.symlink_to(blob)
+        else:
+            p.write_bytes(b"y" * 1000)
+        return p, blob
+
+    def test_cache_location(self):
+        self.assertEqual(h3cache.hf_hub_cache({}), Path.home() / ".cache" / "huggingface" / "hub")
+        self.assertEqual(h3cache.hf_hub_cache({"HF_HOME": "/x"}), Path("/x/hub"))
+        self.assertEqual(h3cache.hf_hub_cache({"HF_HUB_CACHE": "/y", "HF_HOME": "/x"}), Path("/y"))
+
+    def test_only_finished_caches_and_streaming_hosts(self):
+        p1, _ = self.shard("transformer", 1)
+        r1, _ = self.shard("transformer_ref", 13, link=False)
+        touch(self.snap / "transformer" / "config.json")
+        self.assertEqual(h3cache.leftover_shards(self.h3, self.env, "linux"), {})          # キャッシュが無い: 原本はまだ要る
+        make_cache(self.h3 / "models" / "prequant" / "transformer_int8")
+        self.assertEqual(h3cache.leftover_shards(self.h3, self.env, "linux"), {"transformer": [p1]})
+        make_cache(self.h3 / "models" / "prequant" / "transformer_ref_int8")
+        self.assertEqual(h3cache.leftover_shards(self.h3, self.env, "linux"), {"transformer": [p1], "transformer_ref": [r1]})
+        pinned = {**self.env, "H3_GROUP_STREAM_HOST": "pinned"}
+        self.assertEqual(h3cache.leftover_shards(self.h3, pinned, "linux"), {})            # RAM の多い PC は bf16 を読むことがある
+        self.assertEqual(h3cache.leftover_shards(self.h3, self.env, "win32", 97887), {})   # 96gb 級は bf16 を読む
+        self.assertEqual(h3cache.leftover_shards(self.h3, {"HF_HUB_CACHE": str(self.hub)}, "win32", 12288), {"transformer": [p1], "transformer_ref": [r1]})
+
+    def test_stale_snapshots_and_text_encoder(self):
+        root = self.hub / h3cache.HF_MODEL_DIR
+        old = root / "snapshots" / "0919old"
+        big = touch(old / "transformer" / "diffusion_pytorch_model-00001-of-00014.safetensors")
+        big.write_bytes(b"o" * 3000)
+        self.assertEqual(h3cache.stale_snapshots(self.env), [])                 # refs/main が無ければ触らない
+        touch(root / "refs" / "main").write_text("abc\n")
+        self.assertEqual(h3cache.stale_snapshots(self.env), [])                 # いまの版のフォルダが無ければ触らない
+        make_cache(self.h3 / "models" / "prequant" / "transformer_int8")
+        p1, _ = self.shard("transformer", 1)
+        self.assertEqual(h3cache.stale_snapshots(self.env), [old])
+        self.assertEqual(h3cache.leftover_shards(self.h3, self.env, "win32", 12288), {"transformer": [p1]})     # 古い版の中は数えない
+        te = self.snap / "text_encoder" / "model-00001-of-00014.safetensors"
+        touch(te).write_bytes(b"t" * 500)
+        self.assertNotIn("text_encoder", h3cache.leftover_shards(self.h3, self.env, "win32", 12288))            # 画像のエンジンの TE が無い
+        self.assertEqual(h3cache.leftover_shards(self.h3, self.env, "win32", 12288, te_ready=True)["text_encoder"], [te])   # 12GB: 4B + 投影
+        self.assertNotIn("text_encoder", h3cache.leftover_shards(self.h3, self.env, "win32", 32607, te_ready=True))         # 32GB 級は原本を読みうる
+        touch(self.h3 / "models" / "prequant" / "te_bnb-4bit_prune1" / "config.json")
+        self.assertIn("text_encoder", h3cache.leftover_shards(self.h3, self.env, "win32", 32607, te_ready=True))            # 量子化済みがあれば不要
+        freed, failed = h3cache.sweep_leftovers(self.h3, self.env, "win32", 12288, te_ready=True)
+        self.assertEqual((round(freed * 1e9), failed, old.exists(), te.exists(), p1.exists()), (4500, [], False, False, False))
+
+    def test_sweep_removes_links_and_blobs(self):
+        p1, b1 = self.shard("transformer", 1)
+        r1, _ = self.shard("transformer_ref", 13, link=False)
+        make_cache(self.h3 / "models" / "prequant" / "transformer_int8")
+        make_cache(self.h3 / "models" / "prequant" / "transformer_ref_int8")
+        small = touch(self.snap / "transformer" / "config.json")          # 小物はエンジンが使うので消さない
+        freed, failed = h3cache.sweep_leftovers(self.h3, self.env, "linux")
+        self.assertEqual((round(freed * 1e9), failed), (2000, []))
+        self.assertFalse(p1.exists() or p1.is_symlink() or b1.exists() or r1.exists())
+        self.assertTrue(small.exists())
+        self.assertEqual(h3cache.sweep_leftovers(self.h3, self.env, "linux"), (0.0, []))
+
+
 class NeededRuleTest(unittest.TestCase):
     """要るのは、エンジンが重みをキャッシュのファイルから流す構成(file)で、参照モードを group の経路で読むとき。"""
 

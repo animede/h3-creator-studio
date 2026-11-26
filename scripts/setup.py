@@ -456,6 +456,37 @@ def share_h3_te(cfg: Settings, h3_dir: Optional[Path], img_dir: Path, local_toml
     return {"H3IMG_TE_DIR": str(shared)}
 
 
+# ---- 動画のエンジンの準備で残った bf16 の原本 ----
+
+def sweep_h3_leftovers(h3_dir: Path, cfg: Settings, plat: str = None, total_mib: Optional[int] = None) -> float:
+    """HF キャッシュ(models--MiniMaxAI--MiniMax-H3)の片づけ(studio/h3cache.py): 使っていない版のフォルダと、キャッシュが完成しているのに
+    残っている bf16 の原本(Windows でシャードごとの削除に失敗した分。1 本 約 4.6GB)を消す。消した GB を返す。
+    text_encoder の原本は、画像のエンジンの量子化済みがあり、動画のエンジンが原本を読まない構成のときだけ。bf16 を直接読む構成では何もしない。"""
+    if total_mib is None:
+        info = gpu_info()
+        total_mib = info[1] if info else None
+    env = h3cache.engine_env(cfg)
+    te_ready = False
+    if "h3image" in cfg.component_names():
+        img_dir = cfg.component_dir("h3image")
+        te_ready = img_dir.is_dir() and h3imgcache.te_ready(img_dir, h3imgcache.engine_env(cfg))
+    stale = h3cache.stale_snapshots(env)
+    found = h3cache.leftover_shards(h3_dir, env, plat, total_mib, te_ready)
+    if not stale and not found:
+        return 0.0
+    if stale:
+        say(f"  使っていない版のフォルダが {len(stale)} つあります(配布元の更新の前に取得したもの)。消します: {stale[0].parent}")
+    if found:
+        n = sum(len(v) for v in found.values())
+        say(f"  準備で残っていた bf16 の原本が {n} 本あります(量子化したキャッシュは完成しているので不要です)。消します: {h3cache.hf_hub_cache(env)}")
+    freed, failed = h3cache.sweep_leftovers(h3_dir, env, plat, total_mib, te_ready)
+    if freed:
+        say(f"  {freed:.1f}GB を空けました")
+    for p in failed:
+        say(f"  消せませんでした(エンジンもスタジオも止めてから、手で消してください): {p}")
+    return freed
+
+
 # ---- 既に入れてあるエンジン(h3image)の本体のキャッシュ ----
 # setup は既存のエンジンのモデルの準備をしないが、キャッシュ(models/cache/ckw4a8_adaln_table_pdmd3 など)が無いと、最初の画像の生成で
 # bf16 の本体 62GB を取得して作るので 1 時間以上かかる(2026-11-26、Windows の実機 8GB VRAM / 16GB RAM の報告)。判定は studio/h3imgcache.py。
@@ -990,6 +1021,8 @@ def main(argv: list = None) -> int:
             say("  ※ 量子化キャッシュを作ります。数時間かかります(止めても、できあがったキャッシュは次に飛ばします。作りかけの分は最初から作り直します)")
             if not run_step(h3_build, sources["h3"].path):
                 return 1
+        if "h3" in sources and models and sources["h3"].action in ("existing", "present", "clone"):
+            sweep_h3_leftovers(sources["h3"].path, cfg)
 
         if img_build is not None:
             say(f"\n[h3image] {COMPS['h3image'].label}(既存のエンジン: {sources['h3image'].path})")
