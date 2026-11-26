@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 
+from ..angles import apply_angle, check_angle
 from ..styles import apply_style, check_style
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from .common import download as _download, error_text as _error_text
@@ -36,7 +37,9 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
     """画面から来た params を検証して整える。不正なら ValueError(日本語)。"""
     mode = kind.split(".", 1)[1]
     prompt = str(params.get("prompt") or "").strip()
-    if not 1 <= len(prompt) <= 8000:
+    angle = check_angle(params.get("angle")) if mode == "edit" else "none"      # アングルは edit だけ(t2i は常に none)
+    # edit でアングルを選んでいれば、プロンプトは空でよい(アングルの文がプロンプトになる)
+    if not (1 if angle == "none" else 0) <= len(prompt) <= 8000:
         raise ValueError("プロンプトは 1〜8000 文字で入力してください")
     refs = [str(r) for r in (params.get("references") or [])]
     if mode == "t2i" and refs:
@@ -68,7 +71,7 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
                 raise ValueError(f"参照画像が見つかりません: {r}")
     return {"prompt": prompt, "width": _snap(params.get("width", 1024), "width"),
             "height": _snap(params.get("height", 1024), "height"), "seed": seed, "steps": steps, "references": refs,
-            "style": check_style(params.get("style"))}
+            "style": check_style(params.get("style")), "angle": angle}
 
 
 def _client(ctx: Ctx, timeout: float = 60.0) -> httpx.AsyncClient:
@@ -102,8 +105,10 @@ async def run(job: Job, ctx: Ctx) -> None:
             if job.cancel_requested:
                 raise JobCancelled()
 
-            # 画風は入力欄の文とは別の設定。送る直前に英語の文を足す(edit は参照画像があるので、被写体を参照のまま保つ文)
-            body = {"mode": mode, "prompt": apply_style(p["prompt"], p.get("style"), mode == "edit"), "width": p["width"], "height": p["height"]}
+            # 画風・アングルは入力欄の文とは別の設定。送る直前に英語の文を足す(順は 入力欄の文 → アングル → 画風。
+            # edit は参照画像があるので、画風は被写体を参照のまま保つ文)
+            prompt = apply_angle(p["prompt"], p.get("angle")) if mode == "edit" else p["prompt"]
+            body = {"mode": mode, "prompt": apply_style(prompt, p.get("style"), mode == "edit"), "width": p["width"], "height": p["height"]}
             for key in ("seed", "steps"):
                 if p.get(key) is not None:
                     body[key] = p[key]

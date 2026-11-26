@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import editclip, genres, h3cache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
+from . import angles, editclip, genres, h3cache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
@@ -381,6 +381,12 @@ class TtsIn(BaseModel):
     text: str
     style_id: int
     speed: float = 1.0
+
+
+@app.get("/api/angles")
+def api_angles():
+    """アングルの一覧(id と画面の名前 ja / en。画像タブの edit だけ)。唯一の出どころは studio/angles.py。"""
+    return {"angles": angles.public_list(), "default": angles.ANGLE_NONE}
 
 
 @app.get("/api/styles")

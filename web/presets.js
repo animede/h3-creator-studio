@@ -43,6 +43,19 @@ function wireStyleNote(sel, note) {
   render();
 }
 
+// アングルの選択(画像タブの edit だけ)。画風と同じく、プロンプトには入れず params の angle になる。
+// active() が false(t2i)のあいだは注記を出さない。返す関数は、作り方を切り替えたときに呼び直す
+function wireAngleNote(sel, note, active = () => true) {
+  const render = () => {
+    const opt = sel.options[sel.selectedIndex];
+    note.hidden = !opt || sel.value === "none" || !active();
+    note.textContent = note.hidden ? "" : t("アングル: {name}(生成時に指示を足します)", { name: opt.textContent.trim() });
+  };
+  sel.addEventListener("change", render);
+  render();
+  return render;
+}
+
 // box にプリセットの欄を組み立てる。tab は image / video / music / mv / short
 function wirePresets({ tab, box, get, apply }) {
   let list = [];                  // このタブのプリセット(同梱が先、自分のものが後)

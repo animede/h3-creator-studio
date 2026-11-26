@@ -52,9 +52,12 @@
         <textarea id="im-prompt" rows="5" maxlength="8000" placeholder="作りたい画像を日本語や英語で書きます" data-i18n-placeholder></textarea></label>
       <div class="enh"><button id="im-enh" type="button" title="H3-Image の公式ルールで、短い指示を詳しいプロンプトに書き直します(管理役の LLM を使います)" data-i18n-title data-i18n>プロンプト強化</button>
         <a href="#" id="im-enh-undo" hidden data-i18n>元に戻す</a><span class="note" id="im-enh-note"></span>
-        <span class="note stylenote" id="im-style-note" hidden></span></div>
+        <span class="note stylenote" id="im-style-note" hidden></span>
+        <span class="note stylenote" id="im-angle-note" hidden></span></div>
       <label class="fld"><span class="fl"><span data-i18n>画風</span> <small data-i18n>(プロンプトには入れず、生成のときに指示を足します)</small></span>
         <select id="im-style" class="stylesel" title="参照画像があるときは、人物・物の見た目は参照のまま、場面・背景・光・質感を画風に寄せます" data-i18n-title><option value="none" data-i18n>なし(参照画像に合わせる)</option><option value="real" data-i18n>リアル</option><option value="cinema" data-i18n>映画</option><option value="drama" data-i18n>ドラマ</option><option value="anime" data-i18n>アニメ</option><option value="illust" data-i18n>イラスト</option><option value="sketch" data-i18n>スケッチ</option><option value="watercolor" data-i18n>水彩</option><option value="oil" data-i18n>油彩</option><option value="cg3d" data-i18n>3DCG</option></select></label>
+      <label class="fld" id="im-angle-fld" hidden><span class="fl"><span data-i18n>アングル</span> <small data-i18n>(edit だけ。参照画像を別の向きから描き直します)</small></span>
+        <select id="im-angle" class="stylesel" title="左右は絵から見た向きです。見上げは全身の絵になります。プロンプトが空でも、アングルの指示だけで作れます" data-i18n-title><option value="none" data-i18n>なし</option><option value="front" data-i18n>正面</option><option value="left" data-i18n>斜め・左向き</option><option value="right" data-i18n>斜め・右向き</option><option value="side" data-i18n>真横</option><option value="back" data-i18n>後ろ姿</option><option value="high" data-i18n>見下ろし</option><option value="low" data-i18n>見上げ(全身になります)</option></select></label>
       <div class="fld"><span class="fl" data-i18n>サイズ</span>
         <div class="inline">
           <select id="im-size">

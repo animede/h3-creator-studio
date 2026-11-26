@@ -103,7 +103,7 @@ class HandlerPromptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.h3_prompt("h3.t2va", style="none"), "猫が歩く")
         self.assertEqual(self.h3_prompt("h3.t2va", style=None), "猫が歩く")         # 画風の無い古いジョブ
 
-    async def image_prompt(self, kind, refs) -> tuple:
+    async def image_prompt(self, kind, refs, **extra) -> tuple:
         sent = []
 
         def handler(req: httpx.Request) -> httpx.Response:
@@ -119,7 +119,7 @@ class HandlerPromptTest(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(204)
         sched = types.SimpleNamespace(comps={"h3image": types.SimpleNamespace(spec=types.SimpleNamespace(base_url="http://h3image.test"))})
         job = Job(id="job1", tab="image", kind=kind, params={"prompt": "猫", "width": 512, "height": 512, "seed": 1, "steps": None,
-                                                              "references": refs, "style": "anime"})
+                                                              "references": refs, "style": "anime", **extra})
         await h3image.run(job, Ctx(sched, self.ledger, self.root, transport=httpx.MockTransport(handler)))
         rec = self.ledger.get_output(job.outputs[0])
         return sent[0]["prompt"], rec["params"]

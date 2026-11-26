@@ -353,6 +353,7 @@ EN = {
     "画角は {} のいずれかです": "Aspect must be one of {0}",
     "画質は {} のいずれかです": "Quality must be one of {0}",
     "画風は {} のいずれかです": "Visual style must be one of {0}",
+    "アングルは {} のいずれかです": "Camera angle must be one of {0}",
     "シーンの最短": "Shortest scene",
     "シーンの最長": "Longest scene",
     "シーンの長さは {}〜{} 秒で指定してください": "Scene length must be {0}–{1} seconds",

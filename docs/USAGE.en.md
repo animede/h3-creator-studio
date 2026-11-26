@@ -172,6 +172,25 @@ Pressing **Enhance prompt** (プロンプト強化) rewrites a short instruction
 
 Choosing a **Visual style** (画風: None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG) appends an English style instruction to the prompt at generation. It is not written into the prompt box (a note such as "Visual style: Anime (an instruction is added at generation)" appears under it) and prompt enhancement does not include it. In edit mode the reference's look is kept and the background, lighting and materials follow the style. The sentences are in the table under "Video tab". Presets store it too.
 
+### Camera angle (edit only)
+
+The **Camera angle** (アングル) field appears only in edit mode. Choosing one appends an English instruction to the prompt at generation (a note such as "Camera angle: Three-quarter, facing left (an instruction is added at generation)" appears under the prompt). Every angle ends with a sentence that keeps the same person (face, hair, outfit, art style) and the same place, lighting and background, and adds no other people. With an angle selected you can generate even with an empty prompt (the angle sentence becomes the prompt). The order sent is **prompt box → angle → visual style**. Presets store it too.
+
+| Camera angle | What you get |
+|---|---|
+| None | nothing added |
+| Front | straight on, at eye level |
+| Three-quarter, facing left | body and face turn toward the **left** edge of the picture (more of the right cheek) |
+| Three-quarter, facing right | body and face turn toward the **right** edge of the picture (more of the left cheek) |
+| Side profile | full profile (90 degrees to the side) |
+| From behind | from the back |
+| High angle (looking down) | from above the head, looking down |
+| Low angle (looking up; becomes full body) | from near the floor looking up; the full body is in frame and the sky or ceiling fills the top two-thirds |
+
+Left/right mean which way the person faces in the picture, not how the camera moves.
+
+Tip: even without an angle, edit can convert the style or extend the picture (outpainting) by prompt alone, e.g. "Turn this picture into a watercolor" or "Extend the background on both sides to make it wide" (set a landscape output size for that).
+
 ### Size
 
 - The picker: **1024×1024** / **1344×768** / **768×1344** / **1536×1536** / **2048×2048** / **Custom** (自由入力). You can also type the width and height directly into the two fields next to it.

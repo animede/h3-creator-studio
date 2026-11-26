@@ -84,7 +84,8 @@ class BuiltinFilesTest(unittest.TestCase):
                 "mode": v.get("mode") in self.modes("im-modes"), "prompt": self.text_ok(v.get("prompt"), "im-prompt"),
                 "width": self.number_ok(v.get("width"), "im-w", True) and v.get("width", 0) % 32 == 0,
                 "height": self.number_ok(v.get("height"), "im-h", True) and v.get("height", 0) % 32 == 0,
-                "steps": v.get("steps") is None or str(v.get("steps")) in opt["im-steps"], "seed": seed_ok, "style": style_ok}
+                "steps": v.get("steps") is None or str(v.get("steps")) in opt["im-steps"], "seed": seed_ok, "style": style_ok,
+                "angle": v.get("angle") in opt["im-angle"]}                                    # アングル(画像タブだけ)
         elif tab == "video":
             checks = {
                 "mode": v.get("mode") in self.modes("vd-modes"), "prompt": self.text_ok(v.get("prompt"), "vd-prompt"),
@@ -162,11 +163,14 @@ class BuiltinFilesTest(unittest.TestCase):
         self.assertEqual(self.problems("image", {"style": "anime"}), [])
         for tab in ("image", "video", "mv", "short"):
             self.assertEqual(self.problems(tab, {"style": "pixel"}), ["style"], tab)             # 画風の選択肢に無い値
+        self.assertEqual(self.problems("image", {"angle": "left"}), [])
+        self.assertEqual(self.problems("image", {"angle": "spin"}), ["angle"])               # アングルの選択肢に無い値
+        self.assertEqual(self.problems("video", {"angle": "left"}), ["angle"])               # 動画タブにアングルは無い
         self.assertEqual(self.problems("music", {"style": "anime"}), ["style"])                 # 音楽タブに画風は無い                       # 物語・セリフ・曲・画像はプリセットに入れない
 
     def test_each_tab_script_saves_and_applies_every_field(self):
         """プリセットの項目の一覧(この検査の field 一覧)が、各タブの getPresetValues と applyPresetValues の両方に出てくる。"""
-        fields = {"image": ("mode", "prompt", "width", "height", "steps", "seed", "style"),
+        fields = {"image": ("mode", "prompt", "width", "height", "steps", "seed", "style", "angle"),
                   "video": ("mode", "prompt", "resolution", "seconds", "match_audio", "vocal_lock", "seed", "style"),
                   "music": ("mode", "genre_mode", "genre", "language", "duration", "instrumental", "query", "theme", "lyrics", "caption", "caption_auto", "mood",
                             "vocal", "model", "steps", "batch_size", "thinking", "seed", "negative_prompt", "shift", "infer_method"),

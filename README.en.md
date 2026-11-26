@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: 2026-11-26 JST** — When an engine fails to start because its virtual environment is incomplete, the studio now says how to re-run setup. On PCs with 2 or more GPUs, all engines are pinned by default to the one GPU the supervisor manages (`[gpu] devices`). Also, The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: 2026-11-26 JST** — The Image tab edit mode gets a **Camera angle** selector (front, three-quarter left/right, side, back, high, low); an instruction to redraw the reference from that angle is added at generation. When an engine fails to start because its virtual environment is incomplete, the studio now says how to re-run setup. On PCs with 2 or more GPUs, all engines are pinned by default to the one GPU the supervisor manages (`[gpu] devices`). Also, The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -218,6 +218,7 @@ Pick the mode with the two buttons at the top (named as in MiniMax-H3-Image).
 
 **Enhance prompt** (プロンプト強化) rewrites a short instruction into a detailed prompt (bundled LLM).
 **Visual style** (画風) adds an English style instruction at generation (not written into the prompt box; in edit mode the reference's look is kept and the background, lighting and materials follow the style).
+In edit mode, **Camera angle** (アングル: None / Front / Three-quarter, facing left / Three-quarter, facing right / Side profile / From behind / High angle / Low angle) adds an English instruction to redraw the reference from that angle (the person and place are kept; left/right are as seen in the picture; low angle becomes a full-body shot; works even with an empty prompt).
 
 ### Video tab (MiniMax-H3)
 

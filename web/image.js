@@ -59,10 +59,13 @@ function renderRefs() {
 
 // ---- 作り方(H3-Image の略語): t2i = テキストから、edit = 参照画像で編集 ----
 let mode = "t2i";
+let renderAngleNote = null;      // アングルの注記の描き直し(下で wireAngleNote が入れる)
 function setMode(m) {
   mode = m;
   document.querySelectorAll("#im-modes button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
   im("refs-fld").hidden = m !== "edit";
+  im("angle-fld").hidden = m !== "edit";      // アングルは edit だけ
+  if (renderAngleNote) renderAngleNote();
   showMsg("");
 }
 document.querySelectorAll("#im-modes button").forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
@@ -110,13 +113,14 @@ function setBusy(busy) {
 
 async function generate() {
   const prompt = im("prompt").value.trim();
-  if (!prompt) { showMsg(t("プロンプトを入力してください")); im("prompt").focus(); return; }
+  const angle = mode === "edit" ? im("angle").value : "none";
+  if (!prompt && angle === "none") { showMsg(t("プロンプトを入力してください")); im("prompt").focus(); return; }      // edit でアングルがあれば空でよい
   showMsg("");
   const seed = im("random").checked || im("seed").value === "" ? null : parseInt(im("seed").value, 10);
   if (mode === "edit" && !refs.length) { showMsg(t("edit は参照画像が要ります。画像を参照欄に落としてください")); return; }
   tracker.submit(mode === "edit" ? "h3image.edit" : "h3image.t2i", {
     prompt, width: +im("w").value, height: +im("h").value, seed, steps: im("steps").value ? +im("steps").value : null,
-    references: mode === "edit" ? refs.map((r) => r.id) : [], style: im("style").value,
+    references: mode === "edit" ? refs.map((r) => r.id) : [], style: im("style").value, angle,
   });
 }
 
@@ -133,7 +137,7 @@ wireEnhance({ tab: "image", ta: im("prompt"), btn: im("enh"), undo: im("enh-undo
 function getPresetValues() {
   return { mode, prompt: im("prompt").value.trim(), width: +im("w").value, height: +im("h").value,
     steps: im("steps").value ? +im("steps").value : null, seed: presetGetSeed(im("seed"), im("random")),
-    style: im("style").value };
+    style: im("style").value, angle: im("angle").value };
 }
 
 // 書かれている項目だけ反映する(知らない項目は無視)。プロンプトは空でなければ置き換える(サイズだけのプリセットで、書きかけの文を消さない)
@@ -145,9 +149,11 @@ function applyPresetValues(v) {
   if ("steps" in v && !presetSet(im("steps"), v.steps == null ? "" : v.steps)) skipped.push(t("ステップ数"));
   if ("seed" in v) presetSetSeed(im("seed"), im("random"), v.seed);
   if ("style" in v && !presetSet(im("style"), v.style || "none")) skipped.push(t("画風"));
+  if ("angle" in v && !presetSet(im("angle"), v.angle || "none")) skipped.push(t("アングル"));
   return skipped;
 }
 wireStyleNote(im("style"), im("style-note"));
+renderAngleNote = wireAngleNote(im("angle"), im("angle-note"), () => mode === "edit");
 wirePresets({ tab: "image", box: $("im-presets"), get: getPresetValues, apply: applyPresetValues });
 
 tracker.resume();
