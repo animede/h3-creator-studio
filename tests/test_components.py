@@ -108,13 +108,18 @@ class ComponentsTest(unittest.TestCase):
     def test_h3_profile_is_the_largest_that_fits_the_budget(self):
         self.assertEqual([h3_profile(g) for g in (96, 90, 80, 48, 47.8, 40, 32, 24, 16, 12, 8, 6)],
                          ["96gb", "80gb", "80gb", "48gb", "32gb", "32gb", "32gb", "16gb", "16gb", "8gb", "8gb", "8gb"])
+        # 既定の利用枠(nvidia-smi の総量 MiB): A100 40GB / L40S / A6000(H3 = 20〜24GiB)は 16gb、A100 80GB / RTX PRO 6000(40〜47.8GiB)は 32gb
+        # (2026-11-26 の実測で、上げない)
+        self.assertEqual([h3_profile(default_budget_gb("h3", mib)) for mib in (40960, 46068, 49140, 81920, 97887)], ["16gb"] * 3 + ["32gb"] * 2)
 
     def test_budget_env_for_share(self):
         gib = 1024
         h3, h3image, ace = self.spec("h3"), self.spec("h3image"), self.spec("ace")
-        self.assertEqual(h3.budget_env(48 * gib), {"H3_PROFILE": "48gb", "H3_VRAM_LIMIT_GB": "48"})
-        self.assertEqual(h3.budget_env(24 * gib), {"H3_PROFILE": "16gb", "H3_VRAM_LIMIT_GB": "24"})
-        self.assertEqual(h3.budget_env(int(47.8 * gib)), {"H3_PROFILE": "32gb", "H3_VRAM_LIMIT_GB": "47.8"})
+        # H3_VRAM_LIMIT_GB は 10 進の GB で、CUDA の固定分(0.75GiB)を引いた分: (24 - 0.75) × 1.0737 = 24.96
+        self.assertEqual(h3.budget_env(48 * gib), {"H3_PROFILE": "48gb", "H3_VRAM_LIMIT_GB": "50.73"})
+        self.assertEqual(h3.budget_env(24 * gib), {"H3_PROFILE": "16gb", "H3_VRAM_LIMIT_GB": "24.96"})
+        self.assertEqual(h3.budget_env(int(47.8 * gib)), {"H3_PROFILE": "32gb", "H3_VRAM_LIMIT_GB": "50.52"})
+        self.assertEqual(h3.budget_env(7 * gib), {"H3_PROFILE": "8gb", "H3_VRAM_LIMIT_GB": "6.71"})
         self.assertEqual(h3image.budget_env(31 * gib), {"H3IMG_VRAM_GB": "31"})
         self.assertEqual(h3image.budget_env(int(16.8 * gib)), {"H3IMG_VRAM_GB": "16"})       # 整数の GiB(切り捨て)
         self.assertEqual(ace.budget_env(14 * gib), {"ACESTEP_GPU_PROFILE": "16gb"})

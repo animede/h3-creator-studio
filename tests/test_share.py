@@ -135,7 +135,7 @@ class BudgetTest(ShareBase):
         self.assertIsNone(get_spec("ace", cfg).vram_budget_gb)
         s = Scheduler({"h3": sp}, monitor=FakeMonitor(96), mode="share", total_mib=96 * GIB)
         self.assertEqual(s._default_budget_mib(s.comps["h3"]), 20 * GIB)
-        self.assertEqual(sp.budget_env(20 * GIB), {"H3_PROFILE": "16gb", "H3_VRAM_LIMIT_GB": "20"})
+        self.assertEqual(sp.budget_env(20 * GIB), {"H3_PROFILE": "16gb", "H3_VRAM_LIMIT_GB": "20.67"})
 
     async def test_reload_keeps_the_budget_the_process_started_with(self):
         s = self.sched(50, h3=30, h3image=30)

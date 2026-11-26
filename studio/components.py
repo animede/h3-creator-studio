@@ -124,7 +124,13 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
 
 # ---- share のときの VRAM の利用枠 ----
 
-H3_PROFILES = (96, 80, 48, 32, 16, 8)       # H3 の H3_PROFILE が受ける級(GiB)
+# H3 の H3_PROFILE が受ける級(GiB)。利用枠以下の最大の級を使う。H3 自身の自動選択(カードの総 VRAM で 32gb 級 ≥ 20GB、48gb 級 ≥ 40GB)より
+# 控えめなのは意図どおり(2026-11-26 の実測。docs/SPEC.md):
+# - 32gb 級は 32B のテキストエンコーダ(約 17GB)を載せたまま参照画像を読むので、24GiB・30GiB の枠では参照画像 3 枚の ref2va が VRAM 不足(16gb 級は 11GB で通る)
+# - 48gb 級は turbo をリクエストごとに巻く級で、スタジオは turbo を送らないので 30 ステップになり、32gb 級(turbo の 4 ステップ)の 2〜4 倍遅い
+H3_PROFILES = (96, 80, 48, 32, 16, 8)
+H3_OVERHEAD_GIB = 0.75     # H3 が PyTorch の割り当ての外で使う VRAM(CUDA のコンテキストなど)。H3_VRAM_LIMIT_GB は割り当ての上限なので、利用枠からこの分を引く
+GIB_IN_GB = 1024 ** 3 / 1e9     # 1GiB = 約 1.074GB(H3_VRAM_LIMIT_GB は 10 進の GB)
 
 
 def default_budget_gb(name: str, total_mib: int) -> Optional[float]:
@@ -133,18 +139,21 @@ def default_budget_gb(name: str, total_mib: int) -> Optional[float]:
     return {"h3": min(total_gb * 0.5, 48), "h3image": min(total_gb * 0.35, 31), "ace": 14}.get(name)
 
 
+def h3_limit_gb(budget_gb: float) -> float:
+    """利用枠(GiB)から、H3 に渡す H3_VRAM_LIMIT_GB(PyTorch の割り当ての上限。H3 は 10 進の GB として読む)。
+    以前は GiB の数字をそのまま渡していて、24GiB の利用枠が 22.35GiB の上限になっていた。"""
+    return max(0.5, budget_gb - H3_OVERHEAD_GIB) * GIB_IN_GB
+
+
 def h3_profile(budget_gb: float) -> str:
-    """利用枠(GiB)に収まる最大の級(96gb / 80gb / 48gb / 32gb / 16gb / 8gb)。8GiB に満たなければ最小の 8gb。"""
+    """利用枠(GiB)以下の最大の級(96gb / 80gb / 48gb / 32gb / 16gb / 8gb)。8GiB に満たなければ最小の 8gb。
+    既定の利用枠では 40〜48GB のカード = 16gb、80〜96GB = 32gb(96GB の 47.8GiB も 48 に届かないので 32gb。上の理由でそれでよい)。"""
     return f"{next((g for g in H3_PROFILES if g <= budget_gb), H3_PROFILES[-1])}gb"
 
 
-def _gb_text(mib: int) -> str:
-    gb = mib / 1024
-    return str(int(gb)) if gb == int(gb) else f"{gb:.1f}"
-
-
 def h3_budget_env(budget_mib: int) -> dict:
-    return {"H3_PROFILE": h3_profile(budget_mib / 1024), "H3_VRAM_LIMIT_GB": _gb_text(budget_mib)}
+    gb = budget_mib / 1024
+    return {"H3_PROFILE": h3_profile(gb), "H3_VRAM_LIMIT_GB": f"{h3_limit_gb(gb):.2f}"}
 
 
 def h3image_budget_env(budget_mib: int) -> dict:
