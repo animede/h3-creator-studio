@@ -56,6 +56,15 @@ class ExtractJsonTest(unittest.TestCase):
             self.assertIn(word, cm.exception.message)
 
 
+class SingleLineTest(unittest.TestCase):
+    def test_text_and_objects(self):
+        self.assertEqual(M._single_line(" a  quiet\n street. "), "a quiet street")
+        self.assertEqual((M._single_line(None), M._single_line(0), M._single_line(5)), ("", "", "5"))
+        # 文字列のはずがオブジェクト・配列で返ってきたら、中の値をつなぐ(Python の表記をプロンプトに入れない)
+        self.assertEqual(M._single_line({"color": "black.", "length": ["short", ""]}), "black; short")
+        self.assertEqual((M._single_line({}), M._single_line([])), ("", ""))
+
+
 class FrameTest(unittest.TestCase):
     def test_frame_kind_from_size(self):
         for size, kind in (((768, 448), "landscape"), ((1344, 768), "landscape"), ((448, 768), "portrait"), ((576, 1024), "portrait"),

@@ -76,6 +76,17 @@ class StoryOutlineTest(unittest.IsolatedAsyncioTestCase):
         out = await S.story_outline(chat, "x", character={})
         self.assertEqual(out, {"title": "T", "setting": "s", "characters": "", "arc": "", "places": ["a", "b"], "continuity_rules": []})
 
+    async def test_objects_in_place_of_text_are_flattened(self):
+        # 2026-11-26: places が {"scene_description": ...} のオブジェクトで返り、"{'scene_description': '...'}" のまま次のプロンプトに入っていた
+        chat = FakeChat([{"title": "夜明けの光", "characters": [], "arc": {"from": "storm.", "to": "calm dawn."},
+                          "places": [{"scene_description": "A wide shot of the lighthouse at dawn.\n"}, "the lantern room",
+                                     {"name": "the coastline", "time": "morning"}, {}, ["harbor", ""]],
+                          "continuity_rules": {"1": "same lighthouse", "2": "dawn colors"}}])
+        out = await S.story_outline(chat, "x", character={})
+        self.assertEqual(out, {"title": "夜明けの光", "setting": "", "characters": "", "arc": "storm; calm dawn",
+                               "places": ["A wide shot of the lighthouse at dawn", "the lantern room", "the coastline; morning", "harbor"],
+                               "continuity_rules": ["same lighthouse", "dawn colors"]})
+
     async def test_unreadable_or_non_object_falls_back_to_empty(self):
         chat = FakeChat(["prose", "more prose"])
         with self.assertLogs("studio.shortscript", "WARNING"), self.assertLogs("studio.mvscript", "WARNING"):

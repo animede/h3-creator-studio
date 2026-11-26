@@ -125,6 +125,12 @@ async def character_facts(chat: Chat, description: str) -> dict:
 # ---- 人物・構図 ----
 
 def _single_line(value: Any) -> str:
+    """LLM の返した値を 1 行の文にする。文字列のはずがオブジェクト・配列で返ってきたら、中の値を「; 」でつなぐ
+    (str にすると {'scene_description': '...'} がそのままプロンプトに入る。2026-11-26 のショート動画の筋の places)。"""
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, (list, tuple)):
+        return "; ".join(t for t in (_single_line(v) for v in value) if t)
     return re.sub(r"\s+", " ", str(value or "")).strip().rstrip(".")
 
 

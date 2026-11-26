@@ -50,6 +50,9 @@ def _clip(value: Any, limit: int = DESC_MAX) -> str:
 
 
 def _lines(value: Any) -> list:
+    """LLM の返した一覧を、1 行ずつの文の list にする。項目がオブジェクトなら中の値をつなぎ、一覧がオブジェクトならその値を項目にする。"""
+    if isinstance(value, dict):
+        value = list(value.values())
     return [t for t in (_single_line(v) for v in value) if t] if isinstance(value, list) else []
 
 
