@@ -7,8 +7,11 @@ import logging
 import mimetypes
 import re
 import shutil
+import sys
+import threading
 import time
 import uuid
+import webbrowser
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
 
@@ -1159,9 +1162,44 @@ app.mount("/docs/img", StaticFiles(directory=str(HELP_IMG_DIR), check_dir=False)
 app.mount("/", StaticFiles(directory=str(REPO_ROOT / "web"), html=True), name="web")
 
 
+def studio_url(host: str, port: int) -> str:
+    """ブラウザで開く URL(すべてのアドレスで待ち受けるときは 127.0.0.1)。"""
+    return f"http://{'127.0.0.1' if host in ('', '0.0.0.0', '::') else host}:{port}/"
+
+
+def running_studio(url: str, timeout: float = 2.0) -> bool:
+    """その URL で、このスタジオが既に動いているか(/api/status がエンジンの一覧を返す)。"""
+    try:
+        import httpx
+        r = httpx.get(url + "api/status", timeout=timeout)
+        return r.status_code == 200 and isinstance(r.json().get("components"), dict)
+    except Exception:  # noqa: BLE001  動いていない・別のアプリ
+        return False
+
+
+def open_when_ready(url: str, wait_s: float = 180.0, open_browser=webbrowser.open) -> bool:
+    """スタジオが応答するようになったらブラウザで開く(--open。デスクトップのアイコンから起動したとき)。開いたら True。"""
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        if running_studio(url, 1.0):
+            open_browser(url)
+            return True
+        time.sleep(0.5)
+    return False
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="YUZU Creator Studio 管理役")
     ap.add_argument("--host", default=settings.host)
     ap.add_argument("--port", type=int, default=settings.port)
+    ap.add_argument("--open", action="store_true",
+                    help="準備ができたらブラウザで開く。既に動いていれば、ブラウザで開くだけで終わる(デスクトップのアイコンはこれで起動する)")
     args = ap.parse_args()
+    url = studio_url(args.host, args.port)
+    if args.open and running_studio(url):
+        print(f"YUZU Creator Studio は既に動いています。ブラウザで開きます / Already running, opening the browser: {url}", flush=True)
+        webbrowser.open(url)
+        sys.exit(0)
+    if args.open:
+        threading.Thread(target=open_when_ready, args=(url,), daemon=True).start()
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

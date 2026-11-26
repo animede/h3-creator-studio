@@ -538,6 +538,61 @@ def plan_existing_h3image(img_dir: Path, steps: int = None, env: dict = None, pl
                 [str(st["venv"]), script, "--build-cache", str(st["steps"])], env=step_env)
 
 
+# ---- Windows: デスクトップの起動アイコン ----
+# アイコンは run.bat --open を呼ぶ: 黒い画面(管理役)が開き、準備ができるとブラウザが開く。既に動いていればブラウザを開くだけ。
+# 作るのは PowerShell の WScript.Shell(Windows に標準)。パスは環境変数で渡す(日本語や空白を含むパスでも引用符を考えずに済む)。
+
+SHORTCUT_NAME = "YUZU Creator Studio.lnk"
+PS_DESKTOP = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')"
+PS_SHORTCUT = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:YCS_LNK); $s.TargetPath = $env:YCS_TARGET; "
+               "$s.Arguments = '--open'; $s.WorkingDirectory = $env:YCS_DIR; $s.IconLocation = $env:YCS_ICON + ',0'; "
+               "$s.Description = 'YUZU Creator Studio'; $s.Save()")
+
+
+def desktop_dir(run: Callable = subprocess.run) -> Optional[Path]:
+    """デスクトップの場所(OneDrive に移したものも、Windows が返すとおりに)。分からなければ None。"""
+    try:
+        out = run(["powershell", "-NoProfile", "-Command", PS_DESKTOP], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = out.stdout.decode("utf-8", "replace").strip() if isinstance(out.stdout, bytes) else str(out.stdout or "").strip()
+    return Path(text) if out.returncode == 0 and text else None
+
+
+def make_shortcut(lnk: Path, root: Path, run: Callable = subprocess.run) -> bool:
+    env = {**os.environ, "YCS_LNK": str(lnk), "YCS_TARGET": str(root / "run.bat"), "YCS_DIR": str(root),
+           "YCS_ICON": str(root / "web" / "favicon.ico")}
+    try:
+        out = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", PS_SHORTCUT],
+                  env=env, capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0
+
+
+def offer_shortcut(root: Path, plat: str = None, run: Callable = subprocess.run) -> Optional[Path]:
+    """Windows で、デスクトップに起動アイコンが無ければ作るか聞く(既定は「はい」。端末でなければ作らない)。作った・あったら場所。"""
+    if not is_win(plat):
+        return None
+    desk = desktop_dir(run)
+    if desk is None:
+        return None
+    lnk = desk / SHORTCUT_NAME
+    if lnk.exists():
+        say(f"\nデスクトップの起動アイコン: {lnk}(作成済み)")
+        return lnk
+    if not ask_yes("\nデスクトップに起動アイコン(YUZU Creator Studio)を作りますか?"):
+        say("  作らずに終わります。後で作るなら、setup.bat をもう一度実行してください")
+        return None
+    if make_shortcut(lnk, Path(root), run):
+        say(f"  作りました: {lnk}")
+        say("  ダブルクリックでスタジオが起動し、準備ができるとブラウザが開きます(起動中ならブラウザを開くだけ)。"
+            "止めるときは、開いた黒い画面を閉じるか Ctrl+C")
+        return lnk
+    say("  作れませんでした。.\\run.bat --open で同じように起動できます")
+    return None
+
+
 # ---- 状態の確認(まとめの表) ----
 
 def component_status(name: str, d: Path, plat: str = None, env: dict = None) -> tuple:
@@ -1041,6 +1096,7 @@ def main(argv: list = None) -> int:
         return 130
 
     print_summary(cfg, selected, mv_ok)
+    offer_shortcut(Path(cfg.root))
     return 0
 
 

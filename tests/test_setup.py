@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -783,6 +784,56 @@ class SetupBatTest(unittest.TestCase):
         utf8 = next(i for i in range(run, len(lines)) if lines[i] == b"chcp 65001 >nul")
         self.assertTrue(all(not line.strip() or line.startswith(b"rem ") for line in lines[back + 1:run]))
         self.assertTrue(all(line.isascii() for line in lines[back:utf8 + 1]))   # 元のコードページで読む行は ASCII だけ
+
+
+class ShortcutTest(unittest.TestCase):
+    """Windows のデスクトップの起動アイコン(offer_shortcut)。"""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.desk = Path(self._t.name) / "デスクトップ"
+        self.desk.mkdir()
+        self.calls, self.lines = [], []
+        p = mock.patch.object(S, "say", self.lines.append)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def fake_run(self, argv, **kw):
+        self.calls.append((argv, kw.get("env") or {}))
+        if "GetFolderPath" in argv[-1]:
+            return types.SimpleNamespace(returncode=0, stdout=(str(self.desk) + "\r\n").encode("utf-8"))
+        return types.SimpleNamespace(returncode=0, stdout=b"")
+
+    def test_other_os_does_nothing(self):
+        self.assertIsNone(S.offer_shortcut(Path("/r"), "linux", self.fake_run))
+        self.assertEqual(self.calls, [])
+
+    def test_creates_with_paths_in_env(self):
+        root = Path("C:/AI/h3-creator-studio")
+        with mock.patch.object(S, "ask_yes", return_value=True):
+            lnk = S.offer_shortcut(root, "win32", self.fake_run)
+        self.assertEqual(lnk, self.desk / "YUZU Creator Studio.lnk")       # 日本語のデスクトップ名も UTF-8 で読む
+        argv, env = self.calls[1]
+        self.assertIn("CreateShortcut($env:YCS_LNK)", argv[-1])
+        self.assertIn("$s.Arguments = '--open'", argv[-1])
+        self.assertEqual((env["YCS_TARGET"], env["YCS_DIR"], env["YCS_LNK"]),
+                         (str(root / "run.bat"), str(root), str(self.desk / "YUZU Creator Studio.lnk")))
+        self.assertTrue(env["YCS_ICON"].endswith("favicon.ico"))
+        self.assertIn("ダブルクリックでスタジオが起動し", "\n".join(self.lines))
+
+    def test_existing_or_declined(self):
+        (self.desk / "YUZU Creator Studio.lnk").write_bytes(b"x")
+        with mock.patch.object(S, "ask_yes") as ask:
+            self.assertEqual(S.offer_shortcut(Path("/r"), "win32", self.fake_run), self.desk / "YUZU Creator Studio.lnk")
+            ask.assert_not_called()
+        (self.desk / "YUZU Creator Studio.lnk").unlink()
+        with mock.patch.object(S, "ask_yes", return_value=False):
+            self.assertIsNone(S.offer_shortcut(Path("/r"), "win32", self.fake_run))
+        self.assertEqual(len(self.calls), 2)                               # 場所を聞いただけで、作っていない
+
+    def test_icon_exists(self):
+        self.assertTrue((Path(S.__file__).resolve().parent.parent / "web" / "favicon.ico").is_file())
 
 
 class SweepLeftoversTest(unittest.TestCase):
