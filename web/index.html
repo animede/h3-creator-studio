@@ -8,15 +8,20 @@
 </head>
 <body>
 <header class="topbar">
-  <h1 class="brand"><img src="yuzu.png" alt="" class="brand-logo"><b>YUZU</b> Creator Studio</h1>
-  <div class="topright">
+  <!-- 上段: 題と、使い方・言語。下段: 計器(VRAM・CPU メモリ)とジョブの状況。計器を題の横に置くと、GPU 名が長いときに題へ重なっていた(2026-11-26) -->
+  <div class="toprow">
+    <h1 class="brand"><img src="yuzu.png" alt="" class="brand-logo"><b>YUZU</b> Creator Studio</h1>
+    <div class="topctl">
+      <button id="help-btn" class="mini help-btn" type="button" aria-expanded="false" aria-controls="help-win" title="使い方の説明を、動かせる窓で開きます(Esc で閉じる)" data-i18n-title data-i18n>使い方</button>
+      <select id="lang-select" class="mini lang-select" aria-label="Language / 言語"><option value="ja">日本語</option><option value="en">English</option></select>
+    </div>
+  </div>
+  <div class="topstatus">
     <div class="gauges">
       <div class="gauge" id="g-vram"><span class="g-label">VRAM</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
       <span class="g-label" id="g-gpu" hidden></span>
       <div class="gauge" id="g-shared" hidden><span class="g-label" data-i18n>共有 GPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
       <div class="gauge" id="g-ram"><span class="g-label" data-i18n>CPU メモリ</span><div class="bar"><i></i></div><span class="g-num">-</span></div>
-      <button id="help-btn" class="mini help-btn" type="button" aria-expanded="false" aria-controls="help-win" title="使い方の説明を、動かせる窓で開きます(Esc で閉じる)" data-i18n-title data-i18n>使い方</button>
-      <select id="lang-select" class="mini lang-select" aria-label="Language / 言語"><option value="ja">日本語</option><option value="en">English</option></select>
     </div>
     <div class="lanes" id="lanes" aria-label="ジョブの状況と GPU に載っているエンジン" data-i18n-aria></div>
   </div>

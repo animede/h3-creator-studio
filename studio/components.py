@@ -123,17 +123,19 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
 
 
 H3_REF_SHORT_EDGE_LOW_VRAM = "768"
+REF_EDGE_MAX_MIB = 14 * 1024          # これ未満(8GB・12GB のカード)は参照画像を短辺 768 で読む。16GB(A4000)は既定の 2048 で MV が通っている
 
 
 def h3_gpu_env(total_mib: Optional[int]) -> dict:
-    """VRAM が 10GiB 未満(8GB のカード)のときだけ、参照画像を読む大きさを短辺 768 にする(H3_REF_IMAGE_SHORT_EDGE)。
+    """VRAM が 14GiB 未満(8GB・12GB のカード)のときだけ、参照画像を読む大きさを短辺 768 にする(H3_REF_IMAGE_SHORT_EDGE)。
 
     エンジンの既定は短辺 2048 で、参照画像をそこまで拡大してから 32B のテキストエンコーダの視覚部分に通す。その注意の計算が
     1 回で約 6.9GB を確保するので、8GB のカードでは参照モード(MV・ショート動画のシーン、参照から)が CUDA out of memory になる
-    (2026-11-26、RTX 4060 8GB のデスクトップの実機: 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」)。768 は RTX 4060 Laptop 8GB で
-    MV を通した値(README の時間の目安)。studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
+    (2026-11-26、RTX 4060 8GB のデスクトップの実機: 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」)。12GB(RTX 3060)も同じ:
+    エンジンは 16gb 級(4B の代わりのエンコーダ 約 3GB を常駐)になり、Windows の上限(約 10.9GiB)を超えた(同日の実機)。
+    768 は RTX 4060 Laptop 8GB で MV を通した値(README の時間の目安)。studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
     """
-    if total_mib is None or total_mib >= LOW_VRAM_MIB:
+    if total_mib is None or total_mib >= REF_EDGE_MAX_MIB:
         return {}
     return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_LOW_VRAM}
 

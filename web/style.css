@@ -5,7 +5,10 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, "Hiragino Sans", "Yu Gothic UI", "Noto Sans CJK JP", sans-serif; }
-.topbar { display: flex; align-items: center; gap: 24px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.topbar { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.toprow { display: flex; align-items: center; justify-content: space-between; gap: 16px; }        /* 題(左)と、使い方・言語(右) */
+.topctl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.topstatus { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 24px; }                 /* 計器(左)と、ジョブの状況(右。足りなければ次の行) */
 .topbar h1.brand { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: .5px; white-space: nowrap; color: #e9ff57;      /* ほんの少し緑を足した明るいレモン色 */
   text-shadow: 0 0 10px rgba(233, 255, 87, .25); }
 .topbar h1.brand b { font-weight: 900; letter-spacing: 1px; }
@@ -16,9 +19,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 syst
   font-size: 12px; color: var(--muted); }
 .credits .cr { color: var(--text); }
 .credits a { color: #c9d4e6; }
-.topright { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.gauges { display: flex; gap: 20px; justify-content: flex-end; }
-.lanes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-height: 18px; font-size: 12px; }
+.gauges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; }
+.lanes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-left: auto; min-height: 18px; font-size: 12px; }
 .lane { padding: 0 8px; border-radius: 3px; background: var(--bar); color: var(--muted); white-space: nowrap; }
 .lane.run { color: var(--text); border-left: 3px solid var(--accent); }
 .lane.res.busy { color: var(--text); border-left: 3px solid var(--ok); }
@@ -505,12 +507,12 @@ fieldset.edbody:disabled { opacity: .55; }
 
 /* 幅の狭い画面(スマートフォン・縦のタブレット): 操作・生成物・履歴を 1 列に縦に並べ、高さは中身に合わせる(広い画面の見た目は変えない) */
 @media (max-width: 900px) {
-  .topbar { flex-wrap: wrap; gap: 8px 16px; }
-  .topright { flex-basis: 100%; }
-  .gauges { flex-wrap: wrap; justify-content: flex-start; gap: 6px 16px; }
+  .toprow { flex-wrap: wrap; }
+  .gauges { gap: 6px 16px; }
+  #g-gpu { white-space: normal; }      /* GPU 名(複数 GPU の PC)は長いので折り返す */
   .gauge { min-width: 0; flex: 1 1 100%; }      /* 計は 1 つで 1 行(ラベル・バー・数値は縮まないので、375px で 2 つ並べると画面の外にはみ出る) */
   .fld > .chk, .chk.fld { white-space: normal; }      /* 長いチェックボックスの文(音楽タブの「キャプション自動…」「Thinking…」)は折り返す */
-  .lanes { justify-content: flex-start; }
+  .lanes { justify-content: flex-start; margin-left: 0; }
   .tabs { flex-wrap: wrap; }
   .tab { padding: 6px 14px; }
   .workspace, .workspace[data-tab="mv"], .workspace[data-tab="short"], .workspace[data-tab="edit"] {
