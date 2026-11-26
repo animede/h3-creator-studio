@@ -74,7 +74,7 @@ class SettingsTest(unittest.TestCase):
         auto = llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, True, "auto")
         self.assertEqual(auto[auto.index("--fit"):], ["--fit", "on", "--fit-target", "1536"])
         self.assertEqual(auto[auto.index("--reasoning") + 1], "off")
-        self.assertEqual(auto[auto.index("-c") + 1], "8192")
+        self.assertEqual(auto[auto.index("-c") + 1], "16384")
         layers = llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, True, 20)
         self.assertEqual(layers[layers.index("-ngl"):], ["-ngl", "20", "--fit", "off"])
         self.assertNotIn("--fit", llm_mod.build_command(Path("/x/llama-server"), Path("/m.gguf"), 8701, False, "auto"))
