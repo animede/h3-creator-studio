@@ -30,15 +30,15 @@ from typing import Callable, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from studio import h3cache  # noqa: E402
+from studio import h3cache, h3imgcache  # noqa: E402
 from studio.config import Settings, load_settings  # noqa: E402
 
 AIVIS_VERSION = "1.2.0"
 AIVIS_BASE = f"https://github.com/Aivis-Project/AivisSpeech-Engine/releases/download/{AIVIS_VERSION}/"
 MIN_RAM_GIB = 30           # 32GB の PC は 31 GiB 台で見えることがあるので、少し下に線を引く
 MIN_VRAM_GIB = 5.8         # 6GB のカードは 5.9〜6.0 GiB で見える
-NEED_DISK_GIB = 160            # 4 つのエンジンのモデル(約 130GB。動画の参照モード用キャッシュ 32GB を含む)と Python 環境(約 25GB)の合計
-NEED_DISK_NO_REF_GIB = 130     # --no-ref のとき
+NEED_DISK_GIB = 175            # 4 つのエンジンのモデル(約 145GB。動画の参照モード用キャッシュ 32GB と画像の本体のキャッシュ 11GB を含む)と Python 環境(約 25GB)の合計
+NEED_DISK_NO_REF_GIB = 145     # --no-ref のとき
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,8 @@ COMPS = {
                "モデルの準備は約 60GB のダウンロードです。回線次第で数時間かかります(途中で止まっても再実行で続きから進みます)"),
     "h3image": Comp("h3image", "MiniMax-H3-Image(画像)", "minimax-h3-image-server",
                     "https://github.com/animede/minimax-h3-image-server.git",
-                    "モデルの準備は約 25GB のダウンロードと量子化です。回線次第で 1 時間以上かかります"),
+                    "モデルの準備は約 25GB のダウンロードと量子化、続けて本体のキャッシュ(既定のステップ数 3、約 11GB)の作成です。"
+                    "キャッシュは bf16 の本体(約 62GB)をシャード 1 つずつ取得して作り、取得した分は消します。回線次第で 1〜2 時間かかり、GPU を使います"),
     "ace": Comp("ace", "ACE-Step(音楽)", "ACE-Step-1.5-fast", "https://github.com/animede/ACE-Step-1.5-fast.git",
                 "モデルは 2B 系だけ(約 15GB)です"),
     "aivis": Comp("aivis", "AivisSpeech(音声合成)", "AivisSpeech-Engine", None),
@@ -257,7 +258,7 @@ def format_command(argv: list, plat: str = None) -> str:
 
 
 def component_steps(name: str, models: bool = True, ace_xl: bool = False, have_venv: bool = False,
-                    plat: str = None, h3_ref: bool = True) -> list:
+                    plat: str = None, h3_ref: bool = True, h3image_steps: int = h3imgcache.DEFAULT_STEPS) -> list:
     """環境とモデルの準備に呼ぶコマンド(エンジン自身のスクリプト)。相対パスはエンジンのフォルダ基準。"""
     win = is_win(plat)
     env = {"HF_HUB_DISABLE_SYMLINKS": "1"} if win else {}
@@ -283,8 +284,11 @@ def component_steps(name: str, models: bool = True, ace_xl: bool = False, have_v
         steps.append(Step("h3image: 依存パッケージ(uv pip install)", ["uv", "pip", "install", "--python", py, "-r", req,
                                                                  "--index-strategy", "unsafe-best-match"]))
         if models:
-            script = "scripts\\prepare_models.py" if win else "scripts/prepare_models.py"
-            steps.append(Step("h3image: モデルの準備(scripts/prepare_models.py)", [py, script], env=env))
+            # --build-cache: 本体の transformer キャッシュ(ステップ数ごと、約 11GB)も作る。無いと最初の生成で 62GB を取得して作るので、
+            # 1 時間以上かかり、RAM 16GB の PC ではメモリが埋まりきる(2026-11-26、Windows の実機の報告)。作るのは GPU(CUDA)を使う
+            argv = h3imgcache.prepare_argv(h3image_steps, plat)
+            steps.append(Step(f"h3image: モデルの準備と本体のキャッシュ(scripts/prepare_models.py --build-cache {h3image_steps}。GPU を使います)",
+                              argv, env=env))
         return steps
     if name == "ace":
         # --no-client(easy-music の環境を作らない)は Linux の setup.sh だけにある。Windows の setup.bat は
@@ -380,6 +384,47 @@ def plan_existing_h3(h3_dir: Path, want_ref: bool = True, env: dict = None, plat
         say("    " + h3cache.prepare_command(h3_dir, env, plat, ref=want_ref))
         return None
     return h3_cache_step(h3_dir, st["venv"], want_ref, env, plat)
+
+
+# ---- 既に入れてあるエンジン(h3image)の本体のキャッシュ ----
+# setup は既存のエンジンのモデルの準備をしないが、キャッシュ(models/cache/ckw4a8_adaln_table_pdmd3 など)が無いと、最初の画像の生成で
+# bf16 の本体 62GB を取得して作るので 1 時間以上かかる(2026-11-26、Windows の実機 8GB VRAM / 16GB RAM の報告)。判定は studio/h3imgcache.py。
+
+def h3image_cache_status(img_dir: Path, steps: int = None, env: dict = None, plat: str = None) -> dict:
+    """{"steps": 確かめたステップ数, "ready": あるか, "dir": 置き場所, "venv": エンジンの venv の python か None}。steps が None なら
+    エンジンの既定(H3IMG_STEPS、無ければ 3)。"""
+    env = os.environ if env is None else env
+    st = h3imgcache.status(img_dir, env)
+    steps = steps or st["default_steps"]
+    sub = "Scripts/python.exe" if is_win(plat) else "bin/python"
+    venv = next((p for p in (Path(img_dir) / v / sub for v in (".venv", "venv")) if p.is_file()), None)
+    return {"steps": steps, "ready": st["ready"][steps], "dir": st["dir"], "venv": venv}
+
+
+def plan_existing_h3image(img_dir: Path, steps: int = None, env: dict = None, plat: str = None) -> Optional[Step]:
+    """既に入れてあるエンジン(h3image)の本体のキャッシュを確かめ、無ければ作るか聞く(既定は「はい」)。作るなら手順を返す。
+    venv が無い・端末でない・「いいえ」なら、作るコマンドを出して None。"""
+    env = os.environ if env is None else env
+    st = h3image_cache_status(img_dir, steps, env, plat)
+    if st["ready"]:
+        say(f"  本体のキャッシュ(ステップ数 {st['steps']}): ✓")
+        return None
+    say(f"  MiniMax-H3-Image の本体のキャッシュ(ステップ数 {st['steps']}、約 11GB)がありません(場所: {st['dir']})。"
+        "初回の生成で 62GB をダウンロードして作るため 1 時間以上かかります")
+    command = h3imgcache.prepare_command(img_dir, st["steps"], plat)
+    if st["venv"] is None:
+        say("  エンジンの venv がありません。環境を作ってから、次で作れます:")
+        say("    " + command)
+        return None
+    say("  いま作ると、ここで 1 時間ほどかかります(GPU を使います。取得した bf16 のシャードは 1 つずつ消すので、ディスクの空きは約 20GB で足ります)")
+    if not ask_yes("  いま作りますか?"):
+        say("  作らずに進みます。後で作るなら(スタジオを止めてから):")
+        say("    " + command)
+        return None
+    script = "scripts\\prepare_models.py" if is_win(plat) else "scripts/prepare_models.py"
+    step_env = {"HF_HUB_DISABLE_SYMLINKS": "1"} if is_win(plat) else {}
+    return Step(f"h3image: 本体のキャッシュの作成(scripts/prepare_models.py --build-cache {st['steps']})",
+                [str(st["venv"]), script, "--build-cache", str(st["steps"])], env=step_env)
 
 
 # ---- 状態の確認(まとめの表) ----
@@ -806,6 +851,7 @@ def main(argv: list = None) -> int:
         if selected:
             say("\n== エンジンの取り込み ==")
         sources = {}
+        img_build = None         # 既に入れてあるエンジン(h3image)で、本体のキャッシュを作る手順(作ると答えたときだけ)
         h3_build = None          # 既に入れてあるエンジン(h3)で、足りない量子化キャッシュを作る手順(作ると答えたときだけ。走らせるのは 2. で)
         for name in selected:
             src = decide_source(name, cfg, Path.home(), args.clone_anyway)
@@ -818,6 +864,8 @@ def main(argv: list = None) -> int:
             say(f"[{name}] {src.message}")
             if name == "h3" and src.action == "existing" and models:
                 h3_build = plan_existing_h3(src.path, want_ref=not args.no_ref, env=h3cache.engine_env(cfg))
+            if name == "h3image" and src.action == "existing" and models:
+                img_build = plan_existing_h3image(src.path, env=h3imgcache.engine_env(cfg))
             if src.action == "clone":
                 if not git_clone(COMPS[name].url, src.path):
                     return 1
@@ -831,7 +879,7 @@ def main(argv: list = None) -> int:
 
         # 2. 環境とモデル
         todo = [n for n in selected if sources[n].run_setup and COMPS[n].url]
-        if todo or h3_build is not None:
+        if todo or h3_build is not None or img_build is not None:
             say("\n== 環境とモデルの準備 ==")
             if any(n in ("h3image", "ace") for n in todo):
                 if not ensure_uv_on_path():
@@ -845,7 +893,8 @@ def main(argv: list = None) -> int:
             ensure_uv_on_path()
             extra_env = python312_env() if name == "h3" else {}
             have_venv = (d / ".venv" / ("Scripts/python.exe" if is_win() else "bin/python")).exists()
-            for step in component_steps(name, models=models, ace_xl=args.ace_xl, h3_ref=not args.no_ref, have_venv=have_venv):
+            for step in component_steps(name, models=models, ace_xl=args.ace_xl, h3_ref=not args.no_ref, have_venv=have_venv,
+                                        h3image_steps=h3imgcache.default_steps(h3imgcache.engine_env(cfg))):
                 step.env.update(extra_env)
                 if not run_step(step, d):
                     return 1
@@ -853,6 +902,11 @@ def main(argv: list = None) -> int:
             say(f"\n[h3] {COMPS['h3'].label}(既存のエンジン: {sources['h3'].path})")
             say("  ※ 量子化キャッシュを作ります。数時間かかります(止めても、できあがったキャッシュは次に飛ばします。作りかけの分は最初から作り直します)")
             if not run_step(h3_build, sources["h3"].path):
+                return 1
+
+        if img_build is not None:
+            say(f"\n[h3image] {COMPS['h3image'].label}(既存のエンジン: {sources['h3image'].path})")
+            if not run_step(img_build, sources["h3image"].path):
                 return 1
 
         if args.llm and not prefetch_llm(cfg):

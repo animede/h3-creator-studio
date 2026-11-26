@@ -221,6 +221,9 @@ EN = {
     "生成中 {}%": "Generating {0}%",
     "生成中 {}/{}": "Generating {0}/{1}",          # H3 の denoising の段(handlers/h3.py の label + step/total)
     "生成が 30 分以内に終わりませんでした": "Generation did not finish within 30 minutes",
+    "生成が 4 時間以内に終わりませんでした": "Generation did not finish within 4 hours",
+    "本体のキャッシュを作っています(初回だけ。62GB のダウンロードで 1 時間以上かかります)":
+        "Building the main-model cache (first time only; a 62GB download that takes over an hour)",
 
     # ---- 音楽(handlers/ace.py・songplan.py・genres.py) ----
     "{} は {} 文字以内にしてください": "{0} must be at most {1} characters",

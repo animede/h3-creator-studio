@@ -161,14 +161,14 @@ class CommandsTest(unittest.TestCase):
             self.assertEqual(st[0].argv, ["uv", "venv", "--python", "3.12", ".venv"])
             self.assertEqual(st[1].argv, ["uv", "pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt",
                                           "--index-strategy", "unsafe-best-match"])
-            self.assertEqual(st[2].argv, [".venv/bin/python", "scripts/prepare_models.py"])
+            self.assertEqual(st[2].argv, [".venv/bin/python", "scripts/prepare_models.py", "--build-cache", "3"])
             self.assertEqual(len(S.component_steps("h3image", have_venv=True)), 2)
 
     def test_h3image_windows_uses_windows_requirements(self):
         with mock.patch.object(sys, "platform", "win32"):
             st = S.component_steps("h3image")
             self.assertEqual(st[1].argv[-5:], [".venv\\Scripts\\python.exe", "-r", "requirements-windows.txt", "--index-strategy", "unsafe-best-match"])
-            self.assertEqual(st[2].argv, [".venv\\Scripts\\python.exe", "scripts\\prepare_models.py"])
+            self.assertEqual(st[2].argv, [".venv\\Scripts\\python.exe", "scripts\\prepare_models.py", "--build-cache", "3"])
 
     def test_ace(self):
         with mock.patch.object(sys, "platform", "linux"):
@@ -214,9 +214,9 @@ class PrerequisiteTest(unittest.TestCase):
         self.assertIn("CPU メモリ 32GB 未満では動画の準備(量子化)と音楽の同梱 LLM が厳しくなります", w[0])
         self.assertIn("VRAM", w[1])
         self.assertIsNone(S.disk_warning(500, True))
-        self.assertIn("160GB", S.disk_warning(50, True))
-        self.assertIn("130GB", S.disk_warning(50, True, ref=False))
-        self.assertIsNone(S.disk_warning(140, True, ref=False))
+        self.assertIn("175GB", S.disk_warning(50, True))
+        self.assertIn("145GB", S.disk_warning(50, True, ref=False))
+        self.assertIsNone(S.disk_warning(150, True, ref=False))
         self.assertIsNone(S.disk_warning(50, False))
 
 

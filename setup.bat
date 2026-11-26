@@ -4,7 +4,7 @@ set "OLDCP=%OLDCP: =%"
 rem UTF-8 first: every line below (Japanese text included) is parsed with this code page
 chcp 65001 >nul
 rem YUZU Creator Studio のセットアップ(Windows)。uv を用意し、管理役の .venv を作って、scripts\setup.py に渡す。
-rem   .\setup.bat                  エンジンの取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 160GB、回線次第で数時間)
+rem   .\setup.bat                  エンジンの取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 175GB、回線次第で数時間)
 rem   .\setup.bat --no-models      環境だけ(モデルは後で)
 rem   .\setup.bat --only h3,ace    指定したエンジンだけ
 rem   .\setup.bat --llm            同梱 LLM(約 5GB)も先に取得する

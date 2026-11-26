@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 
+from .. import config, h3imgcache
 from ..angles import apply_angle, check_angle
 from ..styles import apply_style, check_style
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
@@ -17,6 +18,9 @@ log = logging.getLogger("studio.h3image")
 COMPONENT = "h3image"
 POLL_S = 1.0
 TOTAL_TIMEOUT_S = 30 * 60
+# 本体のキャッシュが無いステップ数の初回は、エンジンが bf16 の 62GB を取得して作る(1 時間以上)。そのときだけ待つ上限を延ばす
+BUILD_TIMEOUT_S = 4 * 60 * 60
+BUILDING_MESSAGE = "本体のキャッシュを作っています(初回だけ。62GB のダウンロードで 1 時間以上かかります)"
 MAX_POLL_ERRORS = 30           # エンジンへ連続して届かなかった回数(1 秒おき)がこれを超えたら失敗にする
 MAX_REFS = 16
 # エンジン自体は 8192 まで受けるが、このアプリでは 4096 までにする(6〜12GB の GPU では
@@ -118,7 +122,7 @@ async def run(job: Job, ctx: Ctx) -> None:
             if r.status_code != 202:
                 raise JobFailed(f"H3-Image がジョブを受け付けませんでした: {_error_text(r)}")
             job.remote_id = r.json()["id"]
-            info = await _poll(job, c)
+            info = await _poll(job, c, building=not _cache_ready(p.get("steps")))
 
             ext = Path(info["image_url"]).suffix.lower()
             dest = ctx.outputs_dir / "image" / f"{job.id}{ext if ext in ('.png', '.jpg', '.jpeg', '.webp') else '.png'}"
@@ -136,8 +140,19 @@ async def run(job: Job, ctx: Ctx) -> None:
                     pass
 
 
-async def _poll(job: Job, c: httpx.AsyncClient) -> dict:
-    """エンジンのジョブが終わるまで 1 秒おきに見る。完了なら JobResponse を返す。"""
+def _cache_ready(steps) -> bool:
+    """このステップ数(None はエンジンの既定)の本体のキャッシュがあるか。確かめられなければ(フォルダが無い・外部のエンジン)ある扱い。"""
+    try:
+        d = config.settings.component_dir(COMPONENT)
+        return not d.is_dir() or h3imgcache.steps_ready(d, steps, h3imgcache.engine_env())
+    except Exception:  # noqa: BLE001
+        return True
+
+
+async def _poll(job: Job, c: httpx.AsyncClient, building: bool = False) -> dict:
+    """エンジンのジョブが終わるまで 1 秒おきに見る。完了なら JobResponse を返す。building はキャッシュ作りから始まるか:
+    エンジンはその間 progress を 0 のまま(ステップの進みは 0.05 から)にするので、0.05 未満のあいだは作っている旨を出し、待つ上限も延ばす。"""
+    limit = BUILD_TIMEOUT_S if building else TOTAL_TIMEOUT_S
     t0, errors, interrupt_sent = time.monotonic(), 0, False
     while True:
         if job.cancel_requested and not interrupt_sent:
@@ -161,11 +176,11 @@ async def _poll(job: Job, c: httpx.AsyncClient) -> dict:
             raise JobCancelled()
         if status == "running":
             job.progress = max(0.0, min(0.99, float(info.get("progress") or 0)))
-            job.message = f"生成中 {round(job.progress * 100)}%"
+            job.message = BUILDING_MESSAGE if building and job.progress < 0.05 else f"生成中 {round(job.progress * 100)}%"
         else:
             job.message = "H3-Image の順番を待っています"
-        if time.monotonic() - t0 > TOTAL_TIMEOUT_S:
-            raise JobFailed("生成が 30 分以内に終わりませんでした")
+        if time.monotonic() - t0 > limit:
+            raise JobFailed("生成が 30 分以内に終わりませんでした" if not building else "生成が 4 時間以内に終わりませんでした")
         await asyncio.sleep(POLL_S)
 
 

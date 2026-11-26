@@ -200,6 +200,7 @@ Tip: even without an angle, edit can convert the style or extend the picture (ou
 ### Steps and seed
 
 - **Steps**: **Server default** (サーバ既定) / **2** / **3** / **6**. Fewer is faster and rougher. Use 2 for drafts and 6 for finals (built-in presets **Quick draft (2 steps)** (ラフ確認用(2 ステップ)) and **High detail (6 steps)** (高精細(6 ステップ))).
+  Each step count uses its own main-model cache (about 11GB). Setup builds only the default, 3, so the first time you pick 2 or 6, that first run starts by building the cache (a 62GB download, over an hour). A note appears under the field, and the job shows "Building the main-model cache (first time only)". To build ahead, stop the studio and run `cd <h3image folder>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 2 6` (Linux: `.venv/bin/python scripts/prepare_models.py --build-cache 2 6`).
 - **Seed**: with **Random** (ランダム) ticked, it changes every time. Untick it and enter a number to get the same picture for the same prompt. Fix it when you want to keep a composition you like while tweaking only the text.
 
 ### edit (edit with reference images)
@@ -840,6 +841,7 @@ When VRAM overflows, Windows starts using CPU memory in place of GPU memory. It 
 
 ### Common issues
 
+- **The first image takes over an hour / downloads keep going** (RAM fills up repeatedly): MiniMax-H3-Image's main-model cache (per step count, about 11GB) is missing, so the first generation fetches the bf16 model (about 62GB) one shard at a time and quantizes it (earlier setup did not build it). If you wait, it is fast afterwards. To build it ahead, stop the studio and run in PowerShell `cd <h3image folder>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 3` (uses the GPU). `.\setup.bat --only h3image` also checks and builds it.
 - **"The Python environment of ... is incomplete (module uvicorn is missing)"**: that engine's virtual environment was only partly installed (its log has `No module named ...`). Stop the studio, then run `.\setup.bat --only <name>` (Linux: `./setup.sh --only <name>`). The name (h3 / h3image / ace, etc.) is in the message.
 - **An engine shows "Error"**: open **Log** on that engine's row in the engine panel. The same content is in `logs\<name>.log` (`logs/h3.log`, etc.). If a model or environment is missing, run setup again.
 - **A port is in use**: another app is using one of 8700 (supervisor), 8701 (bundled LLM), 8611 (video), 8633 (image), 8001 (music), or 10101 (text-to-speech). Stop that app, or change the port in `studio.local.toml`.

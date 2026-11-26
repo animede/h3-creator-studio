@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: 2026-11-26 JST** — The Image tab edit mode gets a **Camera angle** selector (front, three-quarter left/right, side, back, high, low); an instruction to redraw the reference from that angle is added at generation. When an engine fails to start because its virtual environment is incomplete, the studio now says how to re-run setup. On PCs with 2 or more GPUs, all engines are pinned by default to the one GPU the supervisor manages (`[gpu] devices`). Also, The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: 2026-11-26 JST** — setup now also builds MiniMax-H3-Image's main-model cache (default step count 3, about 11GB); without it the first image generation fetched 62GB and took over an hour. For an already-installed engine it asks whether to build it. The Image tab shows a note when the chosen step count has no cache. Also, The Image tab edit mode gets a **Camera angle** selector (front, three-quarter left/right, side, back, high, low); an instruction to redraw the reference from that angle is added at generation. When an engine fails to start because its virtual environment is incomplete, the studio now says how to re-run setup. On PCs with 2 or more GPUs, all engines are pinned by default to the one GPU the supervisor manages (`[gpu] devices`). Also, The Image, Video, Music Video and Short Video tabs get a **Visual style** selector (None / Realistic / Cinematic / TV drama / Anime / Illustration / Sketch / Watercolor / Oil painting / 3D CG). It is not written into the prompt; an English style instruction is added at generation (with a reference image, the person or object keeps its reference look and the scene, background, lighting and materials follow the style). [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -46,14 +46,14 @@ The GIFs show the first 14 seconds (click for the original video). The original 
 |---|---|
 | GPU | NVIDIA. There is no hard VRAM minimum. 6GB works with a narrowed aspect, but it is slow. **12GB or more recommended** |
 | CPU memory | **Assumes 32GB or more.** With less, video preparation (quantization) and the bundled LLM for music get tight |
-| Storage | **NVMe recommended.** About **160GB free** (models and Python environments for the four engines combined; breakdown below. About 130GB with `--no-ref`) |
+| Storage | **NVMe recommended.** About **175GB free** (models and Python environments for the four engines combined; breakdown below. About 145GB with `--no-ref`) |
 
 Storage breakdown (model sizes as installed through each engine's low-VRAM preparation path. Each file is quantized and the original deleted as it downloads, so usage never balloons temporarily):
 
 | Engine | Models | Python env |
 |---|---|---|
 | MiniMax-H3 (video) | About 60GB (quantized cache) + about 32GB for reference mode (Ref2VA / Vocal Lock; skip with `--no-ref`) | About 5GB |
-| MiniMax-H3-Image (image) | About 25GB | About 5GB |
+| MiniMax-H3-Image (image) | About 25GB + main-model cache of about 11GB (per step count used; setup builds only the default, 3. The roughly 62GB bf16 model it is built from is fetched and deleted one shard at a time, so it does not stay) | About 5GB |
 | ACE-Step (music) | About 15GB (2B models; +about 30GB with `--ace-xl`) | About 9GB |
 | AivisSpeech (TTS) | About 2GB (including the standard voice model) | About 3GB |
 | Bundled LLM / Music Video tools | About 5.6GB (Gemma 4 E4B + projector file) / about 1.3GB | — |
@@ -83,7 +83,7 @@ What the engines can't do on their own is **manage VRAM and CPU memory**, and th
 
 ## Installation
 
-The first run spends **several hours downloading models** (about 160GB). Even on a fast connection, plan for more than an hour.
+The first run spends **several hours downloading models** (about 175GB). Even on a fast connection, plan for more than an hour.
 If you stop partway, run setup again and it picks up where it left off.
 
 ### Windows (quick version)
@@ -156,7 +156,7 @@ cd h3-creator-studio
 | `--components-dir <path>` | Change where engines are cloned |
 | `--clone-anyway` | Clone again even if the folders described in "Already have minimax-h3 etc." below exist |
 
-Rough sizes: MiniMax-H3 models about 60GB (takes the longest), MiniMax-H3-Image about 25GB, ACE-Step about 15GB, AivisSpeech about 0.3GB.
+Rough sizes: MiniMax-H3 models about 60GB (takes the longest), MiniMax-H3-Image about 25GB + a main-model cache of about 11GB (built from the roughly 62GB bf16 model; uses the GPU), ACE-Step about 15GB, AivisSpeech about 0.3GB.
 
 ### Already have minimax-h3 etc. installed
 
@@ -184,6 +184,7 @@ dir = "/home/you/ACE-Step-1.5-fast"
 - For engines with `dir` set, setup skips both cloning and model downloads. The environment and models in that folder are assumed to be ready.
 - Even without `dir`, setup looks for engines you already installed (your home folder and its `AI`, `Documents`, `github`, `src` subfolders; on Windows also each drive root and `\AI`; aliases such as `Diffusers_minimax-h3` included). When it finds one it asks "Use this? [Y/n]" — **press Enter (yes) and it writes the path into `studio.local.toml` for you**, skipping clone and model download. Answer n to leave the file alone and skip that engine (it never re-clones on its own; use `--clone-anyway` for that).
 - For an existing MiniMax-H3, setup checks its quantized caches (in the engine's `models\prequant`: the main `transformer_int8` and the reference-mode `transformer_ref_int8`). If both are there, it just prints "キャッシュ: 本体 ✓ 参照用 ✓" (caches: main ✓ reference ✓). On Windows and on PCs with less than 48GB of RAM, if any are missing it lists them (main about 60GB, reference mode about 32GB; building takes hours) and asks "いま作りますか? [Y/n]" (build them now?). **Press Enter (yes) and it runs the engine's `scripts\prepare_lowvram.py --ref`** (with `--no-ref`, without `--ref`, and the reference-mode cache isn't counted). If you answer n, or setup runs without a terminal, it only prints the command and moves on. If the engine has no venv, it asks you to run the engine's install first; if the engine is too old to have `prepare_lowvram.py`, it asks you to update it first (see "Updating engines"). On Linux with 48GB of RAM or more, the engine can build the caches itself at startup, so setup doesn't ask; it only prints the command with `--keep-source` (prepare deletes the bf16 weights it has quantized, which such a PC may still use).
+- For an existing MiniMax-H3-Image, setup checks its main-model cache (in the engine's `models\cache`, e.g. `ckw4a8_adaln_table_pdmd3`; default step count 3, or `H3IMG_STEPS` if you set it in `[components.h3image.env]`). If it is missing, setup asks "いま作りますか? [Y/n]" (build it now?); Enter (yes) runs the engine's `scripts\prepare_models.py --build-cache 3` (about an hour, uses the GPU). On n, or when not run from a terminal, it only prints the command.
 
 ## Starting and using it
 
@@ -219,6 +220,7 @@ Pick the mode with the two buttons at the top (named as in MiniMax-H3-Image).
 **Enhance prompt** (プロンプト強化) rewrites a short instruction into a detailed prompt (bundled LLM).
 **Visual style** (画風) adds an English style instruction at generation (not written into the prompt box; in edit mode the reference's look is kept and the background, lighting and materials follow the style).
 In edit mode, **Camera angle** (アングル: None / Front / Three-quarter, facing left / Three-quarter, facing right / Side profile / From behind / High angle / Low angle) adds an English instruction to redraw the reference from that angle (the person and place are kept; left/right are as seen in the picture; low angle becomes a full-body shot; works even with an empty prompt).
+**Steps** (ステップ数): each step count uses its own main-model cache (about 11GB). Setup builds only the default, 3, so the first time you pick 2 or 6, that first run starts by building the cache (a 62GB download, over an hour). A note appears under the field, and the job shows "Building the main-model cache (first time only)". To build them ahead, stop the studio and run `cd <h3image folder>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 2 6`.
 
 ### Video tab (MiniMax-H3)
 
@@ -480,6 +482,7 @@ Engine names are `h3` / `h3image` / `ace` / `aivis`.
 
 ## Troubleshooting
 
+- **The first image takes over an hour / downloads keep going** (RAM fills up repeatedly): MiniMax-H3-Image's main-model cache (per step count, about 11GB) is missing, so the first generation fetches the bf16 model (about 62GB) one shard at a time and quantizes it. Earlier versions of setup did not build this cache. If you wait, it is fast afterwards (the job shows "Building the main-model cache (first time only)"). To build it ahead, stop the studio and run in PowerShell `cd <h3image folder>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 3` (Linux: `cd <h3image folder> && .venv/bin/python scripts/prepare_models.py --build-cache 3`; uses the GPU). `.\setup.bat --only h3image` also checks and builds it. If you use 2 or 6 steps, list those too.
 - **An engine shows "Error"**: open "Log" on that row. The same content is in `logs\<name>.log` (`logs/h3.log`, etc.). If the model or environment is missing, run setup again.
 - **"The Python environment of ... is incomplete (module uvicorn is missing)"**: that engine's virtual environment was only partly installed (its log has `No module named ...`). Stop the studio, then run `.\setup.bat --only <name>` (Linux: `./setup.sh --only <name>`). The name (h3 / h3image / ace, etc.) is in the message.
 - **Port already in use**: another app is using one of 8700 (supervisor), 8701 (bundled LLM), 8611 (video), 8633 (image), 8001 (music) or 10101 (TTS). Stop it, or change the port in `studio.local.toml`.

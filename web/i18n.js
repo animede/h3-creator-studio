@@ -49,6 +49,8 @@ function setLang(lang) {
 const langHeaders = (h) => Object.assign({ "Accept-Language": LANG }, h || {});
 
 const I18N_EN = {
+  "このステップ数は初回だけ本体のキャッシュを作ります(62GB のダウンロード、1 時間以上)。setup.bat --only h3image で先に作っておけます":
+    "This step count builds the main-model cache on its first run only (a 62GB download, over an hour). You can build it ahead with setup.bat --only h3image",
   "  (VRAM 不足)": "  (not enough VRAM)",
   "  (未読込。選ぶと読み込みます)": "  (not loaded; loads when selected)",
   "  ✓読込済": "  ✓ loaded",

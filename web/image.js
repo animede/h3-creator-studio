@@ -109,7 +109,29 @@ wireDrop(im("refs"), { zone: $("ops"), active: () => studio.tab === "image", onI
 function setBusy(busy) {
   im("go").disabled = busy;
   im("stop").disabled = !busy;
+  if (!busy) refreshCache();   // 生成が終われば、そのステップ数のキャッシュはできている
 }
+
+// ---- 本体のキャッシュ(ステップ数ごと)。無いステップ数の初回は、エンジンが 62GB を取得して作る(GET /api/image/cache) ----
+
+let cacheInfo = null;
+
+function renderStepsNote() {
+  const note = im("steps-note");
+  const c = cacheInfo;
+  const steps = im("steps").value || (c && String(c.default_steps));
+  note.hidden = !(c && c.installed && steps && c.ready[steps] === false);
+  note.textContent = note.hidden ? "" : t("このステップ数は初回だけ本体のキャッシュを作ります(62GB のダウンロード、1 時間以上)。setup.bat --only h3image で先に作っておけます");
+}
+
+async function refreshCache() {
+  try {   // project.js(apiJson)はこの後に読まれるので、fetch で直に聞く
+    const r = await fetch("/api/image/cache");
+    cacheInfo = r.ok ? await r.json() : null;
+  } catch (e) { cacheInfo = null; }
+  renderStepsNote();
+}
+im("steps").addEventListener("change", renderStepsNote);
 
 async function generate() {
   const prompt = im("prompt").value.trim();
@@ -157,6 +179,7 @@ renderAngleNote = wireAngleNote(im("angle"), im("angle-note"), () => mode === "e
 wirePresets({ tab: "image", box: $("im-presets"), get: getPresetValues, apply: applyPresetValues });
 
 tracker.resume();
+refreshCache();
 setMode("t2i");
 renderRefs();
 })();

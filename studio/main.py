@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import angles, editclip, genres, h3cache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
+from . import angles, editclip, genres, h3cache, h3imgcache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
 from .components import ComponentNotInstalled, all_specs
 from .config import REPO_ROOT, settings
 from .edit import EditManager, ExportBusy
@@ -471,6 +471,21 @@ def _ref_cache_view() -> dict:
     st = h3cache.ref_cache_state()
     hint = h3cache.missing_message(st["command"]) if st["needed"] and not st["ready"] else None
     return {"needed": st["needed"], "ready": st["ready"], "hint": hint}
+
+
+@app.get("/api/image/cache")
+def api_image_cache():
+    """MiniMax-H3-Image の本体のキャッシュが、どのステップ数にあるか(studio/h3imgcache.py)。画像タブは、選んだステップ数(サーバ既定なら
+    default_steps)に無ければ、欄の下に案内を出す。量子化はエンジンが起動時に決めるので、auto ならどちらかの量子化のがあれば ready。
+    エンジンのフォルダが無ければ installed=false(案内は出さない)。"""
+    d = settings.component_dir(h3imgcache.COMPONENT)
+    if not d.is_dir():
+        return {"installed": False, "default_steps": h3imgcache.DEFAULT_STEPS, "ready": {}, "quant": None, "command": None}
+    st = h3imgcache.status(d, h3imgcache.engine_env())
+    missing = [s for s, ok in st["ready"].items() if not ok]
+    return {"installed": True, "default_steps": st["default_steps"], "quant": st["quant"],
+            "ready": {str(k): v for k, v in st["ready"].items()},
+            "command": h3imgcache.prepare_command(d, missing) if missing else None}
 
 
 @app.post("/api/mv/tools/install")
