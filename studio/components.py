@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import Settings, settings as default_settings
+from . import h3imgcache
 from .gpu import smi_mib
 
 
@@ -211,7 +212,9 @@ def get_spec(name: str, cfg: Settings = None) -> ComponentSpec:
         spec.build_command = lambda dd: _h3image_command(dd, spec.port)
         spec.budget_env = h3image_budget_env
         spec.env = lambda dd, p: {"H3IMG_LLM_BASE_URL": f"http://127.0.0.1:{cfg.llm_port}/v1", "H3IMG_LLM_MODEL": "gemma-4-E4B",
-                                      "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True"}
+                                      "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF") or "expandable_segments:True",
+                                      # 既定のステップ数(studio/h3imgcache.py DEFAULT_STEPS = 6)。[components.h3image.env] の H3IMG_STEPS が優先
+                                      "H3IMG_STEPS": str(h3imgcache.default_steps(os.environ))}
     elif name == "ace":
         spec = make("ACE-Step(音楽)", 8001, health_path="/health",
                     health_ok=lambda j: bool(isinstance(j, dict) and (j.get("data") or {}).get("models_initialized")),

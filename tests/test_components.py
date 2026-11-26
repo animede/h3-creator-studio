@@ -69,8 +69,11 @@ class ComponentsTest(unittest.TestCase):
         cmd = sp.build_command(sp.dir)
         self.assertEqual(cmd[1:], ["-u", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8633"])
         self.assertEqual((sp.unload_path, sp.reload_path), ("/api/admin/unload", "/api/admin/load"))
-        self.assertEqual(without_alloc(sp.env(sp.dir, sp.port)),
-                         {"H3IMG_LLM_BASE_URL": "http://127.0.0.1:8701/v1", "H3IMG_LLM_MODEL": "gemma-4-E4B"})
+        with mock.patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("H3IMG_STEPS", None)
+            self.assertEqual(without_alloc(sp.env(sp.dir, sp.port)),
+                             {"H3IMG_LLM_BASE_URL": "http://127.0.0.1:8701/v1", "H3IMG_LLM_MODEL": "gemma-4-E4B",
+                              "H3IMG_STEPS": "6"})                     # 既定のステップ数は 6(studio/h3imgcache.py)
 
     def test_ace(self):
         touch(self.root / "ace" / "run_api_server_fast.sh")

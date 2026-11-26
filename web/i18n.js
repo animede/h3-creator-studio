@@ -809,7 +809,7 @@ const I18N_EN = {
   "高さ(px)": "Height (px)",
   "高画質": "High",
   "高画質 横長 16:9(24GB 以上)": "High quality Landscape 16:9 (24GB+)",
-  "高精細(6 ステップ)": "High detail (6 steps)",
+  "速め(3 ステップ)": "Faster (3 steps)",
   "高速": "Fast",
   "黒からフェード": "Fade from black",
   "黒にする": "Black",

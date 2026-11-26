@@ -162,14 +162,14 @@ class CommandsTest(unittest.TestCase):
             self.assertEqual(st[0].argv, ["uv", "venv", "--python", "3.12", ".venv"])
             self.assertEqual(st[1].argv, ["uv", "pip", "install", "--python", ".venv/bin/python", "-r", "requirements.txt",
                                           "--index-strategy", "unsafe-best-match"])
-            self.assertEqual(st[2].argv, [".venv/bin/python", "scripts/prepare_models.py", "--build-cache", "3"])
+            self.assertEqual(st[2].argv, [".venv/bin/python", "scripts/prepare_models.py", "--build-cache", "6"])
             self.assertEqual(len(S.component_steps("h3image", have_venv=True)), 2)
 
     def test_h3image_windows_uses_windows_requirements(self):
         with mock.patch.object(sys, "platform", "win32"):
             st = S.component_steps("h3image")
             self.assertEqual(st[1].argv[-5:], [".venv\\Scripts\\python.exe", "-r", "requirements-windows.txt", "--index-strategy", "unsafe-best-match"])
-            self.assertEqual(st[2].argv, [".venv\\Scripts\\python.exe", "scripts\\prepare_models.py", "--build-cache", "3"])
+            self.assertEqual(st[2].argv, [".venv\\Scripts\\python.exe", "scripts\\prepare_models.py", "--build-cache", "6"])
 
     def test_ace(self):
         with mock.patch.object(sys, "platform", "linux"):
@@ -950,14 +950,14 @@ class SharedTextEncoderTest(unittest.TestCase):
         self.assertFalse(self.toml.exists())
 
     def ready_cache(self):
-        touch(self.img / "models" / "cache" / "ckw4a8_adaln_table_pdmd3" / "transformer_adaln_table.safetensors")
+        touch(self.img / "models" / "cache" / "ckw4a8_adaln_table" / "transformer_adaln_table.safetensors")
 
     def test_existing_engine_without_text_encoder_is_prepared(self):
         # 「既存を使う」と答えたが、モデルの準備がされていなかった(2026-11-26、Windows の実機)
         self.ready_cache()
         py = touch(self.img / ".venv" / "bin" / "python")
         step = S.plan_existing_h3image(self.img, env={}, plat="linux")
-        self.assertEqual(step.argv, [str(py), "scripts/prepare_models.py", "--build-cache", "3"])
+        self.assertEqual(step.argv, [str(py), "scripts/prepare_models.py", "--build-cache", "6"])
         self.assertIn("テキストエンコーダ(約 17GB。作るときに 66.7GB を取得)がありません", "\n".join(self.lines))
         S.ask_yes.assert_called_once()
 
@@ -965,7 +965,7 @@ class SharedTextEncoderTest(unittest.TestCase):
         self.ready_cache()
         touch(self.shared / "config.json")
         self.assertIsNone(S.plan_existing_h3image(self.img, env={}, plat="linux", extra_env={"H3IMG_TE_DIR": str(self.shared)}))
-        self.assertIn("  本体のキャッシュ(ステップ数 3): ✓  テキストエンコーダ: ✓", self.lines)
+        self.assertIn("  本体のキャッシュ(ステップ数 6): ✓  テキストエンコーダ: ✓", self.lines)
         S.ask_yes.assert_not_called()
 
     def test_the_build_step_gets_the_shared_text_encoder(self):

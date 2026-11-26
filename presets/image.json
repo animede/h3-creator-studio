@@ -5,6 +5,6 @@
     {"name": "水彩画", "values": {"prompt": "Delicate watercolor painting, soft color washes, visible paper texture, gentle gradients, loose brush strokes"}},
     {"name": "縦長 9:16 SNS 用", "values": {"width": 768, "height": 1344}},
     {"name": "ラフ確認用(2 ステップ)", "values": {"width": 768, "height": 768, "steps": 2}},
-    {"name": "高精細(6 ステップ)", "values": {"steps": 6}}
+    {"name": "速め(3 ステップ)", "values": {"steps": 3}}
   ]
 }

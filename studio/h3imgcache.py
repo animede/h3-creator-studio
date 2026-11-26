@@ -21,7 +21,10 @@ from .config import Settings
 COMPONENT = "h3image"
 QUANT_DIRS = {"ck-w4a8": "ckw4a8_adaln_table", "int8wo": "int8wo_adaln_table"}   # engine.py _load_transformer
 STEP_TAGS = {6: "", 3: "_pdmd3", 2: "_pdmd2"}                                    # config.py STEP_PRESETS の接尾辞
-DEFAULT_STEPS = 3                                                                # config.py H3IMG_STEPS の既定
+# スタジオの既定のステップ数(エンジンの既定は 3。管理役が H3IMG_STEPS で 6 を渡す: studio/components.py)。6 はモデル本来の手順で、
+# 3 / 2 は蒸留 LoRA(pDMD)の近道。3 は風景など広い面に格子状のざらつきが出ることがあり、6 で消える(エンジンの README。
+# 2026-11-26、Windows の RTX 3060 12GB / 4060 8GB の実機でも 6 が良好)。時間はおよそ 2 倍
+DEFAULT_STEPS = 6
 # できあがりの印(pruned_image.py の STATE_FILENAME_ST / STATE_FILENAME)。save_cache は <名前>.tmp に書いてから名前を変えるので、
 # 作りかけはこの名前のフォルダにならない
 MARKERS = ("transformer_adaln_table.safetensors", "transformer_int8wo_adaln_table.pt")

@@ -28,7 +28,7 @@ class CacheStatusTest(unittest.TestCase):
 
     def test_markers_and_tmp(self):
         st = C.status(self.d, {})
-        self.assertEqual((st["dir"], st["quant"], st["default_steps"]), (self.cache, None, 3))
+        self.assertEqual((st["dir"], st["quant"], st["default_steps"]), (self.cache, None, 6))     # スタジオの既定は 6
         self.assertEqual(st["ready"], {6: False, 3: False, 2: False})
         touch(self.cache / "ckw4a8_adaln_table_pdmd3.tmp" / "transformer_adaln_table.safetensors")   # 作りかけは数えない
         touch(self.cache / "ckw4a8_adaln_table_pdmd3" / "config.json")                              # 印の無いものも数えない
@@ -38,7 +38,8 @@ class CacheStatusTest(unittest.TestCase):
         st = C.status(self.d, {})
         self.assertEqual(st["ready"], {6: True, 3: True, 2: False})          # auto: どちらかの量子化があれば ready
         self.assertEqual(st["by_quant"]["ck-w4a8"], {6: False, 3: True, 2: False})
-        self.assertTrue(C.steps_ready(self.d, None, {}))
+        self.assertTrue(C.steps_ready(self.d, None, {}))                    # 既定(6)
+        self.assertTrue(C.steps_ready(self.d, None, {"H3IMG_STEPS": "3"}))
         self.assertFalse(C.steps_ready(self.d, 2, {}))
 
     def test_env_quant_steps_and_dir(self):
@@ -46,9 +47,10 @@ class CacheStatusTest(unittest.TestCase):
         self.assertTrue(C.status(self.d, {})["ready"][3])
         st = C.status(self.d, {"H3IMG_TRANSFORMER_QUANT": "ck-w4a8"})        # 決め打ちならその量子化だけ
         self.assertEqual((st["quant"], st["ready"][3]), ("ck-w4a8", False))
-        self.assertEqual(C.default_steps({"H3IMG_STEPS": "6"}), 6)
-        self.assertEqual(C.default_steps({"H3IMG_STEPS": "x"}), 3)
-        self.assertEqual(C.default_steps({"H3IMG_STEPS": "5"}), 3)
+        self.assertEqual(C.default_steps({"H3IMG_STEPS": "3"}), 3)
+        self.assertEqual(C.default_steps({}), 6)
+        self.assertEqual(C.default_steps({"H3IMG_STEPS": "x"}), 6)
+        self.assertEqual(C.default_steps({"H3IMG_STEPS": "5"}), 6)
         self.assertEqual(C.cache_dir(self.d, {"H3IMG_CACHE_DIR": "/x/c"}), Path("/x/c"))
         self.assertEqual(C.cache_dir(self.d, {"H3IMG_MODELS_DIR": "m"}), self.d / "m" / "cache")
 
@@ -71,7 +73,7 @@ class CacheStatusTest(unittest.TestCase):
             touch(self.cache / "ckw4a8_adaln_table_pdmd3" / "transformer_adaln_table.safetensors")
             with mock.patch.object(C, "engine_env", return_value={}):
                 js = main.api_image_cache()
-        self.assertEqual((js["installed"], js["default_steps"], js["ready"]), (True, 3, {"6": False, "3": True, "2": False}))
+        self.assertEqual((js["installed"], js["default_steps"], js["ready"]), (True, 6, {"6": False, "3": True, "2": False}))
         self.assertIn("--build-cache 6 2", js["command"])
         with mock.patch.object(main.settings, "component_dir", return_value=self.d), \
              mock.patch.object(C, "engine_env", return_value={"H3IMG_TE_DIR": "/shared/te"}):
