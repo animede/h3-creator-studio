@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: v1.0.0 (2026-11-26 JST, first public release)** — Six tabs in one screen: image, video, music, music video, short video and editing. For GPUs with 6–96GB of VRAM and PCs from 16GB of RAM, the supervisor decides engine swapping, VRAM allocations, reference-image size and more by itself. One-line setup on Windows and Linux (with a desktop launcher on Windows), Japanese and English UI and guide, bundled samples. The version is shown at the bottom of the screen. [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: v1.1.0 (2026-11-27 JST)** — A prototype MCP server lets AI agents (Claude and others) drive the studio with plain-language instructions (optional; only people who use it install it from [agent/](agent/README.en.md)). Music videos vary the framing of intros and interludes, write each scene's direction in more detail following MiniMax's official guide, and let you retry a scene by editing only its direction. Fixes from contributors' PRs: the Edit tab could not open projects with two or more clips, and 20-24GB GPUs now use the 16gb video-engine profile. v1.0.0 (2026-11-26) was the first public release. [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
