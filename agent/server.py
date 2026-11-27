@@ -184,6 +184,12 @@ def job_view(job: dict, outputs: list = None) -> dict:
     return {k: v for k, v in out.items() if v not in (None, "")}
 
 
+def scene_finished(s: dict) -> bool:
+    """できあがったシーンか。やり直し中・やり直しに失敗したシーンも、画面用に前のテイクの clip_url を持つので、
+    clip_url だけでは決めない(前のテイクを新しい結果として見せてしまう。PR #3 のテイク履歴から)。"""
+    return s.get("status") == "done" and bool(s.get("clip_url"))
+
+
 def project_view(p: dict, include_prompts: bool = False) -> dict:
     out = {"project_id": p.get("id"), "title": p.get("title"), "state": p.get("state"), "message": p.get("message"),
            "progress": p.get("progress"), "error": p.get("error")}
@@ -193,7 +199,7 @@ def project_view(p: dict, include_prompts: bool = False) -> dict:
         for s in scenes:
             v = {"index": s.get("index"), "start": s.get("start"), "end": s.get("end"), "kind": s.get("kind"),
                  "status": s.get("status"), "elapsed_s": s.get("elapsed_s"), "error": s.get("error")}
-            if s.get("clip_url"):
+            if scene_finished(s):
                 v["clip_file"] = local_file(s["clip_url"])
             if include_prompts:
                 if s.get("direction"):
@@ -561,8 +567,8 @@ async def preview_scenes(project_id: str, kind: str = "mv", scenes: Optional[lis
     all_scenes = [s for s in proj.get("scenes") or [] if isinstance(s, dict)]
     wanted = {int(i) for i in scenes} if scenes else None
     chosen = [s for s in all_scenes if wanted is None or s.get("index") in wanted]
-    ready = [s for s in chosen if s.get("clip_url")]
-    waiting = [s.get("index") for s in chosen if not s.get("clip_url")]
+    ready = [s for s in chosen if scene_finished(s)]
+    waiting = [s.get("index") for s in chosen if not scene_finished(s)]
     if not ready:
         raise StudioError("No finished scenes to show yet" + (f" (not rendered: {waiting})" if waiting else ""))
     shown, later = ready[:PREVIEW_MAX_SCENES], [s.get("index") for s in ready[PREVIEW_MAX_SCENES:]]

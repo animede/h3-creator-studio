@@ -293,9 +293,9 @@ class McpServerTest(unittest.TestCase):
         from PIL import Image
         self.make_clip(self.tmp / "mv" / "p1" / "scene_001.mp4")
         remote = self.make_clip(self.tmp / "elsewhere" / "scene_002.mp4")          # この PC の outputs に無い(HTTP で取る)
-        scenes = [{"index": 1, "kind": "instrumental", "start": 0.0, "end": 2.0, "clip_url": "/outputs/mv/p1/scene_001.mp4?v=1"},
-                  {"index": 2, "kind": "vocal", "start": 2.0, "end": 4.0, "clip_url": "/outputs/other/scene_002.mp4?v=2"},
-                  {"index": 3, "kind": "vocal", "start": 4.0, "end": 6.0, "clip_url": None}]
+        scenes = [{"index": 1, "kind": "instrumental", "start": 0.0, "end": 2.0, "status": "done", "clip_url": "/outputs/mv/p1/scene_001.mp4?v=1"},
+                  {"index": 2, "kind": "vocal", "start": 2.0, "end": 4.0, "status": "done", "clip_url": "/outputs/other/scene_002.mp4?v=2"},
+                  {"index": 3, "kind": "vocal", "start": 4.0, "end": 6.0, "status": "pending", "clip_url": None}]
         self.use({("GET", "/api/mv/p1"): {"id": "p1", "scenes": scenes},
                   ("GET", "/outputs/other/scene_002.mp4"): httpx.Response(200, content=remote)})
         r = self.run_tool("preview_scenes", {"project_id": "p1"})
@@ -321,6 +321,25 @@ class McpServerTest(unittest.TestCase):
         r = self.run_tool("preview_scenes", {"project_id": "p1", "scenes": [3]})
         self.assertTrue(r.is_error)
         self.assertIn("No finished scenes to show yet (not rendered: [3])", r.content[0].text)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg が要る")
+    def test_a_scene_being_redone_is_not_finished(self):
+        # やり直し中・やり直しに失敗したシーンは、画面用に前のテイクの clip_url を持つ。それを新しい結果として見せない
+        self.make_clip(self.tmp / "mv" / "p1" / "scene_001.mp4")
+        self.make_clip(self.tmp / "mv" / "p1" / "scene_002.mp4")
+        scenes = [{"index": 1, "kind": "vocal", "start": 0.0, "end": 2.0, "status": "done", "clip_url": "/outputs/mv/p1/scene_001.mp4?v=1"},
+                  {"index": 2, "kind": "vocal", "start": 2.0, "end": 4.0, "status": "running", "clip_url": "/outputs/mv/p1/scene_002.mp4?v=1"},
+                  {"index": 3, "kind": "vocal", "start": 4.0, "end": 6.0, "status": "failed", "clip_url": "/outputs/mv/p1/scene_002.mp4?v=1"}]
+        self.use({("GET", "/api/mv/p1"): {"id": "p1", "state": "running", "scenes": scenes}})
+        r = self.run_tool("preview_scenes", {"project_id": "p1"})
+        self.assertFalse(r.is_error, r.content)
+        self.assertIn("rows top to bottom are scenes [1]", r.content[0].text)
+        self.assertIn("Not rendered yet: [2, 3]", r.content[0].text)
+        r = self.run_tool("preview_scenes", {"project_id": "p1", "scenes": [2, 3]})
+        self.assertTrue(r.is_error)
+        self.assertIn("No finished scenes to show yet (not rendered: [2, 3])", r.content[0].text)
+        v = asyncio.run(ms.get_project("p1"))
+        self.assertEqual(["clip_file" in s for s in v["scenes"]], [True, False, False])
 
     def test_preview_scenes_needs_ffmpeg(self):
         self.use()
