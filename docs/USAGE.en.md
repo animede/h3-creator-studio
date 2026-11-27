@@ -386,7 +386,7 @@ On Windows and on PCs with less than 48GB of RAM, it also needs MiniMax-H3's ref
 
 ### Vocals
 
-- **Lip-sync (music video with singing)** (歌わせる(リップシンク MV)): for each scene, the separated vocals are passed to H3 to sync the mouth (Vocal Lock). In sections without singing (interludes, etc.) the mouth stays closed.
+- **Lip-sync (music video with singing)** (歌わせる(リップシンク MV)): for each scene, the separated vocals are passed to H3 to sync the mouth (Vocal Lock). In sections without singing (intro, interludes, outro) the mouth stays closed and the framing changes (a wide shot, a side tracking shot, a low angle, a view from behind; a walk away from the camera when the song ends on such a section).
 - **No singing (image MV)** (歌わせない(イメージ MV)): no vocals are passed; scenes are made using only the image as a reference. The character doesn't sing. Any composition is used — walking, gazing, scenery. The song is attached during assembly.
 
 Even with no singing, the LLM writing the direction may pick a microphone or stage because it's a "music video" (the mouth didn't move, but a scene holding a microphone appeared). If you want only scenery or everyday life, write what you don't want in **Song concept**.

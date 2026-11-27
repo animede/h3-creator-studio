@@ -382,6 +382,35 @@ def _truthy(value: Any) -> bool:
     return value is True or (isinstance(value, str) and value.strip().lower() in ("true", "yes", "1"))
 
 
+def person_direction(raw: str, character: dict, *, with_person: bool, speech: bool) -> str:
+    """LLM(またはやり直しで書いた)演出に、人物の規則を当てる。話すシーンは口が見える構図(歌唱と同じ規則、演技は「語り」)、
+    話さないシーンは口を閉じる。人物なしはそのまま(「人物は映らない」の文は format_h3_prompt が足す)。"""
+    if not with_person:
+        return raw
+    if speech:
+        return SPEAKING_PREFIX.format(identity=M.identity_instruction(character)) + M.keep_mouth_visible(raw, "speaking framing")
+    return (f"Use the exact same person from the reference image; preserve facial identity, hair, outfit, and "
+            f"visual style unchanged: {M.identity_instruction(character)}. " + CLOSED_MOUTH_PREFIX + raw)
+
+
+def rebuild_scene_prompt(params: dict, scenes: list, index: int, direction: str) -> str:
+    """やり直しで演出だけを書き換えたシーンの最終のプロンプト。制作の params(images の説明と役割・timeline・voiceover・
+    character_facts・幅と高さ・style)と、そのシーンの refs(台本で決まった参照)から、generate_scenario と同じ規則で組み立てる。"""
+    scene = next(s for s in scenes if int(s["index"]) == int(index))
+    images = params.get("images") or []
+    roles = [it.get("role") for it in images]
+    person_idx = roles.index(ROLE_PERSON) if ROLE_PERSON in roles else None
+    timeline = params.get("timeline") or "free"
+    voiceover = bool(params.get("voiceover")) and timeline == "speech" and person_idx is None
+    refs = [int(r) for r in scene.get("refs") or [] if isinstance(r, int)]
+    character = params.get("character_facts") or {}
+    text = person_direction(direction, character, with_person=person_idx is not None and person_idx in refs,
+                            speech=timeline == "speech" and not voiceover)
+    return format_h3_prompt({**scene, "refs": refs}, text, character, [it.get("description") or "" for it in images], roles,
+                            frame=M.frame_kind(params["width"], params["height"]), timeline=timeline,
+                            style=params.get("style") or "none", with_reference=bool(roles))
+
+
 async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: dict, sceneries: list, *, timeline: str, frame: str,
                             background_text: str, roles: Any = (), narration_sentences: Optional[list] = None,
                             style: str = "none", voiceover: bool = False,
@@ -444,7 +473,7 @@ async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: 
         batch_prompt = (
             "Write one production prompt per fixed scene of a short narrative video. Do not add/remove scenes or change times. "
             "Prompts must be English and suitable for MiniMax-H3 (a text-to-video or reference-to-video model). "
-            + person_block + mouth_rule + scenery_block +
+            + person_block + mouth_rule + M.detail_rule(sound=timeline == "free") + scenery_block +
             "Use restrained camera motion and avoid cuts inside a generated clip. Follow CONTINUITY_RULES so consecutive scenes keep the "
             "same place, time of day, clothing and props unless the story moves on. Describe only what is visible; the place of each "
             "scene follows the story. " + M.NO_OVERLAY_RULE + "\n"
@@ -478,17 +507,11 @@ async def generate_scenario(chat: Chat, scenes: list, outline: dict, character: 
                 refs.insert(0, person_idx)
             placed = {**scene, "refs": refs}
             raw = str(item.get("prompt") or "")
-            if person_idx is not None and not drop_person:
-                if speech:
-                    direction = SPEAKING_PREFIX.format(identity=M.identity_instruction(character)) + M.keep_mouth_visible(raw, "speaking framing")      # 口が見える構図は歌唱と同じ規則、演技は「語り」
-                else:
-                    direction = (f"Use the exact same person from the reference image; preserve facial identity, hair, outfit, and "
-                                 f"visual style unchanged: {M.identity_instruction(character)}. " + CLOSED_MOUTH_PREFIX + raw)
-            else:
-                direction = raw                  # 人物なし: 「人物は映らない」の文は format_h3_prompt が足す
+            direction = person_direction(raw, character, with_person=person_idx is not None and not drop_person, speech=speech)
             outputs.append({"index": _index_of(item), "emotion": _single_line(item.get("emotion")),
                             "place": _single_line(item.get("place")) or _single_line(scene.get("place")), "refs": refs,
                             "shot": _single_line(item.get("shot")), "camera": _single_line(item.get("camera")),
+                            "direction": _single_line(raw),
                             "prompt": format_h3_prompt(placed, direction, character, descriptions, roles, frame=frame, timeline=timeline,
                                                      style=style, with_reference=bool(roles))})
         if on_progress is not None:

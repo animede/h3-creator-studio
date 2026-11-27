@@ -502,6 +502,30 @@ class RetryTest(MvBase):
         self.assertEqual(self.seen[1], (3, "only the prompt changed", 1003))
         await self.until_state(pid, "completed")
 
+    async def test_retry_with_only_the_direction_rebuilds_the_official_prompt(self):
+        pid = await self.completed()
+        self.ledger.update_mv_project(pid, params_patch={"character_facts": {"subject": "a girl with silver hair"},
+                                                         "script": {"visual_theme": "winter dusk", "color_script": "indigo to amber"}})
+        self.director.retry_scene(pid, 2, direction="  She walks past the lit shop windows,\n looking up at the lanterns.  ")
+        await self.until_state(pid, "completed")
+        (i, prompt, seed) = self.seen[0]
+        self.assertEqual((i, seed), (2, 1002))                                    # 演出だけ変えたときも、seed はそのまま
+        self.assertTrue(prompt.startswith("subject_definitions:\n<Subject 1> is the exact character shown in <Picture 1>: a girl with silver hair."))
+        self.assertIn("She walks past the lit shop windows, looking up at the lanterns", prompt)
+        self.assertIn("one consistent look: winter dusk. Color palette: indigo to amber.", prompt)
+        self.assertIn("non_diegetic_music:\nN/A", prompt)
+        scene = self.ledger.get_mv_project(pid)["scenes"][1]
+        self.assertEqual(scene["direction"], "She walks past the lit shop windows, looking up at the lanterns")
+        self.assertEqual(self.director.view(pid)["scenes"][1]["direction"], scene["direction"])      # 画面・API にも出る
+        self.director.retry_scene(pid, 2, prompt="a whole new prompt")                               # 全文を直したら、演出は対応しないので消す
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.ledger.get_mv_project(pid)["scenes"][1]["direction"], "")
+        for kwargs, word in (({"prompt": "p", "direction": "d"}, "どちらか一方"), ({"direction": "  "}, "演出は"),
+                             ({"direction": "x" * 3001}, "演出は")):
+            with self.assertRaises(ValueError, msg=str(kwargs)) as cm:
+                self.director.retry_scene(pid, 1, **kwargs)
+            self.assertIn(word, str(cm.exception))
+
     async def test_retry_validation(self):
         pid = await self.completed()
         for kwargs, word in (({"index": 9}, "シーン 9 はありません"), ({"index": "x"}, "整数"), ({"index": 1, "prompt": "   "}, "プロンプトは"),
@@ -807,7 +831,7 @@ class ViewTest(MvBase):
         self.assertEqual(v["message"], "シーン 2: 生成中 2/4")                    # 走っているジョブの今の文言
         self.assertGreater(v["progress"], 0.07 + 0.9 * 8 / 21)
         s1, s2, s3 = v["scenes"]
-        self.assertEqual(set(s1), {"index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "emotion", "seed", "status", "elapsed_s",
+        self.assertEqual(set(s1), {"index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "direction", "emotion", "seed", "status", "elapsed_s",
                                    "peak_vram_gb", "error", "clip_url", "thumb_url", "job_status"})
         self.assertEqual((s1["status"], s1["kind"], s1["prompt"], s1["seed"], s1["elapsed_s"], s1["peak_vram_gb"]), ("done", "vocal", "prompt 1", 1001, 1.5, 8.0))
         self.assertTrue(s1["clip_url"].startswith(f"/outputs/mv/{pid}/scene_001.mp4?v="))

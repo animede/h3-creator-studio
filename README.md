@@ -305,7 +305,7 @@ Thinking、シード(ランダム / 指定 / **同じ骨格で作り直す** = �
 
 - **分離と分割**(CPU): Demucs でボーカルを分け、無音・息継ぎ・小節から 5〜10 秒のシーンに分ける。
 - **曲を聞く**(同梱 LLM。曲の内容が空で、曲に台帳の情報が無いときだけ): 曲の一部を聞いて、曲の内容・世界観の案を作る(分析で分かった BPM も材料にする)。
-- **演出**(同梱 LLM): 人物の説明が空なら画像を見て作ったうえで、人物の見た目(場所や光を除いたもの)を整理し、シーンごとの演出を MiniMax-H3 公式の Ref2VA の形式で書く。歌う区間は正面か 3/4 向きで口が見える構図にする。
+- **演出**(同梱 LLM): 人物の説明が空なら画像を見て作ったうえで、人物の見た目(場所や光を除いたもの)を整理し、シーンごとの演出を MiniMax-H3 公式の Ref2VA の形式で書く。歌う区間は正面か 3/4 向きで口が見える構図にする。歌わない区間(前奏・間奏・後奏)は、引き・横から追う・見上げ・後ろからの構図を順に使い(曲の最後のシーンが歌わない区間なら、去っていく後ろ姿)、口を閉じた画にする。
 - **シーンの生成**(MiniMax-H3): 画像とそのシーンのボーカルを参照に Ref2VA + Vocal Lock。1 シーン終わるごとに次を入れるので、その間に他のタブの生成が割り込める。
   **歌わせない**ときは、ボーカルを渡さず、画像だけを参照にシーンの尺(秒)を指定して作る(H3 が付ける音声は使わない)。口を動かしているのは音声の参照そのものなので、音声を渡さなければ「歌わない・口は閉じたまま」の指示が効く(作者の以前の制作ツールで確かめた)。演出も歌う前提を外し、歩く・見つめる・景色など、どんな構図でも使う。シーンの切れ目は同じ(分離したボーカルの谷・息継ぎ・小節)。
   口は動かないが、演出を書く LLM は「MV」からマイクやステージなど歌う場面を選ぶことがある(確認では、マイクを持って口が少し開くシーンが出た)。**景色や日常だけの映像にしたいときは、「曲の内容」に「マイクやステージは出さない。歌う場面は無い」のように、出したくないものを書く**(そのまま LLM に渡る。歌わせないを選ぶと、欄の下に同じ案内が出る)。
@@ -478,6 +478,60 @@ git pull
 
 **エンジンを入れ直したいとき**は、そのフォルダを消して、`setup` を実行し直す(消したフォルダだけ、取り込みから用意する)。`studio.local.toml` の `dir` で指しているフォルダは、setup は消さない。自分で消す。
 
+## エージェントから使う(MCP サーバ、試作)
+
+Claude などの AI エージェントから、言葉の指示でスタジオを操作できる([MCP](https://modelcontextprotocol.io/))。エージェントは動いているスタジオの API を呼ぶだけで、画面で直す場所(人物の説明、シーンのプロンプト、やり直し、結合し直し、編集タブ)はそのまま残る。下書き(曲・人物の画像・MV の制作)と繰り返しはエージェントに任せ、気になるシーンは画面で、またはエージェントへの指示でプロンプトを直してやり直す、という使い方を想定している。
+
+**先にスタジオを起動しておく**(MCP サーバはスタジオを起動しない)。登録は一度だけ(パスは自分の置き場所に変える)。
+
+Claude Code(Linux):
+
+```bash
+claude mcp add -s user yuzu-studio -- ~/h3-creator-studio/.venv/bin/python ~/h3-creator-studio/scripts/mcp_server.py
+```
+
+Claude Code(Windows、PowerShell):
+
+```powershell
+claude mcp add -s user yuzu-studio -- C:\h3-creator-studio\.venv\Scripts\python.exe C:\h3-creator-studio\scripts\mcp_server.py
+```
+
+Claude Desktop など、設定ファイルに書く利用側(`claude_desktop_config.json` の例。Windows のパスは `\\` で書く):
+
+```json
+{
+  "mcpServers": {
+    "yuzu-studio": {
+      "command": "C:\\h3-creator-studio\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\h3-creator-studio\\scripts\\mcp_server.py"]
+    }
+  }
+}
+```
+
+| 道具 | すること |
+|---|---|
+| `studio_status` | 版・GPU とメモリ・エンジンの状態・動いている / 待っているジョブ |
+| `list_media` / `upload_media` | ギャラリーの一覧(id と、この PC のファイルの場所)/ PC のファイルをギャラリーに足す |
+| `generate_image` | 画像(MiniMax-H3-Image。参照画像の id があれば edit) |
+| `generate_music` | 曲(ACE-Step。テーマだけでも、歌詞とキャプションは LLM が書く) |
+| `get_job` | 画像・曲のジョブの様子 |
+| `create_music_video` / `create_short_video` | MV / ショート動画の制作を始める |
+| `preview_scenes` | 制作の各シーンから 4 コマずつ切り出して並べた画像を返す(エージェントが結果を見て確かめる。ffmpeg を使う) |
+| `list_projects` / `get_project` / `wait_for_project` | 制作の一覧 / 様子(`include_prompts` でシーンごとの演出)/ 終わるまで待つ |
+| `retry_scene` | 1 シーンをやり直す(そのシーンの演出の文だけを直して、または seed を変えて。公式の形への組み立ては管理役がする)。全部そろうと自動で結合し直す |
+| `control_project` | 一時停止・再開・中止・結合し直す |
+
+指示の例: 「ギャラリーの最新の曲と、カフェの女性の画像で 16:9 の MV を作って。できたら 3 番目のシーンだけ、カメラをもっとゆっくりにしてやり直して」
+
+**エージェント用の手順書(スキル)**: [`skills/yuzu-creator-studio/SKILL.md`](skills/yuzu-creator-studio/SKILL.md) に、制作の流れ(素材 → 制作 → `preview_scenes` で全シーンを見る → 利用者に見せる → 演出を直してやり直し)と、このスタジオの実用規則(歌わないシーンの構図など)をまとめた。Claude Code なら、このフォルダを `~/.claude/skills/` に写すと使える(`npx skills add https://github.com/animede/h3-creator-studio --skill yuzu-creator-studio` でも入る)。
+**プロンプトの書き方の公式の規則**は、MiniMax が公開しているスキル [`h3-prompt-writing`](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) にある(ライセンスの表記が無いので、このリポジトリには写さない)。管理役は MV・ショート動画の各シーンをその公式の形(参照画像を使うシーンは Ref2VA の 6 項目、使わないシーンは 3 項目)で書くので、エージェントが渡すのはシーンの演出の文だけ。プロンプト全文を書き換えると、項目・`[Shot 1]`・参照の記号(`<Subject 1>` など)が崩れていないかを確かめ、崩れていれば断る。
+
+- 生成は時間がかかる(30 秒の MV で、PRO 6000 は約 6 分、8〜12GB の GPU は約 20 分)。エージェントは制作を始めて、あとで様子を見る。
+- 環境変数: `YCS_URL`(スタジオの URL。既定は `studio.toml` / `studio.local.toml` の host・port)、`YCS_LANG=en`(スタジオの返す文言を英語に)。Claude Code なら `claude mcp add -s user yuzu-studio -e YCS_LANG=en -- …`。
+- 同じ PC の中で使う前提(エージェントに返すファイルの場所は、この PC のパス)。スタジオの画面と同じく、認証はない。
+- 試作: 編集タブ・プリセット・サンプルの道具はまだない。v1.0.0 から更新した人は、`setup` を一度実行し直す(MCP の部品 `mcp` を入れる。`--no-models` でよい)。
+
 ## 設定
 
 `studio.toml` が既定の設定(リポジトリに含まれる)。自分の PC の設定は **`studio.local.toml`** に書く(git の管理外。書いた項目だけが上書きされる。見本は `studio.local.toml.example`)。
@@ -549,6 +603,8 @@ h3-creator-studio/
 ├── setup.bat / setup.sh   セットアップ(uv を入れ、scripts/setup.py を呼ぶ)
 ├── run.bat / run.sh       管理役の起動
 ├── scripts/setup.py       エンジンの取り込み、環境とモデルの準備(エンジン自身のスクリプトを呼ぶ)
+├── scripts/mcp_server.py  エージェント用の MCP サーバ(試作。本体は studio/mcp_server.py)
+├── skills/                エージェント用の手順書(SKILL.md)
 ├── studio/                管理役(FastAPI): エンジンの起動と停止、載せ替え、メモリ監視、ジョブ、LLM、MV・ショート動画の制作、編集
 ├── studio/mvtools/        MV・ショート動画の音声処理(ボーカル分離・シーン分割。components/mvtools の Python で動かす)
 ├── presets/               同梱のプリセット(タブごとの JSON)

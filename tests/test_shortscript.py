@@ -218,6 +218,7 @@ class GenerateScenarioTest(unittest.IsolatedAsyncioTestCase):
     async def test_speech_keeps_mouth_visible_directions(self):
         chat = FakeChat([[item(1, prompt="Wide shot from behind, profile")]])
         result = await self.gen(chat, [scene(1)], timeline="speech")
+        self.assertIn(M.detail_rule(sound=False), chat.calls[0]["user"])      # 読み上げに差し替えるので、音は書かせない
         prompt = result["scenes"][0]["prompt"]
         self.assertNotIn("from behind", prompt)
         self.assertNotIn("Wide shot", prompt)
@@ -248,6 +249,7 @@ class GenerateScenarioTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"place": "platform", "summary": "She waits"', chat.calls[0]["user"])
         self.assertIn("natural ambience and sound effects", result["scenes"][0]["prompt"].lower())
         self.assertIn("no dialogue and no music", result["scenes"][0]["prompt"].lower())
+        self.assertIn(M.detail_rule(sound=True), chat.calls[0]["user"])       # H3 の音をそのまま使うときだけ、音も書かせる
 
     async def test_scenery_refs_must_be_scenery_indexes(self):
         chat = FakeChat([[item(1, refs=[0, 0])]])
@@ -337,7 +339,7 @@ class GenerateScenarioTest(unittest.IsolatedAsyncioTestCase):
         previous = json.loads(re.search(r"PREVIOUS: (\{.*\})\nSCENES", chat.calls[1]["user"]).group(1))
         self.assertEqual((previous["index"], previous["prompt"]), (5, "A quiet shot 5"))      # 整形前の項目
         self.assertEqual(result["scenes"][0]["place"], "place1")
-        self.assertEqual(set(result["scenes"][0]), {"index", "emotion", "place", "refs", "shot", "camera", "prompt"})
+        self.assertEqual(set(result["scenes"][0]), {"index", "emotion", "place", "refs", "shot", "camera", "direction", "prompt"})
 
     async def test_place_falls_back_to_the_planned_one(self):
         chat = FakeChat([[item(1, **{"place": ""})]])
@@ -478,6 +480,29 @@ class FormatTest(unittest.TestCase):
         line = next(l for l in text.splitlines() if l.startswith("<Subject 1> is the location"))
         self.assertLess(len(line), 600)
         self.assertTrue(line.endswith("...."))          # 切り詰めの "..." と文末の "."
+
+
+class RebuildTest(unittest.TestCase):
+    """やり直しで演出だけを書き換えたときの組み立て直し(台本と同じ規則)。"""
+    PARAMS = {"images": [{"description": DESCS[0], "role": "person"}, {"description": DESCS[1], "role": "scenery"}],
+              "timeline": "speech", "width": 1024, "height": 576, "style": "none", "character_facts": {"subject": "a girl in a red coat"}}
+
+    def test_speaking_scene_keeps_the_mouth_rules(self):
+        scenes = [{**scene(1), "refs": [0, 1]}, {**scene(2), "refs": [1]}]
+        text = S.rebuild_scene_prompt(self.PARAMS, scenes, 1, "Close-up from behind as she waits on the platform")
+        self.assertIn("<Subject 1> is the exact character shown in <Picture 1>: a girl in a red coat", text)
+        self.assertIn("<Subject 2> is the location or object shown in <Picture 2>", text)
+        self.assertIn("The full face and mouth remain clearly visible", text)
+        self.assertNotIn("from behind", text)                                      # 口を隠す構図は書き換わる
+        self.assertIn("<Audio 1>", text)
+
+    def test_scene_without_the_person_and_free_timeline(self):
+        scenes = [{**scene(1), "refs": [1]}]
+        text = S.rebuild_scene_prompt({**self.PARAMS, "timeline": "free"}, scenes, 1, "Rain runs down the station clock")
+        self.assertIn("Rain runs down the station clock", text)
+        self.assertNotIn("<Audio 1>", text)
+        self.assertNotIn("a girl in a red coat", text)
+        self.assertIn("No people, faces or human figures appear", text)
 
 
 if __name__ == "__main__":

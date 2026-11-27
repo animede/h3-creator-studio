@@ -29,6 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from . import mvscript
 from .jobs import TERMINAL
 from .styles import check_style
 
@@ -47,6 +48,7 @@ CUSTOM_MIN, CUSTOM_MAX, CUSTOM_STEP = 256, 1344, 32
 ASPECTS, QUALITIES = (*SIZES, CUSTOM), ("low", "fast", "standard", "high")
 SCENE_MIN_S, SCENE_MAX_S = 5.0, 10.0           # シーンの長さの範囲(H3 の最短が 5 秒、MV の 1 カットとして 10 秒まで)
 CHARACTER_MAX, CONCEPT_MAX, PROMPT_MAX = 600, 1000, 8000
+DIRECTION_MAX = 3000           # やり直しで書き換える演出(LLM が書く部分。全文の PROMPT_MAX より短い)
 SEED_MOD = 2_147_483_647
 
 RUNNING = ("analyzing", "scripting", "generating", "assembling")
@@ -265,8 +267,8 @@ class Director:
     TEXT = {"analyze": "曲を分析します", "listen": "曲を聞いて、曲の内容を考えます", "plan": "物語からシーンに分けます", "script": "演出を書きます",
             "assemble": "シーンを結合します", "done": "MV ができました"}
     PARAM_KEYS = INPUT_KEYS        # 画面(view)に出す制作の入力
-    SCENE_KEYS = ("index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "emotion", "seed", "status", "elapsed_s",
-                  "peak_vram_gb", "error")
+    SCENE_KEYS = ("index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "direction", "emotion", "seed", "status",
+                  "elapsed_s", "peak_vram_gb", "error")
 
     def __init__(self, runner, ledger, outputs_dir):
         self.runner, self.ledger, self.outputs_dir = runner, ledger, Path(outputs_dir)
@@ -360,9 +362,14 @@ class Director:
             await self.runner.cancel(job.id)
         return self.view(pid)
 
-    def retry_scene(self, pid: str, index: int, prompt: str = None, seed: int = None) -> dict:
-        """シーン 1 つを作り直す。prompt を渡せば演出を書き換え、seed を渡せばその seed にする。
-        どちらも渡さなければ、別の絵になるよう seed を取り直す(prompt だけ渡したときは、seed はそのまま)。
+    def rebuild_prompt(self, proj: dict, index: int, direction: str) -> str:
+        """演出(direction)だけを書き換えたシーンの最終のプロンプト(台本と同じ規則。ショート動画は ShortDirector が差し替える)。"""
+        return mvscript.rebuild_scene_prompt(proj["params"], proj["scenes"], index, direction)
+
+    def retry_scene(self, pid: str, index: int, prompt: str = None, seed: int = None, direction: str = None) -> dict:
+        """シーン 1 つを作り直す。prompt を渡せばプロンプト全文を書き換え、direction を渡せば演出(LLM が書く部分)だけを書き換えて、
+        公式の形と口・構図の規則は台本と同じに組み立て直す(エージェント向け。prompt とはどちらか一方)。seed を渡せばその seed にする。
+        どれも渡さなければ、別の絵になるよう seed を取り直す(prompt / direction だけ渡したときは、seed はそのまま)。
         全シーンができたら、自動で結合し直す。"""
         proj = self._get(pid)
         scenes = proj["scenes"]
@@ -379,6 +386,16 @@ class Director:
         if stage == "scene" and job.params.get("scene") == scene["index"]:
             raise ValueError("そのシーンは生成中です")
         patch = {"status": "pending", "error": None, "clip": None, "thumb": None, "elapsed_s": None, "peak_vram_gb": None}
+        if prompt is not None and direction is not None:
+            raise ValueError("プロンプト全文と演出は、どちらか一方だけ渡してください")
+        if direction is not None:
+            direction = mvscript._single_line(direction)
+            if not 1 <= len(direction) <= DIRECTION_MAX:
+                raise ValueError(f"演出は 1〜{DIRECTION_MAX} 文字で入力してください")
+            prompt = self.rebuild_prompt(proj, scene["index"], direction)
+            patch["direction"] = direction
+        elif prompt is not None:
+            patch["direction"] = ""      # 全文を直したら、保存してある演出はもう対応しない
         if prompt is not None:
             prompt = str(prompt).strip()
             if not 1 <= len(prompt) <= PROMPT_MAX:

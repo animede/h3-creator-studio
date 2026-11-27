@@ -6,6 +6,10 @@
 # オブジェクトかオブジェクトの配列を優先する。(3) 読み上げ動画(narration)の分岐と analyze_character は、ここには移植しない
 # (人物の特徴は文章の説明から来る。画像を見る analyze_character は mvdescribe.py)。(4) 全体の構成(overview)が読めなくても、空のまま進める。(5) 次の batch に渡す PREVIOUS は、
 # 整形前の項目にする(整形後の定型文を小さなモデルが真似ないように)。(6) 配列の代わりに {"scenes": [...]} で返されても読む。
+# (7) 歌わないシーン(前奏・間奏・後奏)は、構図を順に変える(NON_SINGING_SHOTS。最後のシーンは去っていく後ろ姿)。
+# (8) 公式の手引き(ref-en.txt の detailed_description は 350〜500 語・ショットごとに構図から音まで具体的に)と、公式 SKILL.md の
+# Tips(2026-08-11: 抽象語より具体的な描写)に合わせて、演出の詳しさの規則(detail_rule)と、全体の構成から作る冒頭の画風の文(overview_look)を足した。
+# (9) シーンごとに LLM の演出(direction)も返し、やり直しで演出だけを書き換えたときに同じ規則で組み立て直せるようにした(scene_prompt)。
 # SPDX-License-Identifier: Apache-2.0
 """MV のシーンごとの演出を、管理役の LLM に書かせる(H3 公式の Ref2VA 6 セクション形式のプロンプトにして返す)。
 
@@ -213,11 +217,78 @@ FRAME_SHOT_PREFIX = {
     "square": "Square frame composition: <Subject 1> is centered in the frame. ",
     "landscape": "",
 }
+# 歌わないシーンの構図文。上の縦長の文は「頭と肩」で寄りの画になるので、引きや横からの画に合う文にする
+FRAME_SHOT_PREFIX_NON_SINGING = {
+    **FRAME_SHOT_PREFIX,
+    "portrait": (
+        "Vertical frame composition: <Subject 1> stays horizontally centered, with the scenery arranged above, "
+        "below and behind the subject. "
+    ),
+}
+
+# 歌わないシーン(前奏・間奏・後奏)の構図。参照画像は正面の顔が多く、構図を書かないと H3 はそのポーズに寄り、口も動きがちだった
+# (2026-11-27 の実機「柚子色の灯り」: 前奏の 2 シーンが、歌うシーンと同じ正面の顔で話しているように見えた。引きの画と横からの画に
+# 書き直すと、口を閉じた落ち着いた画になった)。歌わないシーンの順に回し、続く前奏どうしが同じ構図にならないようにする。
+# 構図の文を頭に置くだけでは弱く(同じ曲の試験で、引きの指示でも正面のバストアップに寄った)、場所と周りの変化(灯りがともる など)を
+# 構図に合わせて書いた演出で効いたので、LLM にもシーンの framing として渡し、その構図で場面を書かせる(試験: 横から追う画は真横の
+# 姿になり、口も閉じた。引きの画は、こちらに歩いてくる姿にはなるが寄り気味のまま。構図の文を演出の後ろに回しても同じ seed で変わらない)。
+NON_SINGING_SHOTS = (
+    "Wide establishing shot of the whole place: <Subject 1> appears small and full-body in the distance, walking slowly "
+    "toward the camera while the camera gently dollies backward.",
+    "Side tracking shot: the camera glides sideways alongside <Subject 1>, seen in profile, as they walk through the scene.",
+    "Low-angle medium-wide shot: <Subject 1> stands still, then slowly looks up and around at the surroundings.",
+    "Over-the-shoulder shot from behind <Subject 1>: the camera follows slowly as they gaze out over the scene ahead.",
+)
+# 曲の最後のシーンが歌わないシーン(後奏)なら、去っていく後ろ姿で締める
+NON_SINGING_LAST_SHOT = ("Closing wide shot from behind: <Subject 1> walks slowly away from the camera, deeper into the scene, "
+                         "while the camera holds and they grow smaller in the frame.")
 
 
 # ---- H3 公式の Ref2VA 6 セクション形式 ----
 
 DEFAULT_STYLE_SENTENCE = "The target video uses a coherent cinematic music-video style while fully preserving the reference character."
+LOOK_MAX_WORDS = 30
+LOOK_RULE = ("visual_theme and color_script are each ONE concrete sentence of at most 25 words (light sources, colors, materials, "
+             "weather), without abstract words such as cinematic. ")
+
+
+def _first_sentence(value: Any, max_words: int = LOOK_MAX_WORDS) -> str:
+    """最初の 1 文(長ければ max_words 語で切り、終わりの「,」「and」などは落とす)。"""
+    text = _single_line(value)
+    first = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].rstrip(".!?")
+    words = first.split()
+    if len(words) > max_words:
+        words = words[:max_words]
+        while words and (words[-1].lower().strip(",;:") in ("and", "or", "with", "of", "the", "a", "an") or not words[-1].strip(",;:")):
+            words.pop()
+    return " ".join(words).rstrip(",;:")
+
+
+def overview_look(overview: Any) -> str:
+    """全体の構成(visual_theme・color_script)から、冒頭の画風の文を作る(無ければ "")。公式の手引きは、[Shot 1] の前の 1〜2 文で画風を
+    決め、例も「柔らかい光とやや彩度を落とした色」のように具体的。既定の文(DEFAULT_STYLE_SENTENCE)の「cinematic」は抽象語なので、
+    LLM の書いた具体的な見た目があれば、それを使う。どちらも最初の 1 文だけ(2026-11-27 の実機で、visual_theme が 3 文・60 語を超え、
+    語数で切ると文の途中で切れた。全体の構成の依頼にも LOOK_RULE で 1 文にするよう頼む)。"""
+    if not isinstance(overview, dict):
+        return ""
+    theme, colors = _first_sentence(overview.get("visual_theme")), _first_sentence(overview.get("color_script"))
+    if not theme and not colors:
+        return ""
+    look = f"The target video is a music video that fully preserves the reference character, with one consistent look: {theme or colors}."
+    return look + (f" Color palette: {colors}." if theme and colors else "")
+
+
+def detail_rule(sound: bool = False) -> str:
+    """演出の詳しさの規則(LLM への依頼)。公式の Ref2VA の手引き(ref-en.txt の冒頭と 5.2 節)は、ショットごとに構図・被写体の見た目と
+    位置・環境と光・動作と状態の変化・カメラの動き・音を具体的に書き、detailed_description 全体で 350〜500 語を目安にする。定型文が
+    約 150 語あるので、LLM の書く分は 120〜180 語にする(2026-11-27 の時点では 50〜60 語で、全体は 190〜250 語だった)。
+    音は、H3 の音をそのまま使うときだけ書かせる(MV、読み上げ・曲のあるショート動画は、音を決まった音声に差し替える)。"""
+    sound_part = ("; and the sounds of the moment" if sound else
+                  ". Do not describe sounds or music: the audio is fixed separately")
+    return ("Each prompt is about 120-180 English words of concrete, visible detail covering, in this order: the composition and "
+            "where the main subject is in the frame; the place, its light sources and colors; what the subject does and how it "
+            "changes during the clip; the camera movement (type, amplitude and speed)" + sound_part + ". Prefer concrete details "
+            "(light sources, colors, materials, textures, weather) over abstract words such as cinematic or beautiful. ")
 
 
 def style_rule(style) -> str:
@@ -232,22 +303,24 @@ def style_sentence(style, default: str = DEFAULT_STYLE_SENTENCE, with_reference:
 
 
 def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, character: dict, frame: str = "landscape",
-                                     lipsync: bool = True, style: str = "none") -> str:
+                                     lipsync: bool = True, style: str = "none", look: str = "") -> str:
     """1 つのクリップを、MiniMax H3 公式の Ref2VA の 6 セクション形式に包む。
 
     参照画像は「キーフレーム」ではなく再利用する被写体なので、公式の指針どおり <Picture 1> の単独の保持項目にはせず、
     <Subject 1> の中で引く。1 シーン = H3 への 1 リクエストなので、タイムラインは常にタイムスタンプなしの [Shot 1] が 1 つ。
     歌詞の文字は書かない(Vocal Lock が <Audio 1> から歌の中身を移す。推測した歌詞は公式の指針に反する)。
     lipsync=False(歌わせないイメージ MV)は、H3 に音声を渡さないので <Audio 1> が無い形(画像だけの参照生成)。音声は結合で曲に差し替える。
+    look は overview_look の冒頭の画風の文(画風を選んだときは、画風の文が優先)。
     """
     subject = subject_definition(character)
     identity = _single_line(identity_instruction(character))
     direction = _single_line(visual_direction)
     if not lipsync:
-        return _format_image_mv_prompt(subject, identity, direction, frame, style)
-    singing = float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO
+        return _format_image_mv_prompt(subject, identity, direction, frame, style, look)
+    sings = singing(scene)
+    frame_prefix = (FRAME_SHOT_PREFIX if sings else FRAME_SHOT_PREFIX_NON_SINGING).get(frame, "")
 
-    if singing:
+    if sings:
         performance = (
             "<Subject 1> (S1) physically performs the supplied vocal. The full face and "
             "unobstructed mouth remain visible, and the lips, jaw, and facial muscles articulate "
@@ -278,8 +351,8 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
         "<Audio 1>: fully_copy - <Audio 1> is reused 1:1 as the target clip's complete synchronized "
         "audio track.\n\n"
         "detailed_description:\n"
-        f"{style_sentence(style)} It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
-        f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{scrub_overlay_text(direction)} {performance} No text overlay.\n\n"
+        f"{style_sentence(style, look or DEFAULT_STYLE_SENTENCE)} It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
+        f"[Shot 1] {frame_prefix}{scrub_overlay_text(direction)} {performance} No text overlay.\n\n"
         "overall_soundscape:\n"
         "No additional dialogue, ambience, crowd voices, or sound effects are introduced; the "
         "synchronized vocal content comes only from <Audio 1>.\n\n"
@@ -288,7 +361,7 @@ def format_h3_official_ref2va_prompt(scene: dict, visual_direction: str, charact
     )
 
 
-def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: str, style: str = "none") -> str:
+def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: str, style: str = "none", look: str = "") -> str:
     """歌わせない(イメージ MV)クリップの 6 セクション形式。参照は <Picture 1> だけで、音声の参照は無い。
     H3 が作る音声は使わない(mute で頼み、結合で曲に差し替える)ので、音の欄は「声も歌も無い」とだけ書く。"""
     return (
@@ -302,7 +375,7 @@ def _format_image_mv_prompt(subject: str, identity: str, direction: str, frame: 
         "<Subject 1> (appears in [Shot 1]): fully_preserved - the referenced character's identity, "
         f"face, hair, clothing, and visual style are retained exactly: {identity}.\n\n"
         "detailed_description:\n"
-        f"{style_sentence(style)} It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
+        f"{style_sentence(style, look or DEFAULT_STYLE_SENTENCE)} It contains one continuous shot with no internal cut. {NO_OVERLAY_TEXT}\n"
         f"[Shot 1] {FRAME_SHOT_PREFIX.get(frame, '')}{scrub_overlay_text(direction)} "
         "<Subject 1> (S1) does not sing or speak; the mouth stays naturally closed and relaxed. No text overlay.\n\n"
         "overall_soundscape:\n"
@@ -337,16 +410,44 @@ def keep_mouth_visible(prompt: str, neutral: str = "performance framing") -> str
     return re.sub(r"\b(?:medium close-up(?: shot| portrait)?|medium shot|medium-wide shot)\b", neutral, prompt, flags=re.IGNORECASE)
 
 
-def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict, lipsync: bool = True) -> str:
+def singing(scene: dict) -> bool:
+    return float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO
+
+
+def non_singing_shots(scenes: list) -> dict:
+    """歌わないシーンの番号 → 構図の文。歌わないシーンの順に NON_SINGING_SHOTS を回し、曲の最後のシーンは NON_SINGING_LAST_SHOT。"""
+    shots, n = {}, 0
+    for pos, sc in enumerate(scenes):
+        if singing(sc):
+            continue
+        last = pos == len(scenes) - 1 and len(scenes) > 1
+        shots[int(sc["index"])] = NON_SINGING_LAST_SHOT if last else NON_SINGING_SHOTS[n % len(NON_SINGING_SHOTS)]
+        n += 1
+    return shots
+
+
+_CLOSE_SHOT_WORDS = re.compile(r"\b(?:extreme )?(?:medium close-up|close-up|medium shot)(?: shot| portrait)?\b", re.IGNORECASE)
+
+
+def neutral_shot_size(prompt: str, neutral: str = "scene framing") -> str:
+    """構図の文を頭に置くシーンで、LLM の演出に残った寄りのショットの語を中立の語にする(1 つの [Shot] でショットの大きさが
+    食い違うと、構図の変更とみなされることがある。keep_mouth_visible と同じ考え)。引き・全身の語は、構図と食い違わないので残す。"""
+    prompt = _CLOSE_SHOT_WORDS.sub(neutral, prompt)
+    return prompt[:1].upper() + prompt[1:]
+
+
+def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict, lipsync: bool = True,
+                                  shot: Optional[str] = None) -> str:
     """LLM の後で、人物の同一性と口の見えを守る規則を、必ず当てる。
     lipsync=False(イメージ MV)は、歌の割合を見ずに、どのシーンも「歌わない・口は閉じたまま」にする(口を動かすのは音声の参照そのもので、
-    音声を渡さなければプロンプトの閉口の指示が効く。mv_studio_V3 の 2026-08-26 の実機プローブ)。"""
+    音声を渡さなければプロンプトの閉口の指示が効く。mv_studio_V3 の 2026-08-26 の実機プローブ)。
+    shot(non_singing_shots の構図の文)は、歌わないシーンの頭に置き、LLM の演出のショットの大きさの語は中立にする。"""
     identity = identity_instruction(character)
     prompt = str(raw_prompt or "").strip()
     if not lipsync:
         return ("Use the exact same person from the reference image; preserve facial identity, hair, outfit, "
                 f"and visual style unchanged: {identity}. " + IMAGE_MV_PREFIX + prompt)
-    if float(scene.get("vocal_ratio") or 0.0) >= SINGING_RATIO:
+    if singing(scene):
         prompt = keep_mouth_visible(prompt)
         prefix = (
             "Medium close-up performance shot, front-facing or three-quarter face view. "
@@ -363,7 +464,60 @@ def enforce_reference_and_lipsync(scene: dict, raw_prompt: str, character: dict,
             f"and visual style unchanged: {identity}. "
             "The character is not singing in this interval and keeps a naturally closed, relaxed mouth. "
         )
+        if shot:
+            prefix, prompt = f"{shot} {prefix}", neutral_shot_size(prompt)
     return prefix + prompt
+
+
+_FRAMING_WORDS = re.compile(r"\b(?:close-up|medium(?:-wide)? shot|wide shot|long shot|full[- ]body|establishing shot|tracking shot|"
+                            r"profile|over-the-shoulder|from behind|low[- ]angle|high[- ]angle|aerial|bird'?s[- ]eye)\b", re.IGNORECASE)
+
+
+def names_framing(text: str) -> bool:
+    """演出が自分で構図(ショットの大きさ・向き)を決めているか。やり直しで人が書いた演出は、その構図を優先する。"""
+    return bool(_FRAMING_WORDS.search(str(text or "")))
+
+
+def scene_prompt(scene: dict, direction: str, character: dict, *, frame: str = "landscape", lipsync: bool = True,
+                 style: str = "none", look: str = "", shot: Optional[str] = None) -> str:
+    """LLM(またはやり直しで人・エージェント)の演出 1 つから、規則を当てた最終のプロンプトを作る(generate_scenario とやり直しで同じ)。"""
+    enforced = enforce_reference_and_lipsync(scene, direction, character, lipsync=lipsync, shot=shot)
+    return format_h3_official_ref2va_prompt(scene, enforced, character, frame=frame, lipsync=lipsync, style=style, look=look)
+
+
+def rebuild_scene_prompt(params: dict, scenes: list, index: int, direction: str) -> str:
+    """やり直しで演出だけを書き換えたシーンの最終のプロンプト。制作の params(character_facts・script・幅と高さ・lipsync・style)から、
+    台本を書いたときと同じ規則で組み立てる。歌わないシーンの構図は、演出が自分で構図を決めていなければ、台本と同じ順の構図を足す。"""
+    scene = next(s for s in scenes if int(s["index"]) == int(index))
+    lipsync = bool(params.get("lipsync", True))
+    shots = non_singing_shots(scenes) if lipsync and not names_framing(direction) else {}
+    return scene_prompt(scene, direction, params.get("character_facts") or {}, frame=frame_kind(params["width"], params["height"]),
+                        lipsync=lipsync, style=params.get("style") or "none", look=overview_look(params.get("script")),
+                        shot=shots.get(int(index)))
+
+
+SECTION_NAMES = ("subject_definitions", "summary", "retention_analysis", "detailed_description", "integrated_multimodal_description",
+                 "overall_soundscape", "non_diegetic_music")
+_LABEL = re.compile(r"<(?:Subject|Picture|Video|Audio) \d+>")
+
+
+def prompt_problems(original: str, edited: str) -> list:
+    """プロンプト全文を書き換えたときに、公式の形が崩れていないかを見る(エージェント向けの検査。画面で人が直すときは使わない)。
+    元と同じ項目が同じ順にあること、[Shot 1] が 1 つで時刻が付いていないこと、参照の記号(<Subject N> など)が増えも減りもしないこと。"""
+    def sections(text: str) -> list:
+        return re.findall(r"(?m)^(" + "|".join(SECTION_NAMES) + r"):", text)
+    problems = []
+    if sections(edited) != sections(original):
+        problems.append(f"sections must stay {sections(original)} in this order (got {sections(edited)})")
+    markers = re.findall(r"\[Shot \d+\](?![),])", edited)      # 「(appears in [Shot 1])」のような参照は数えない
+    if markers != ["[Shot 1]"]:
+        problems.append("there must be exactly one [Shot 1] (one continuous shot, no cuts)")
+    if re.search(r"\[Shot 1\]\s*At \d", edited):
+        problems.append("[Shot 1] must not have a timestamp")
+    before, after = set(_LABEL.findall(original)), set(_LABEL.findall(edited))
+    if before != after:
+        problems.append(f"reference labels must stay {sorted(before)} (got {sorted(after)})")
+    return problems
 
 
 # ---- シナリオ全体 ----
@@ -391,13 +545,15 @@ def _index_of(item: Any) -> int:
         return -1
 
 
-def _brief(scene: dict) -> dict:
-    """LLM に見せるシーンの項目(尺・歌の割合・境界の種類だけ。点数やコマ数は要らない)。"""
+def _brief(scene: dict, framing: str = "") -> dict:
+    """LLM に見せるシーンの項目(尺・歌の割合・境界の種類だけ。点数やコマ数は要らない)。framing は歌わないシーンの構図の文。"""
     out = {"index": int(scene["index"]), "start": round(float(scene["start"]), 3), "end": round(float(scene["end"]), 3),
            "duration": round(float(scene.get("duration") or float(scene["end"]) - float(scene["start"])), 3),
            "vocal_ratio": round(float(scene.get("vocal_ratio") or 0.0), 3)}
     if scene.get("boundary_kind"):
         out["boundary_kind"] = scene["boundary_kind"]
+    if framing:
+        out["framing"] = framing.replace("<Subject 1>", "the character")
     return out
 
 
@@ -406,7 +562,10 @@ MOUTH_RULE_LIPSYNC = (
     "For vocal_ratio >= 0.35 use a medium close-up, keep the entire "
     "face and mouth visible, and explicitly request phoneme-level lip articulation synchronized to "
     "the supplied vocal. Never use a wide shot, rear view, eye-only shot or obscured mouth for a "
-    "singing scene. For lower vocal_ratio explicitly describe a closed relaxed mouth. ")
+    "singing scene. For lower vocal_ratio (intro, interlude, outro) explicitly describe a closed relaxed mouth and never "
+    "a pose facing the camera. Such scenes come with a framing: write the prompt around it, starting with that framing and "
+    "the whole place, where the character is in the frame and what they do (walking, pausing, looking up, a small gesture), "
+    "and one visible change in the surroundings (lights coming on, snow starting, wind in the trees). ")
 MOUTH_RULE_IMAGE_MV = (
     "This is an image music video: the character NEVER sings, speaks or mouths words on camera, in any scene, "
     "whatever vocal_ratio says (the music is added later in editing). Describe cinematic scenes instead: walking, "
@@ -420,7 +579,8 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
     """全体の構成(overview)を 1 回、シーンごとの演出を BATCH_SIZE 個ずつ頼み、整形した最終プロンプトを返す。
     番号と個数が合わなければ 1 回だけ頼み直し、それでも合わなければ ScenarioError。
     on_progress(終わったシーン数, 全シーン数)は batch が終わるごとに呼ぶ。lipsync=False は歌わせないイメージ MV(口の規則と最終の形が変わる)。"""
-    briefs = [_brief(s) for s in scenes]
+    shots = non_singing_shots(scenes) if lipsync else {}
+    briefs = [_brief(s, shots.get(int(s["index"]), "")) for s in scenes]
     facts = json.dumps(character, ensure_ascii=False)
     try:
         overview = await scenario_request(chat, (
@@ -431,6 +591,7 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             "The reference character's identity, hair, face, outfit and style are immutable. "
             "Do not invent a named alternate character or redesign their appearance.\n"
             f"SCENES: {json.dumps(briefs, ensure_ascii=False)}\n"
+            + LOOK_RULE +
             'Return: {"title":"","visual_theme":"","color_script":"","story_arc":"","continuity_rules":[""]}.'))
     except ScenarioError as e:
         log.warning("全体の構成を読めませんでした。空のまま進めます: %s", e.message)
@@ -439,6 +600,7 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
         log.warning("全体の構成がオブジェクトではありません。空のまま進めます")
         overview = {}
 
+    look = overview_look(overview)
     outputs: list = []
     previous: Optional[dict] = None
     for start in range(0, len(scenes), BATCH_SIZE):
@@ -449,7 +611,7 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             "Write one production prompt per fixed scene. Do not add/remove scenes or change times. "
             "Prompts must be English and suitable for MiniMax-H3 ref2va. Keep exactly one character. "
             "Never describe hair color, hairstyle, face, clothing, age or art style differently from "
-            "CHARACTER_REFERENCE_FACTS. " + (MOUTH_RULE_LIPSYNC if lipsync else MOUTH_RULE_IMAGE_MV) +
+            "CHARACTER_REFERENCE_FACTS. " + (MOUTH_RULE_LIPSYNC if lipsync else MOUTH_RULE_IMAGE_MV) + detail_rule(sound=False) +
             "Use restrained camera motion and avoid cuts inside a generated clip. " + NO_OVERLAY_RULE + "\n"
             + FRAME_LLM_GUIDANCE.get(frame, "")
             + BACKGROUND_TEXT_GUIDANCE.get(background_text, "")
@@ -475,9 +637,10 @@ async def generate_scenario(chat: Chat, scenes: list, concept: str, character: d
             raise ScenarioError(f"シーンの番号が合いません: 期待 {expected}、LLM の答え {actual}")
         previous = dict(result[-1])          # 整形前の項目(下で prompt を書き換えても、次の batch に渡す内容は変わらない)
         for scene, item in zip(batch, result, strict=True):
-            direction = enforce_reference_and_lipsync(scene, str(item.get("prompt") or ""), character, lipsync=lipsync)
-            item["prompt"] = format_h3_official_ref2va_prompt(scene, direction, character, frame=frame, lipsync=lipsync,
-                                                              style=style)
+            raw = str(item.get("prompt") or "")
+            item["direction"] = _single_line(raw)
+            item["prompt"] = scene_prompt(scene, raw, character, frame=frame, lipsync=lipsync, style=style, look=look,
+                                          shot=shots.get(int(scene["index"])))
         outputs.extend(result)
         if on_progress is not None:
             on_progress(len(outputs), len(scenes))

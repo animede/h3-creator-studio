@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from . import mv
+from . import mv, shortscript
 from .llm import LlmError
 from .mv import CHARACTER_MAX, Director, _clip, _number, _output, pick_song, resolve_format
 
@@ -231,6 +231,9 @@ class ShortDirector(Director):
 
     def _resolve(self, params: dict) -> dict:
         return resolve_params(self.ledger, params)
+
+    def rebuild_prompt(self, proj: dict, index: int, direction: str) -> str:
+        return shortscript.rebuild_scene_prompt(proj["params"], proj["scenes"], index, direction)
 
     def _next_step(self, proj: dict) -> tuple:
         return next_step(proj)

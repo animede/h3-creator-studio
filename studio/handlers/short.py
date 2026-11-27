@@ -245,7 +245,8 @@ async def _script(job: Job, ctx: Ctx) -> None:
     for s in scenes:
         it = items[s["index"]]
         refs = [int(r) for r in it.get("refs") or [] if isinstance(r, int) and 0 <= r < len(images)]
-        patches[s["index"]] = {"prompt": str(it["prompt"]).strip(), "emotion": str(it.get("emotion") or ""), "place": str(it.get("place") or s.get("place") or ""),
+        patches[s["index"]] = {"prompt": str(it["prompt"]).strip(), "direction": str(it.get("direction") or ""),
+                               "emotion": str(it.get("emotion") or ""), "place": str(it.get("place") or s.get("place") or ""),
                                "refs": refs, "seed": mvclip.scene_seed(seed_base, s["index"])}
     ctx.ledger.update_mv_project(pid, scene_patches=patches, params_patch={"script": result["overview"]})
     log.info("ショート動画 %s: %d シーンの演出を書きました", pid, len(scenes))

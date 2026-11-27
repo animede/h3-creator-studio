@@ -160,4 +160,5 @@ Python packages of the supervisor (.venv, from requirements.txt)
   huggingface_hub       Apache-2.0
   py7zr                 LGPL-2.1-or-later
   multivolumefile       LGPL-2.1-or-later
+  mcp (MCP Python SDK; only for scripts/mcp_server.py)   MIT
   tomli (Python < 3.11 only)   MIT

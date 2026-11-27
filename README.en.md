@@ -306,7 +306,7 @@ Internally it goes through these steps (the top right shows each scene's status 
 
 - **Separation and splitting** (CPU): Demucs separates the vocals, and the song is split into 5–10 second scenes at silences, breaths and bars.
 - **Listening to the song** (bundled LLM; only when the song description is empty and the song has no info in the database): listens to part of the song and drafts the song description and world (using the BPM found in analysis as well).
-- **Direction** (bundled LLM): if the character description is empty, it first writes one from the image, then organizes the character's appearance (without location or lighting) and writes per-scene direction in the official MiniMax-H3 Ref2VA format. Sung ranges get frontal or 3/4 shots where the mouth is visible.
+- **Direction** (bundled LLM): if the character description is empty, it first writes one from the image, then organizes the character's appearance (without location or lighting) and writes per-scene direction in the official MiniMax-H3 Ref2VA format. Sung ranges get frontal or 3/4 shots where the mouth is visible. Ranges without singing (intro, interludes, outro) cycle through a wide shot, a side tracking shot, a low angle and a view from behind (a walk away from the camera when the song ends on such a range), with the mouth closed.
 - **Scene generation** (MiniMax-H3): Ref2VA + Vocal Lock with the image and that scene's vocals as references. The next scene is queued only after each one finishes, so generations from other tabs can cut in between.
   With **no singing**, no vocals are passed; scenes are made from the image alone with the scene length (seconds) specified (the audio H3 adds is not used). What moves the mouth is the audio reference itself, so without it the "not singing, mouth closed" instruction works (confirmed with the author's earlier tool). The direction also drops the singing assumption and uses any composition: walking, gazing, scenery and so on. Scene cuts are the same (dips in the separated vocals, breaths, bars).
   The mouth won't move, but the LLM writing the direction may still pick singing scenes like a microphone or stage because it's an "MV" (in testing, a scene with a mic and a slightly open mouth appeared). **If you want only scenery or everyday shots, write what to leave out in "Song concept", such as "No microphones or stages. No singing scenes."** (it goes straight to the LLM; choosing no singing shows the same tip under the field).
@@ -479,6 +479,60 @@ git pull
 
 **To reinstall an engine**, delete its folder and run `setup` again (only the deleted folder is set up from cloning onward). setup never deletes folders pointed to by `dir` in `studio.local.toml`; delete those yourself.
 
+## Using it from an agent (MCP server, prototype)
+
+AI agents such as Claude can drive the studio with plain-language instructions ([MCP](https://modelcontextprotocol.io/)). The agent only calls the running studio's API, so every place where you adjust things by hand stays (the character description, scene prompts, retries, reassembling, the Edit tab). The intended use: let the agent do the drafts (songs, character images, Music Video projects) and the repetitive work, and fix the scenes you care about with an edited prompt, in the UI or by telling the agent.
+
+**Start the studio first** (the MCP server does not start it). Register once (change the paths to where you put it).
+
+Claude Code (Linux):
+
+```bash
+claude mcp add -s user yuzu-studio -- ~/h3-creator-studio/.venv/bin/python ~/h3-creator-studio/scripts/mcp_server.py
+```
+
+Claude Code (Windows, PowerShell):
+
+```powershell
+claude mcp add -s user yuzu-studio -- C:\h3-creator-studio\.venv\Scripts\python.exe C:\h3-creator-studio\scripts\mcp_server.py
+```
+
+Clients configured with a file, such as Claude Desktop (example `claude_desktop_config.json`; write Windows paths with `\\`):
+
+```json
+{
+  "mcpServers": {
+    "yuzu-studio": {
+      "command": "C:\\h3-creator-studio\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\h3-creator-studio\\scripts\\mcp_server.py"]
+    }
+  }
+}
+```
+
+| Tool | What it does |
+|---|---|
+| `studio_status` | Version, GPU and memory use, engine states, running / waiting jobs |
+| `list_media` / `upload_media` | List the gallery (ids and the local file paths) / add a file from the PC to the gallery |
+| `generate_image` | An image (MiniMax-H3-Image; with reference image ids it edits) |
+| `generate_music` | A song (ACE-Step; a theme is enough, the LLM writes the lyrics and caption) |
+| `get_job` | State of an image or music job |
+| `create_music_video` / `create_short_video` | Start a Music Video / Short Video project |
+| `preview_scenes` | Returns one image with 4 frames from each scene of a project (so the agent can look at the result; uses ffmpeg) |
+| `list_projects` / `get_project` / `wait_for_project` | List projects / show one (`include_prompts` adds each scene's direction) / wait until it finishes |
+| `retry_scene` | Re-render one scene (with a new direction for that scene, or a new seed; the supervisor rebuilds the official prompt around the direction); the video is reassembled automatically when all scenes are done |
+| `control_project` | Pause, resume, cancel or reassemble |
+
+Example instruction: "Make a 16:9 music video from the newest song in the gallery and the image of the woman in the cafe. When it is done, redo only scene 3 with a slower camera."
+
+**A guide for agents (skill)**: [`skills/yuzu-creator-studio/SKILL.md`](skills/yuzu-creator-studio/SKILL.md) describes the workflow (material → project → reviewing every scene with `preview_scenes` → showing the user → retrying with a new direction) and this studio's practical rules (such as the framing of scenes without singing). In Claude Code, copy the folder to `~/.claude/skills/` (or `npx skills add https://github.com/animede/h3-creator-studio --skill yuzu-creator-studio`).
+**The official prompt rules** are in MiniMax's skill [`h3-prompt-writing`](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) (not copied here because that repository has no license notice). The supervisor writes every Music Video / Short Video scene in that official form (six Ref2VA sections for scenes with reference images, three sections otherwise), so an agent only passes the scene's direction. A whole-prompt edit is checked for the sections, the single `[Shot 1]` and the reference labels (`<Subject 1>` ...), and refused if they are broken.
+
+- Generation takes time (a 30-second Music Video takes about 6 minutes on a PRO 6000 and about 20 minutes on an 8-12GB GPU). The agent starts the project and checks back later.
+- Environment variables: `YCS_URL` (the studio's URL; defaults to the host / port in `studio.toml` / `studio.local.toml`), `YCS_LANG=en` (English messages from the studio). With Claude Code: `claude mcp add -s user yuzu-studio -e YCS_LANG=en -- ...`.
+- Meant for use on the same PC (the file paths returned to the agent are paths on this PC). Like the studio's UI, there is no authentication.
+- Prototype: there are no tools yet for the Edit tab, presets or samples. If you are updating from v1.0.0, run `setup` once more (it installs the `mcp` package; `--no-models` is enough).
+
 ## Configuration
 
 `studio.toml` holds the defaults (included in the repository). Put settings for your own PC in **`studio.local.toml`** (not tracked by git; only the keys you write override the defaults. See `studio.local.toml.example`).
@@ -550,6 +604,8 @@ h3-creator-studio/
 ├── setup.bat / setup.sh   Setup (installs uv, then calls scripts/setup.py)
 ├── run.bat / run.sh       Starts the supervisor
 ├── scripts/setup.py       Clones the engines and prepares their environments and models (calls each engine's own scripts)
+├── scripts/mcp_server.py  MCP server for agents (prototype; the code is in studio/mcp_server.py)
+├── skills/                A guide for agents (SKILL.md)
 ├── studio/                The supervisor (FastAPI): engine start / stop, swapping, memory monitoring, jobs, LLM, Music Video / Short Video projects, editing
 ├── studio/mvtools/        Music Video / Short Video audio processing (vocal separation, scene splitting; run with the Python in components/mvtools)
 ├── presets/               Bundled presets (one JSON per tab)

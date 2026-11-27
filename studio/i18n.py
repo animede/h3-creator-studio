@@ -389,6 +389,8 @@ EN = {
     "結合しています。終わってからやり直してください": "Assembling now. Redo after it finishes",
     "そのシーンは生成中です": "That scene is being generated",
     "プロンプトは 1〜{} 文字で入力してください": "The prompt must be 1–{0} characters",
+    "プロンプト全文と演出は、どちらか一方だけ渡してください": "Pass either the whole prompt or the direction, not both",
+    "演出は 1〜{} 文字で入力してください": "The direction must be 1–{0} characters",
     "全部のシーンができてから結合できます": "You can assemble once all scenes are done",
     "制作中です。終わってから結合し直してください": "The project is in progress. Re-assemble after it finishes",
     "その{}の制作は見つかりません(削除されたかもしれません)": "That {0} project was not found (it may have been deleted)",

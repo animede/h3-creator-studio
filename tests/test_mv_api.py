@@ -412,6 +412,18 @@ class MvApiTest(unittest.TestCase):
         self.assertNotEqual(r.json()["scenes"][0]["seed"], 1001)
         self.assertEqual(r.json()["scenes"][0]["prompt"], "prompt 1")
 
+    def test_retry_scene_with_only_the_direction(self):
+        pid = self.with_scenes(state="completed")
+        r = self.client.post(f"/api/mv/{pid}/scenes/2/retry", json={"direction": "She looks up at the lanterns."})
+        self.assertEqual(r.status_code, 200, r.text)
+        sc = r.json()["scenes"][1]
+        self.assertEqual(sc["direction"], "She looks up at the lanterns")
+        self.assertIn("[Shot 1] ", sc["prompt"])                     # 管理役が公式の形に組み立て直す
+        self.assertIn("She looks up at the lanterns", sc["prompt"])
+        r = self.client.post(f"/api/mv/{pid}/scenes/1/retry", json={"direction": "d", "prompt": "p"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("どちらか一方", r.json()["detail"])
+
     def test_retry_errors(self):
         pid = self.with_scenes(state="completed")
         r = self.client.post(f"/api/mv/{pid}/scenes/9/retry")

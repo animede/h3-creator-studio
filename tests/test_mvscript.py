@@ -141,6 +141,137 @@ class EnforceTest(unittest.TestCase):
         self.assertTrue(out.endswith("Wide shot of the empty stage"))
 
 
+class NonSingingShotTest(unittest.IsolatedAsyncioTestCase):
+    """歌わないシーン(前奏・間奏・後奏)の構図を順に変える(2026-11-27: 前奏が参照画像の正面のポーズに寄り、話しているように見えた)。"""
+
+    def test_shots_rotate_over_non_singing_scenes_and_the_last_one_walks_away(self):
+        scenes = [scene(1, 0.0), scene(2, 0.1), scene(3, 0.9), scene(4, 0.2), scene(5, 0.0), scene(6, 0.0), scene(7, 0.8), scene(8, 0.0)]
+        shots = M.non_singing_shots(scenes)
+        self.assertEqual(sorted(shots), [1, 2, 4, 5, 6, 8])                       # 歌うシーン(3, 7)には構図を足さない
+        self.assertEqual([shots[i] for i in (1, 2, 4, 5, 6)], [*M.NON_SINGING_SHOTS, M.NON_SINGING_SHOTS[0]])
+        self.assertTrue(shots[1].startswith("Wide establishing shot"))           # 前奏の最初は引きの画
+        self.assertEqual(shots[8], M.NON_SINGING_LAST_SHOT)                       # 曲の最後(後奏)は去っていく後ろ姿
+        self.assertEqual(M.non_singing_shots([scene(1, 0.9), scene(2, 0.9)]), {})
+        self.assertEqual(M.non_singing_shots([scene(1, 0.0)]), {1: M.NON_SINGING_SHOTS[0]})     # 1 シーンだけなら「最後」にしない
+
+    def test_shot_leads_and_the_llm_shot_size_is_neutralised(self):
+        out = M.enforce_reference_and_lipsync(scene(1, 0.0), "Medium shot of her walking; a close-up of the lanterns.",
+                                              {"subject": "a woman"}, shot=M.NON_SINGING_SHOTS[0])
+        self.assertTrue(out.startswith(M.NON_SINGING_SHOTS[0] + " Use the exact same person"))
+        self.assertIn("keeps a naturally closed, relaxed mouth. Scene framing of her walking; a scene framing of the lanterns.", out)
+        self.assertNotIn("Medium shot", out)
+        # 引き・全身の語は構図と食い違わないので残す(LLM が framing に合わせて書いた語)
+        wide = M.enforce_reference_and_lipsync(scene(1, 0.0), "Wide shot of the whole street, full-body.", {}, shot=M.NON_SINGING_SHOTS[0])
+        self.assertTrue(wide.endswith("Wide shot of the whole street, full-body."))
+        # 歌うシーンには shot を渡しても足さない(口の見える構図の規則のまま)
+        sung = M.enforce_reference_and_lipsync(scene(1, 0.9), "She sings.", {}, shot=M.NON_SINGING_SHOTS[0])
+        self.assertNotIn("Wide establishing", sung)
+        self.assertTrue(sung.startswith("Medium close-up performance shot"))
+
+    def test_portrait_prefix_of_a_non_singing_scene_is_not_head_and_shoulders(self):
+        quiet = M.format_h3_official_ref2va_prompt(scene(1, 0.0), "dir", {}, frame="portrait")
+        self.assertIn("[Shot 1] Vertical frame composition: <Subject 1> stays horizontally centered", quiet)
+        self.assertNotIn("head and", quiet)
+        sung = M.format_h3_official_ref2va_prompt(scene(1, 0.9), "dir", {}, frame="portrait")
+        self.assertIn("head and shoulders in the upper-middle", sung)
+        self.assertIn("[Shot 1] Square frame composition", M.format_h3_official_ref2va_prompt(scene(1, 0.0), "dir", {}, frame="square"))
+
+    async def test_generate_scenario_puts_the_shots_in_the_prompts(self):
+        scenes = [scene(1, 0.0), scene(2, 0.0), scene(3, 0.9), scene(4, 0.0)]
+        chat = FakeChat([OVERVIEW, items([1, 2, 3, 4], prompt="She walks")])
+        result = await M.generate_scenario(chat, scenes, "", {"subject": "a woman"})
+        batch = chat.calls[1]["user"]
+        self.assertIn("Such scenes come with a framing: write the prompt around it", batch)
+        briefs = json.loads(re.search(r"SCENES: (\[.*\])\nReturn exactly", batch).group(1))
+        self.assertTrue(briefs[0]["framing"].startswith("Wide establishing shot of the whole place: the character appears small"))
+        self.assertNotIn("framing", briefs[2])                                    # 歌うシーンには構図を渡さない
+        self.assertIn('"framing": "Wide establishing shot', chat.calls[0]["user"])  # 全体の構成の依頼にも見える
+        prompts = [it["prompt"] for it in result["scenes"]]
+        self.assertIn("[Shot 1] Wide establishing shot of the whole place:", prompts[0])
+        self.assertIn("[Shot 1] Side tracking shot:", prompts[1])
+        self.assertIn("[Shot 1] Medium close-up performance shot", prompts[2])
+        self.assertIn("[Shot 1] Closing wide shot from behind:", prompts[3])
+        # 歌わせない(イメージ MV)は、どんな構図も LLM に任せるので足さない
+        chat = FakeChat([OVERVIEW, items([1, 2])])
+        result = await M.generate_scenario(chat, scenes[:2], "", {}, lipsync=False)
+        self.assertFalse(any(shot in it["prompt"] for it in result["scenes"] for shot in M.NON_SINGING_SHOTS))
+
+
+class OfficialGuideTest(unittest.IsolatedAsyncioTestCase):
+    """公式の手引き(ref-en.txt: ショットごとに具体的に・350〜500 語)と SKILL.md の Tips(抽象語より具体的な描写)に合わせた部分。"""
+
+    def test_overview_look(self):
+        look = M.overview_look({"visual_theme": "Winter dusk street, warm\nlanterns. Second sentence is dropped.",
+                                "color_script": "Indigo to yuzu yellow."})
+        self.assertEqual(look, "The target video is a music video that fully preserves the reference character, with one consistent "
+                               "look: Winter dusk street, warm lanterns. Color palette: Indigo to yuzu yellow.")
+        self.assertEqual(M.overview_look({"visual_theme": "", "color_script": ""}), "")
+        self.assertEqual(M.overview_look({"color_script": "deep indigo"}),
+                         "The target video is a music video that fully preserves the reference character, with one consistent look: deep indigo.")
+        self.assertEqual(M.overview_look(None), "")
+        long = M.overview_look({"visual_theme": " ".join(["word"] * 28) + " textures, damp stones, and lights everywhere"})
+        self.assertIn("word textures, damp", long)                     # 30 語で切り、終わりの「,」「and」は落とす
+        self.assertTrue(long.endswith("damp."), long)
+
+    def test_detail_rule_and_sound(self):
+        self.assertIn("about 120-180 English words", M.detail_rule())
+        self.assertIn("Do not describe sounds or music", M.detail_rule())
+        self.assertIn("the sounds of the moment", M.detail_rule(sound=True))
+        self.assertNotIn("Do not describe sounds", M.detail_rule(sound=True))
+        self.assertIn("over abstract words such as cinematic", M.detail_rule(sound=True))
+
+    async def test_scenario_uses_the_look_and_asks_for_detail(self):
+        overview = {**OVERVIEW, "visual_theme": "winter dusk street", "color_script": "indigo to yuzu yellow"}
+        for lipsync in (True, False):
+            chat = FakeChat([overview, items([1])])
+            result = await M.generate_scenario(chat, [scene(1)], "", {"subject": "a woman"}, lipsync=lipsync)
+            self.assertIn(M.detail_rule(sound=False), chat.calls[1]["user"])
+            text = result["scenes"][0]["prompt"]
+            self.assertIn("detailed_description:\nThe target video is a music video that fully preserves the reference character, "
+                          "with one consistent look: winter dusk street. Color palette: indigo to yuzu yellow. It contains", text)
+            self.assertNotIn(M.DEFAULT_STYLE_SENTENCE, text)
+        self.assertIn("ONE concrete sentence of at most 25 words", chat.calls[0]["user"])     # 全体の構成の依頼にも
+        chat = FakeChat([overview, items([1])])                       # 画風を選んだら、画風の文が優先
+        result = await M.generate_scenario(chat, [scene(1)], "", {}, style="anime")
+        self.assertNotIn("one consistent look", result["scenes"][0]["prompt"])
+
+
+class RebuildTest(unittest.TestCase):
+    """やり直しで演出だけを書き換えたときの組み立て直し(台本と同じ規則)と、全文を書き換えたときの検査。"""
+    PARAMS = {"character_facts": {"subject": "a woman"}, "script": {"visual_theme": "dusk"}, "width": 1024, "height": 576,
+              "lipsync": True, "style": "none"}
+    SCENES = [scene(1, 0.0), scene(2, 0.0), scene(3, 0.9)]
+
+    def test_non_singing_scene_gets_the_rotation_shot_unless_the_direction_names_one(self):
+        plain = M.rebuild_scene_prompt(self.PARAMS, self.SCENES, 2, "She pauses by a window")
+        self.assertIn("[Shot 1] " + M.NON_SINGING_SHOTS[1], plain)              # 台本と同じ順の構図(2 つ目の歌わないシーン)
+        named = M.rebuild_scene_prompt(self.PARAMS, self.SCENES, 2, "Close-up of her gloved hand on the window glass")
+        self.assertNotIn("Side tracking shot", named)
+        self.assertIn("Close-up of her gloved hand on the window glass", named)   # 人が決めた構図は中立にしない
+        self.assertIn("keeps a naturally closed, relaxed mouth", named)
+        sung = M.rebuild_scene_prompt(self.PARAMS, self.SCENES, 3, "Wide shot from behind as she sings")
+        self.assertIn("Medium close-up performance shot", sung)                   # 歌うシーンは口が見える構図のまま
+        self.assertNotIn("from behind", sung)
+        self.assertIn("one consistent look: dusk.", sung)
+        image_mv = M.rebuild_scene_prompt({**self.PARAMS, "lipsync": False}, self.SCENES, 1, "She walks")
+        self.assertNotIn("<Audio 1>", image_mv)
+        self.assertNotIn("Wide establishing", image_mv)
+        self.assertTrue(M.names_framing("a low-angle view"))
+        self.assertFalse(M.names_framing("she walks under the lanterns"))
+
+    def test_prompt_problems(self):
+        original = M.scene_prompt(scene(1, 0.9), "She sings", {"subject": "a woman"})
+        self.assertEqual(M.prompt_problems(original, original.replace("She sings", "She sings softly")), [])
+        no_audio = original.replace("<Audio 1>", "the audio")
+        self.assertIn("reference labels must stay", " ".join(M.prompt_problems(original, no_audio)))
+        no_summary = original.replace("summary:\n", "")
+        self.assertIn("sections must stay", " ".join(M.prompt_problems(original, no_summary)))
+        two_shots = original.replace("[Shot 1] ", "[Shot 1] At 00:02.000, ") + "\n[Shot 1] more"
+        problems = " ".join(M.prompt_problems(original, two_shots))
+        self.assertIn("exactly one [Shot 1]", problems)
+        self.assertIn("must not have a timestamp", problems)
+
+
 class ImageMvTest(unittest.IsolatedAsyncioTestCase):
     """歌わせない(lipsync=False): 歌の割合を見ず、音声の参照が無い形にする。"""
 

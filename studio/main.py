@@ -450,6 +450,7 @@ class MvIn(BaseModel):
 class MvRetryIn(BaseModel):
     prompt: Optional[str] = None   # 演出(H3 に渡すプロンプト全文)を書き換えるとき
     seed: Optional[int] = None
+    direction: Optional[str] = None  # 演出の文(LLM が書く部分)だけを書き換えるとき。公式の形と口・構図の規則は管理役が組み立て直す
 
 
 @contextlib.contextmanager
@@ -620,7 +621,7 @@ async def api_mv_reassemble(pid: str):
 async def api_mv_retry_scene(pid: str, index: int, body: Optional[MvRetryIn] = None):
     body = body or MvRetryIn()
     with _mv_errors():
-        return _mv_public(app.state.mv.retry_scene(pid, index, body.prompt, body.seed))
+        return _mv_public(app.state.mv.retry_scene(pid, index, body.prompt, body.seed, body.direction))
 
 
 @app.delete("/api/mv/{pid}")
@@ -737,7 +738,7 @@ async def api_short_reassemble(pid: str, body: Optional[ShortReassembleIn] = Non
 async def api_short_retry_scene(pid: str, index: int, body: Optional[MvRetryIn] = None):
     body = body or MvRetryIn()
     with _mv_errors():
-        return _mv_public(app.state.short.retry_scene(pid, index, body.prompt, body.seed))
+        return _mv_public(app.state.short.retry_scene(pid, index, body.prompt, body.seed, body.direction))
 
 
 @app.delete("/api/short/{pid}")

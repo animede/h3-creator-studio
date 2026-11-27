@@ -239,7 +239,8 @@ async def _script(job: Job, ctx: Ctx) -> None:
         raise JobFailed(e.message) from e
     items = {int(it["index"]): it for it in result["scenes"]}
     seed_base = p["seed"] if p.get("seed") is not None else int(hashlib.sha256(pid.encode()).hexdigest()[:8], 16)
-    patches = {s["index"]: {"prompt": str(items[s["index"]]["prompt"]).strip(), "emotion": str(items[s["index"]].get("emotion") or ""),
+    patches = {s["index"]: {"prompt": str(items[s["index"]]["prompt"]).strip(), "direction": str(items[s["index"]].get("direction") or ""),
+                            "emotion": str(items[s["index"]].get("emotion") or ""),
                             "seed": mvclip.scene_seed(seed_base, s["index"])} for s in scenes}
     ctx.ledger.update_mv_project(pid, scene_patches=patches, params_patch={"script": result["overview"], "character_facts": character})
     log.info("MV %s: %d シーンの演出を書きました", pid, len(scenes))
