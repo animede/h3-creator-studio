@@ -464,6 +464,7 @@ Choosing a **Visual style** tells the direction-writing LLM to keep every scene 
 Each scene row shows the time, length, a **Vocal** (歌唱) or **Instrumental** (器楽) badge, state (**Waiting** (待機) / **Generating** (生成中) / **Done** (完了) / **Failed**), seed, generation time, and peak VRAM.
 
 - **Retry** (やり直す): remakes it with a different seed.
+- **Compare takes**: preview an earlier result and restore it with **Use this take**. This works for both MV and short projects. Saved takes stay in the project folder.
 - **Edit prompt** (プロンプトを編集): edit the direction text passed to H3 and the seed, then **Retry with this** (この内容でやり直す). **Close** (閉じる) backs out.
 - When all scenes are done, it re-assembles automatically. The previous music video stays in the gallery.
 - **Re-assemble**: rejoins the current clips into a new music video. Before re-assembling, the video shows "This is an old version. Re-assemble to update it." (古い版です。結合し直すと更新されます)

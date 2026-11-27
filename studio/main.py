@@ -619,6 +619,18 @@ async def api_mv_reassemble(pid: str):
         return _mv_public(app.state.mv.reassemble(pid))
 
 
+@app.get("/api/mv/{pid}/scenes/{index}/takes")
+def api_mv_takes(pid: str, index: int):
+    with _mv_errors():
+        return app.state.mv.list_takes(pid, index)
+
+
+@app.post("/api/mv/{pid}/scenes/{index}/takes/{take_id}/select")
+async def api_mv_select_take(pid: str, index: int, take_id: str):
+    with _mv_errors():
+        return _mv_public(app.state.mv.select_take(pid, index, take_id))
+
+
 @app.post("/api/mv/{pid}/scenes/{index}/retry")
 async def api_mv_retry_scene(pid: str, index: int, body: Optional[MvRetryIn] = None):
     body = body or MvRetryIn()
@@ -734,6 +746,18 @@ async def api_short_reassemble(pid: str, body: Optional[ShortReassembleIn] = Non
     """結合し直す。body の final_audio(auto / none)・subtitles があれば、制作の設定を書き換えてから。前の動画はギャラリーに残る。"""
     with _mv_errors():
         return _mv_public(app.state.short.reassemble(pid, body.final_audio if body else None, body.subtitles if body else None))
+
+
+@app.get("/api/short/{pid}/scenes/{index}/takes")
+def api_short_takes(pid: str, index: int):
+    with _mv_errors():
+        return app.state.short.list_takes(pid, index)
+
+
+@app.post("/api/short/{pid}/scenes/{index}/takes/{take_id}/select")
+async def api_short_select_take(pid: str, index: int, take_id: str):
+    with _mv_errors():
+        return _mv_public(app.state.short.select_take(pid, index, take_id))
 
 
 @app.post("/api/short/{pid}/scenes/{index}/retry")

@@ -68,7 +68,7 @@ class McpServerTest(unittest.TestCase):
         server = ms.build_server()
         tools = asyncio.run(server.list_tools())
         self.assertEqual([t.name for t in tools], [f.__name__ for f in ms.TOOLS])
-        self.assertEqual(len(tools), 17)
+        self.assertEqual(len(tools), 19)
         self.assertTrue(all(t.description for t in tools))
         self.assertIn("retry_scene", server.instructions)
         gen = next(t for t in tools if t.name == "generate_image")
@@ -329,6 +329,27 @@ class McpServerTest(unittest.TestCase):
         self.assertTrue(r.is_error)
         self.assertIn("ffmpeg is not installed", r.content[0].text)
         self.assertEqual(self.studio.calls, [])
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg が要る")
+    def test_compare_takes_and_select_via_mcp(self):
+        self.make_clip(self.tmp / "short" / "p1" / "original.mp4")
+        self.make_clip(self.tmp / "short" / "p1" / "retry.mp4")
+        takes = {"active_take_id": "retry", "duration": 2.0, "takes": [
+            {"id": "original", "clip_url": "/outputs/short/p1/original.mp4"},
+            {"id": "retry", "clip_url": "/outputs/short/p1/retry.mp4"},
+        ]}
+        self.use({("GET", "/api/short/p1/scenes/1/takes"): takes,
+                  ("POST", "/api/short/p1/scenes/1/takes/original/select"): {"id": "p1", "state": "assembling"}})
+        args = {"project_id": "p1", "kind": "short", "index": 1}
+        result = self.run_tool("list_scene_takes", {**args, "preview_ids": ["original", "retry"]})
+        self.assertFalse(result.is_error, result.content)
+        self.assertEqual(json.loads(result.content[0].text), takes)
+        self.assertEqual(result.content[1].mime_type, "image/jpeg")
+        bad = self.run_tool("list_scene_takes", {**args, "preview_ids": ["missing"]})
+        self.assertTrue(bad.is_error)
+        result = self.run_tool("select_scene_take", {**args, "take_id": "original"})
+        self.assertFalse(result.is_error, result.content)
+        self.assertEqual(self.studio.calls[-1][:2], ("POST", "/api/short/p1/scenes/1/takes/original/select"))
 
     def test_upload_media(self):
         f = self.tmp / "song.mp3"

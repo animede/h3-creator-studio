@@ -87,6 +87,8 @@ If `mcp` is not installed, the server stops and the agent's MCP log shows the co
 | `preview_scenes` | Returns one image with 4 frames from each scene of a project (so the agent can look at the result; `frames` up to 8 for scenes with vehicles or large motion; uses ffmpeg) |
 | `list_projects` / `get_project` / `wait_for_project` | List projects / show one (`include_prompts` adds each scene's direction) / wait until it finishes |
 | `retry_scene` | Re-render one scene (with a new direction for that scene, or a new seed; the supervisor rebuilds the official prompt around the direction); the video is reassembled automatically when all scenes are done |
+| `list_scene_takes` | List saved takes and the active take for one MV or short scene. Pass one or two IDs in `preview_ids` to compare their frames |
+| `select_scene_take` | Select a saved take without regeneration. If all scenes are ready, the project reassembles |
 | `control_project` | Pause, resume, cancel or reassemble |
 
 Example instruction: "Make a 16:9 music video from the newest song in the gallery and the image of the woman in the cafe. When it is done, redo only scene 3 with a slower camera."
