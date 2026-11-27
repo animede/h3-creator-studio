@@ -126,23 +126,33 @@ def ace_gpu_env(total_mib: Optional[int]) -> dict:
 H3_REF_SHORT_EDGE_LOW_VRAM = "768"
 H3_REF_SHORT_EDGE_WINDOWS = "1024"
 REF_EDGE_MAX_MIB = 14 * 1024          # これ未満(8GB・12GB のカード)は、OS を問わず参照画像を短辺 768 で読む
+H3_16GB_MIN_MIB = 18 * 1024           # 20〜24GB 級(Colab L4 22.5GiB / RTX 4090 24GB など)の exclusive 起動向け
+H3_16GB_MAX_MIB = 28 * 1024           # 32GB 級(RTX 5090 等)は H3 側の自動判定(32gb)に任せる
 
 
 def h3_gpu_env(total_mib: Optional[int], plat: str = None) -> dict:
-    """参照画像を読む大きさ(H3_REF_IMAGE_SHORT_EDGE)。VRAM 14GiB 未満は 768。それ以上は、Windows だけ 1024(Linux はエンジンの既定 2048)。
+    """参照画像を読む大きさ(H3_REF_IMAGE_SHORT_EDGE)と、20〜24GB 級での H3_PROFILE。
 
-    エンジンの既定は短辺 2048 で、参照画像をそこまで拡大してから 32B のテキストエンコーダの視覚部分に通す。Windows では、その注意の
-    計算が 1 回で約 6.9GB を確保し、参照モード(MV・ショート動画のシーン、参照から)が CUDA out of memory になった(2026-11-26 の実機:
-    RTX 4060 8GB 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」、RTX 3060 12GB、RTX 4060 Ti 16GB)。Linux では同じ条件
-    (16GB の Windows 相当の上限、16gb 級)でも最大 7GB で通り、A4000 16GB・RTX PRO 6000 も既定のまま MV が通っているので、
-    Windows 版の PyTorch の注意の計算(省メモリの経路が無い)によると見ている。拡大の量の 2 乗で効くので、1024 なら約 1/16。
-    768 は RTX 4060 Laptop 8GB(Windows)で MV を通した値。studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
+    - H3_REF_IMAGE_SHORT_EDGE: VRAM 14GiB 未満は 768。それ以上は、Windows だけ 1024(Linux はエンジンの既定 2048)。
+      エンジンの既定は短辺 2048 で、参照画像をそこまで拡大してからテキストエンコーダの視覚部分に通す。Windows では、その注意の
+      計算が 1 回で約 6.9GB を確保し、参照モード(MV・ショート動画のシーン、参照から)が CUDA out of memory になった(2026-11-26 の実機:
+      RTX 4060 8GB 「Tried to allocate 6.87 GiB … 6.88 GiB allowed」、RTX 3060 12GB、RTX 4060 Ti 16GB)。Linux では同じ条件
+      (16GB の Windows 相当の上限、16gb 級)でも最大 7GB で通り、A4000 16GB・RTX PRO 6000 も既定のまま MV が通っているので、
+      Windows 版の PyTorch の注意の計算(省メモリの経路が無い)によると見ている。拡大の量の 2 乗で効くので、1024 なら約 1/16。
+      768 は RTX 4060 Laptop 8GB(Windows)で MV を通した値。
+    - H3_PROFILE=16gb: 18GiB 以上 28GiB 未満(Colab L4 22.5GiB や 24GB 単騎カード)の exclusive モード向け。
+      H3 本体の自動判定は 10 進 20GB 以上で 32gb 級(32B テキストエンコーダ、約 17GB)を選ぶため、setup の prepare_lowvram.py が用意した
+      ClipProj(16gb 級)と食い違い、追加で 67GB の 32B TE 取得や Ref2VA での VRAM 不足が起きる。share モードの 24GiB 枠と同じく 16gb 級を指定する。
+      studio.local.toml の [components.h3.env] に書いた値はこれより優先される。
     """
+    env: dict = {}
     if total_mib is not None and total_mib < REF_EDGE_MAX_MIB:
-        return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_LOW_VRAM}
-    if (plat or sys.platform) == "win32":
-        return {"H3_REF_IMAGE_SHORT_EDGE": H3_REF_SHORT_EDGE_WINDOWS}
-    return {}
+        env["H3_REF_IMAGE_SHORT_EDGE"] = H3_REF_SHORT_EDGE_LOW_VRAM
+    elif (plat or sys.platform) == "win32":
+        env["H3_REF_IMAGE_SHORT_EDGE"] = H3_REF_SHORT_EDGE_WINDOWS
+    if total_mib is not None and H3_16GB_MIN_MIB <= total_mib < H3_16GB_MAX_MIB:
+        env["H3_PROFILE"] = "16gb"
+    return env
 
 
 # ---- share のときの VRAM の利用枠 ----

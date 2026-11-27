@@ -93,17 +93,23 @@ class ComponentsTest(unittest.TestCase):
 
     def test_h3_gpu_env_reference_edge(self):
         # 参照画像を読む大きさ: 14GiB 未満は 768、それ以上は Windows だけ 1024(既定の 2048 は Windows で 1 回の確保が約 6.9GB。2026-11-26 の実機 ×3)
+        # 20〜24GB 級(18GiB 以上 28GiB 未満: Colab L4 22.5GiB / 24GB 単騎)では exclusive モードでも H3_PROFILE=16gb を指定する
         for plat in ("linux", "win32"):
             self.assertEqual(h3_gpu_env(8188, plat), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
             self.assertEqual(h3_gpu_env(12288, plat), {"H3_REF_IMAGE_SHORT_EDGE": "768"})      # RTX 3060 12GB
             self.assertEqual(h3_gpu_env(14335, plat), {"H3_REF_IMAGE_SHORT_EDGE": "768"})
-        self.assertEqual([h3_gpu_env(m, "win32") for m in (16380, 24564, 97887, None)], [{"H3_REF_IMAGE_SHORT_EDGE": "1024"}] * 4)
-        self.assertEqual([h3_gpu_env(m, "linux") for m in (16376, 97887, None)], [{}] * 3)     # Linux はエンジンの既定(2048)
+        self.assertEqual([h3_gpu_env(m, "win32") for m in (16380, 32607, 97887, None)], [{"H3_REF_IMAGE_SHORT_EDGE": "1024"}] * 4)
+        self.assertEqual(h3_gpu_env(24564, "win32"), {"H3_REF_IMAGE_SHORT_EDGE": "1024", "H3_PROFILE": "16gb"})
+        self.assertEqual([h3_gpu_env(m, "linux") for m in (16376, 32607, 97887, None)], [{}] * 4)     # Linux はエンジンの既定(2048)
+        self.assertEqual(h3_gpu_env(23034, "linux"), {"H3_PROFILE": "16gb"})                 # Colab L4 22.5GiB
+        self.assertEqual(h3_gpu_env(24564, "linux"), {"H3_PROFILE": "16gb"})                 # 24GB 単騎
         with mock.patch("studio.components.smi_mib", lambda field: 8188):
             env = get_spec("h3", Settings({}, Path("/r"))).env(Path("/x"), 8611)
             self.assertEqual(env["H3_REF_IMAGE_SHORT_EDGE"], "768")
         with mock.patch("studio.components.smi_mib", lambda field: 16376):
             self.assertNotIn("H3_REF_IMAGE_SHORT_EDGE", get_spec("h3", Settings({}, Path("/r"))).env(Path("/x"), 8611))
+        with mock.patch("studio.components.smi_mib", lambda field: 23034):
+            self.assertEqual(get_spec("h3", Settings({}, Path("/r"))).env(Path("/x"), 8611)["H3_PROFILE"], "16gb")
 
     def test_ace_gpu_env_only_below_10gib(self):
         recipe = {"ACESTEP_GPU_PROFILE": "12gb", "ACESTEP_LM_OFFLOAD_TO_CPU": "1", "ACESTEP_RESIDENT_COMPONENTS": "none",
