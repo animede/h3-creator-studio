@@ -628,17 +628,17 @@ const EDIT_LOGIC = (() => {
     const n = view ? view.state.clips.length : 0;
     if (n < 2) { box.append(el("div", "note", t("クリップが 2 つ以上になると、境目ごとに選べます"))); return; }
     for (let i = 0; i < n - 1; i++) {
-      const t = (view.state.transitions || []).find((x) => x.after === i && x.type !== "cut");
+      const tr = (view.state.transitions || []).find((x) => x.after === i && x.type !== "cut");
       const row = el("div", "edtrow");
       row.append(el("span", "edtlabel", `${i + 1} → ${i + 2}`));
       const sel = el("select");
       sel.setAttribute("aria-label", t("{a} 番目と {b} 番目の境目", { a: i + 1, b: i + 2 }));
       for (const [v, label] of Object.entries(TR_LABEL)) { const o = el("option", "", label); o.value = v; sel.append(o); }
-      sel.value = t ? t.type : "cut";
+      sel.value = tr ? tr.type : "cut";
       const sec = el("input");
       sec.type = "number"; sec.min = "0.5"; sec.max = "2"; sec.step = "0.1";
-      sec.value = t ? f(t.duration) : "1";
-      sec.disabled = !t;
+      sec.value = tr ? f(tr.duration) : "1";
+      sec.disabled = !tr;
       sec.className = "edsmall";
       sec.setAttribute("aria-label", t("境目の秒数"));
       const apply = () => mutate((v) => L.setTransition(v.state, i, sel.value, Math.min(2, Math.max(0.5, num(sec) || 1))));
