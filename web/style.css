@@ -354,6 +354,10 @@ textarea.sm { min-height: 0; }
 .mvs-none { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; text-align: center; }
 .mvscene.tall .mvs-video, .mvscene.tall .mvs-none { height: 160px; }
 .mvs-actions { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.mvs-takes { margin-top: 8px; }
+.mvs-takes > summary { cursor: pointer; }
+.mvs-takes > .inline { flex-wrap: wrap; margin: 6px 0; }
+.mvs-takes .mvs-video { max-width: 100%; }
 .mvs-info { margin-top: 4px; font-size: 12px; color: var(--muted); }
 .mvs-info[hidden] { display: none; }
 .mvs-info-row b { margin-right: 6px; color: var(--text); font-weight: 600; }

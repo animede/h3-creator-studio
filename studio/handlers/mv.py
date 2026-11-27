@@ -261,7 +261,8 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
     tag = f"シーン {index} / {len(scenes)}"
     work = work_dir(ctx.outputs_dir, pid)
     lipsync = bool(p.get("lipsync", True))
-    vocals, raw, clip, thumb = work / "vocals.wav", work / f"scene_{index:03d}_raw.mp4", work / scene_clip_name(index), work / scene_thumb_name(index)
+    vocals = work / "vocals.wav"
+    raw, clip, thumb = scene_output_paths(work, scene, job.id)
     if lipsync and not vocals.is_file():
         raise JobFailed("分離したボーカルが見つかりません(分析からやり直してください)")
     started = time.monotonic()
@@ -314,6 +315,15 @@ async def generate_clip(job: Job, ctx: Ctx, endpoint: str, data: dict, files: li
     return res, frames
 
 
+def scene_output_paths(work: Path, scene: dict, job_id: str) -> tuple[Path, Path, Path]:
+    index = scene["index"]
+    # Keep the original names for the first take and never overwrite a saved clip.
+    clip, thumb = work / scene_clip_name(index), work / scene_thumb_name(index)
+    if scene.get("takes") or clip.exists():
+        clip, thumb = (p.with_stem(f"{p.stem}_{job_id}") for p in (clip, thumb))
+    return work / f"scene_{index:03d}_{job_id}_raw.mp4", clip, thumb
+
+
 async def record_scene(job: Job, ctx: Ctx, label: str, pid: str, scene: dict, res: dict, clip: Path, thumb: Path, started: float, frames: int,
                        tag: str) -> None:
     """できたシーンを台帳に書く(サムネイル・実測・seed)。"""
@@ -325,7 +335,7 @@ async def record_scene(job: Job, ctx: Ctx, label: str, pid: str, scene: dict, re
     seed = res.get("seed") if res.get("seed") is not None else scene.get("seed")
     log.info("%s %s: %s ができました(H3 %s 秒、%d コマ、%.1f 秒)", label, pid, tag, elapsed, frames, time.monotonic() - started)
     ctx.ledger.update_mv_project(pid, scene_patches={index: {
-        "status": "done", "clip": clip.name, "thumb": thumb.name if has_thumb else None, "error": None, "seed": seed,
+        "status": "done", "take_id": job.id, "clip": clip.name, "thumb": thumb.name if has_thumb else None, "error": None, "seed": seed,
         "elapsed_s": round(elapsed if elapsed is not None else time.monotonic() - started, 1), "peak_vram_gb": res.get("peak_vram_gb")}})
 
 

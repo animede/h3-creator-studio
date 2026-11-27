@@ -129,10 +129,11 @@ class MvBase(unittest.IsolatedAsyncioTestCase):
             self.seen.append((i, sc["prompt"], sc["seed"]))
             job.progress, job.message = 0.5, f"シーン {i}: 生成中 2/4"
             await self.gate(job, f"scene{i}")
-            clip = mv.work_dir(ctx.outputs_dir, pid) / mv.scene_clip_name(i)
-            clip.write_bytes(b"clip")
-            ctx.ledger.update_mv_project(pid, scene_patches={i: {"status": "done", "clip": clip.name, "thumb": None, "elapsed_s": 1.5,
-                                                                 "peak_vram_gb": 8.0, "error": None}})
+            work = mv.work_dir(ctx.outputs_dir, pid)
+            _, clip, thumb = mvh.scene_output_paths(work, sc, job.id)
+            clip.write_bytes(sc["prompt"].encode())
+            await mvh.record_scene(job, ctx, "MV", pid, sc, {"total_elapsed_s": 1.5, "peak_vram_gb": 8.0},
+                                   clip, thumb, 0, 48, f"scene {i}")
 
         async def assemble(job, ctx):
             self.log.append(("assemble", None))
@@ -463,6 +464,68 @@ class PauseCancelTest(MvBase):
 
 
 class RetryTest(MvBase):
+    async def test_compare_and_restore_persisted_takes_without_regeneration(self):
+        self.start()
+        pid = self.new_project()["id"]
+        await self.until_state(pid, "completed")
+        # A project created by an earlier version has a clip and no take ID.
+        self.ledger.update_mv_project(pid, scene_patches={1: {"take_id": None}})
+        old = self.director.list_takes(pid, 1)
+        self.assertEqual(old["active_take_id"], "original")
+        old_file = self.director.work(pid) / mv.scene_clip_name(1)
+        original_bytes = old_file.read_bytes()
+        original_output = self.director.view(pid)["output"]["id"]
+
+        self.director.retry_scene(pid, 1, prompt="new take", seed=55)
+        with self.assertRaises(ValueError):
+            self.director.select_take(pid, 1, "original")
+        self.assertEqual(self.director.view(pid)["scenes"][0]["clip_url"], old["takes"][0]["clip_url"])
+        await self.until_state(pid, "completed")
+        saved = self.director.list_takes(pid, 1)
+        self.assertEqual([take["seed"] for take in saved["takes"]], [1001, 55])
+        self.assertNotEqual(saved["takes"][0]["clip_url"], saved["takes"][1]["clip_url"])
+        self.assertEqual(old_file.read_bytes(), original_bytes)
+        chosen = saved["active_take_id"]
+
+        # Reopen the database and restart the director, as on an app restart.
+        await self.runner.stop()
+        self.ledger = Ledger(self.root)
+        self.addCleanup(self.ledger.close)
+        self.start()
+        self.director.restore()
+        self.assertEqual(self.director.list_takes(pid, 1), saved)
+        restored = self.director.select_take(pid, 1, "original")
+        self.assertEqual(restored["state"], "assembling")
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.log[-1], ("assemble", None))
+        self.assertFalse(self.mv_jobs("mv.scene"))
+        self.assertEqual(self.director.view(pid)["scenes"][0]["seed"], 1001)
+        self.assertNotEqual(self.director.view(pid)["output"]["id"], original_output)
+        self.assertEqual(self.director.list_takes(pid, 1)["active_take_id"], "original")
+        self.assertEqual(len(self.director.list_takes(pid, 1)["takes"]), 2)
+        self.assertIsNotNone(self.ledger.get_output(original_output))
+        self.director.select_take(pid, 1, chosen)
+        await self.until_state(pid, "completed")
+        self.assertEqual(self.director.view(pid)["scenes"][0]["prompt"], "new take")
+
+    async def test_failed_retry_preserves_take_and_allows_reassembly(self):
+        self.start()
+        pid = self.new_project()["id"]
+        await self.until_state(pid, "completed")
+        old = self.director.list_takes(pid, 1)
+        self.failing["scene1"] = 1
+        self.director.retry_scene(pid, 1, prompt="failed candidate", seed=56)
+        await self.until_state(pid, "failed")
+        self.assertEqual(self.director.list_takes(pid, 1), old)
+        self.assertEqual(self.director.view(pid)["scenes"][0]["clip_url"], old["takes"][0]["clip_url"])
+        with self.assertRaises(LookupError):
+            self.director.select_take(pid, 1, "missing")
+        n = len(self.mv_jobs("mv.scene"))
+        self.director.select_take(pid, 1, old["active_take_id"])
+        await self.until_state(pid, "completed")
+        self.assertEqual(len(self.mv_jobs("mv.scene")), n)
+        self.assertEqual(self.director.view(pid)["scenes"][0]["prompt"], "prompt 1")
+
     async def completed(self) -> str:
         self.start()
         pid = self.new_project()["id"]
@@ -832,7 +895,7 @@ class ViewTest(MvBase):
         self.assertGreater(v["progress"], 0.07 + 0.9 * 8 / 21)
         s1, s2, s3 = v["scenes"]
         self.assertEqual(set(s1), {"index", "start", "end", "duration", "kind", "vocal_ratio", "prompt", "direction", "emotion", "seed", "status", "elapsed_s",
-                                   "peak_vram_gb", "error", "clip_url", "thumb_url", "job_status"})
+                                   "peak_vram_gb", "error", "clip_url", "thumb_url", "active_take_id", "takes", "job_status"})
         self.assertEqual((s1["status"], s1["kind"], s1["prompt"], s1["seed"], s1["elapsed_s"], s1["peak_vram_gb"]), ("done", "vocal", "prompt 1", 1001, 1.5, 8.0))
         self.assertTrue(s1["clip_url"].startswith(f"/outputs/mv/{pid}/scene_001.mp4?v="))
         self.assertEqual((s1["thumb_url"], s1["job_status"]), (None, None))

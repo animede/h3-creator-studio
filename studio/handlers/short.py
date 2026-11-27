@@ -27,7 +27,7 @@ from pathlib import Path
 from .. import config, mv_audio, mvclip, mvscript, mvsub, shortscript
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from ..llm import LlmError
-from ..mv import concept_from_song, scene_clip_name, scene_thumb_name, scene_vocals_name
+from ..mv import concept_from_song, scene_vocals_name
 from ..short import make_scenes, person_index, plan_speech_scenes, sentence_text, split_sentences, work_dir
 from ..tts import TtsError
 from . import h3
@@ -276,7 +276,8 @@ async def run_scene(job: Job, ctx: Ctx) -> None:
     voiceover = timeline == "speech" and bool(p.get("voiceover"))       # 画面の外の声: 口を合わせない。音は結合で narration.wav に差し替える
     speech = bool(scene.get("speech")) and timeline == "speech" and not voiceover
     work = work_dir(ctx.outputs_dir, pid)
-    vocals, raw, clip, thumb = work / "vocals.wav", work / f"scene_{index:03d}_raw.mp4", work / scene_clip_name(index), work / scene_thumb_name(index)
+    vocals = work / "vocals.wav"
+    raw, clip, thumb = mvh.scene_output_paths(work, scene, job.id)
     if speech and not vocals.is_file():
         raise JobFailed("読み上げの音声が見つかりません(分析からやり直してください)")
     started = time.monotonic()

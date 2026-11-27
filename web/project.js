@@ -318,6 +318,22 @@ function makeProjectPanel(cfg) {
     row.editBtn = button(t("プロンプトを編集"), () => toggleEdit(row), t("演出(H3 に渡すプロンプト)と seed を直して、そのシーンだけ作り直します"));
     actions.append(row.retry, row.editBtn);
     body.append(row.video, row.none, actions);
+    row.takes = el("details", "mvs-takes");
+    row.takes.hidden = true;
+    const takeHeader = el("summary", "", t("テイクを比較"));
+    const takeActions = el("div", "inline");
+    row.takeSelect = el("select");
+    row.takeSelect.setAttribute("aria-label", t("比較するテイク"));
+    row.takeSelect.addEventListener("change", () => updateTakePreview(row));
+    row.takeButton = button(t("このテイクを採用"), () => {
+      if (!view || !row.takeSelect.value) return;
+      act(cfg.base + "/" + view.id + "/scenes/" + row.index + "/takes/" + encodeURIComponent(row.takeSelect.value) + "/select");
+    });
+    takeActions.append(row.takeSelect, row.takeButton);
+    row.takeVideo = el("video", "mvs-video");
+    row.takeVideo.controls = true;
+    row.takeVideo.preload = "none";
+    row.takes.append(takeHeader, takeActions, row.takeVideo);
     row.editor = el("div", "mvs-edit");
     row.editor.hidden = true;
     row.ta = el("textarea");
@@ -339,7 +355,7 @@ function makeProjectPanel(cfg) {
       row.infoSig = "";
       row.el.append(row.info);
     }
-    row.el.append(body, row.editor, row.err);
+    row.el.append(body, row.takes, row.editor, row.err);
     return row;
   }
 
@@ -364,6 +380,43 @@ function makeProjectPanel(cfg) {
   }
 
   const defaultKind = (v, s) => ({ text: s.kind === "vocal" ? t("歌唱") : t("器楽"), title: t("歌っている割合 {pct}%", { pct: Math.round((s.vocal_ratio || 0) * 100) }) });
+
+  function updateTakePreview(row) {
+    const take = row.takeChoices.find((item) => item.id === row.takeSelect.value);
+    row.takeButton.disabled = !take || !row.canSelectTake;
+    row.takeVideo.hidden = !take;
+    if (!take && row.takeVideo.dataset.src) {
+      row.takeVideo.removeAttribute("src");
+      row.takeVideo.removeAttribute("poster");
+      row.takeVideo.load();
+      delete row.takeVideo.dataset.src;
+    }
+    if (take && row.takeVideo.dataset.src !== take.clip_url) {
+      row.takeVideo.dataset.src = take.clip_url;
+      row.takeVideo.poster = take.thumb_url || "";
+      row.takeVideo.src = take.clip_url;
+    }
+  }
+
+  function updateTakes(row, v, s) {
+    const choices = (s.takes || []).map((take, i) => ({ ...take, number: i + 1 }))
+      .filter((take) => take.id !== s.active_take_id || s.status !== "done");
+    row.takeChoices = choices;
+    row.canSelectTake = !v.job_id && v.state !== "assembling";
+    row.takes.hidden = !choices.length;
+    const sig = JSON.stringify(choices);
+    if (sig !== row.takeSig) {
+      const selected = row.takeSelect.value;
+      row.takeSig = sig;
+      row.takeSelect.replaceChildren(...choices.map((take) => {
+        const option = el("option", "", t("テイク {n}", { n: take.number }) + (take.seed == null ? "" : " · seed " + take.seed));
+        option.value = take.id;
+        return option;
+      }));
+      row.takeSelect.value = choices.some((take) => take.id === selected) ? selected : choices.at(-1)?.id || "";
+    }
+    updateTakePreview(row);
+  }
 
   function updateRow(row, v, s) {
     row.el.className = "mvscene " + s.status + (v.params.height > v.params.width ? " tall" : "");      // 縦長の動画は、小さい動画も少し高く
@@ -407,6 +460,7 @@ function makeProjectPanel(cfg) {
     }
     const idle = !!s.prompt && s.status !== "running" && v.state !== "assembling";
     row.retry.disabled = row.editBtn.disabled = !idle;
+    updateTakes(row, v, s);
   }
 
   // 自動で入れた説明を、どれが自動かが分かるように出す。書いた説明は出さない

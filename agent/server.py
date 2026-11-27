@@ -583,9 +583,45 @@ async def preview_scenes(project_id: str, kind: str = "mv", scenes: Optional[lis
     return [note, Image(data=await asyncio.to_thread(_contact_sheet, rows), format="jpeg")]
 
 
+async def list_scene_takes(project_id: str, index: int, kind: str = "mv",
+                           preview_ids: Optional[list[str]] = None, frames: int = PREVIEW_FRAMES) -> list[Union[str, Image]]:
+    """List saved takes for one MV or short scene and identify the active take.
+    Set preview_ids to one or two listed IDs to compare their frames in a labelled contact sheet."""
+    result = await client.call("GET", f"/api/{_kind(kind)}/{project_id}/scenes/{int(index)}/takes")
+    note = json.dumps(result, ensure_ascii=False)
+    if not preview_ids:
+        return [note]
+    if len(preview_ids) > 2 or len(set(preview_ids)) != len(preview_ids):
+        raise StudioError("Choose one or two distinct take IDs to preview")
+    if not PREVIEW_FRAMES_MIN <= int(frames) <= PREVIEW_FRAMES_MAX:
+        raise StudioError(f"frames must be {PREVIEW_FRAMES_MIN}-{PREVIEW_FRAMES_MAX}")
+    takes = {take["id"]: take for take in result["takes"]}
+    if any(take_id not in takes for take_id in preview_ids):
+        raise StudioError("A requested take is no longer available")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise StudioError("ffmpeg is not installed on this PC, so the takes cannot be previewed")
+    rows = []
+    with tempfile.TemporaryDirectory(prefix="ycs_takes_") as tmp:
+        for i, take_id in enumerate(preview_ids):
+            clip = await _media_file(takes[take_id]["clip_url"], Path(tmp), f"take_{i}.mp4")
+            strip = await asyncio.to_thread(_scene_strip, ffmpeg, clip, result["duration"], int(frames))
+            active = " (active)" if take_id == result["active_take_id"] else ""
+            rows.append((f"Scene {index} - {take_id}{active}", strip))
+    return [note, Image(data=await asyncio.to_thread(_contact_sheet, rows), format="jpeg")]
+
+
+async def select_scene_take(project_id: str, index: int, take_id: str, kind: str = "mv") -> dict:
+    """Adopt a saved take from list_scene_takes without regenerating it. A complete project reassembles automatically."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", take_id):
+        raise StudioError("take_id must be an ID from list_scene_takes")
+    proj = await client.call("POST", f"/api/{_kind(kind)}/{project_id}/scenes/{int(index)}/takes/{take_id}/select")
+    return {**project_view(proj), "active_take_id": take_id}
+
+
 TOOLS = (studio_status, list_media, upload_media, enhance_prompt, generate_image, generate_video, generate_music, get_job, listen_song,
          create_music_video, create_short_video, list_projects, get_project, wait_for_project, preview_scenes, retry_scene,
-         control_project)
+         list_scene_takes, select_scene_take, control_project)
 
 
 def build_server():

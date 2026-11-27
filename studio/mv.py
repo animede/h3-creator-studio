@@ -405,8 +405,39 @@ class Director:
             patch["seed"] = _int(seed, "seed")
         elif prompt is None or scene.get("seed") is None:
             patch["seed"] = random.randrange(SEED_MOD)
+        patch.update(takes=scene_takes(scene), take_id=scene_take_id(scene))
         self.ledger.update_mv_project(pid, params_patch={"assembled": False}, scene_patches={scene["index"]: patch})
         return self._start(pid)
+
+    def _take_scene(self, pid: str, index: int) -> dict:
+        number = _int(index, "シーンの番号")
+        scene = next((s for s in self._get(pid)["scenes"] if s["index"] == number), None)
+        if scene is None:
+            raise LookupError(f"シーン {number} はありません")
+        return scene
+
+    def list_takes(self, pid: str, index: int) -> dict:
+        scene = self._take_scene(pid, index)
+        return {"active_take_id": scene_take_id(scene), "duration": scene["duration"], "takes": self._take_views(pid, scene)}
+
+    def select_take(self, pid: str, index: int, take_id: str) -> dict:
+        scene = self._take_scene(pid, index)
+        if self._inflight(pid) is not None:
+            raise ValueError("制作中です。終わってからテイクを採用してください")
+        takes = scene_takes(scene)
+        take = next((t for t in takes if t["id"] == take_id), None)
+        if take is None or take_file(self.work(pid), take.get("clip")) is None:
+            raise LookupError("テイクの動画が見つかりません")
+        if scene["status"] == "done" and scene_take_id(scene) == take_id:
+            return self.view(pid)
+        self.ledger.update_mv_project(pid, params_patch={"assembled": False}, scene_patches={scene["index"]: {
+            **{key: take.get(key) for key in TAKE_FIELDS}, "take_id": take_id, "takes": takes,
+            "status": "done", "error": None,
+        }})
+        # Selecting a take needs no new H3 job. Assemble only when all scenes are ready.
+        if self._next_step(self._get(pid))[0] == "assemble":
+            return self._start(pid)
+        return self.view(pid)
 
     def _check_reassemble(self, pid: str) -> None:
         proj = self._get(pid)
@@ -476,16 +507,28 @@ class Director:
                 "done": sum(1 for s in proj["scenes"] if s["status"] == "done"), "progress": self._progress(proj, job),
                 "job_id": job.id if job else None, "output": out, "thumb_url": "/outputs/" + thumb if thumb else None}
 
-    def _scene_view(self, pid: str, s: dict, job) -> dict:
-        d = self.work(pid)
+    def _scene_media_url(self, pid: str, name: Optional[str]) -> Optional[str]:
+        path = take_file(self.work(pid), name)
+        if path is not None:
+            try:
+                return f"/outputs/{self.WORK_SUB}/{pid}/{path.name}?v={int(path.stat().st_mtime)}"
+            except FileNotFoundError:
+                pass
+        return None
 
-        def url(name):
-            f = d / name if name else None
-            return f"/outputs/{self.WORK_SUB}/{pid}/{name}?v={int(f.stat().st_mtime)}" if f is not None and f.is_file() else None
+    def _take_views(self, pid: str, scene: dict) -> list:
+        return [{"id": take["id"], "seed": take.get("seed"), "prompt": take.get("prompt"), "clip_url": clip,
+                 "thumb_url": self._scene_media_url(pid, take.get("thumb"))}
+                for take in scene_takes(scene)
+                if (clip := self._scene_media_url(pid, take.get("clip"))) is not None]
+
+    def _scene_view(self, pid: str, s: dict, job) -> dict:
         running = job is not None and self._stage(job) == "scene" and job.params.get("scene") == s["index"]
+        takes, active_id = self._take_views(pid, s), scene_take_id(s)
+        active = next((take for take in takes if take["id"] == active_id), {})
         return {**{k: s.get(k) for k in self.SCENE_KEYS},
-                "clip_url": url(s.get("clip")) if s["status"] == "done" else None, "thumb_url": url(s.get("thumb")),
-                "job_status": job.status if running else None}
+                "clip_url": active.get("clip_url"), "thumb_url": active.get("thumb_url"), "active_take_id": active_id,
+                "takes": takes, "job_status": job.status if running else None}
 
     def _message(self, proj: dict, job) -> str:
         """画面に出す一文。走っているジョブがあれば、そのジョブの今(順番待ち・準備中・「生成中 2/4」など)。"""
@@ -600,6 +643,32 @@ class Director:
             self._set(pid, "paused", "一時停止しました")
         elif state in RUNNING:       # 管理役の画面の外(ジョブの一覧など)から、このジョブだけ中止された
             self._set(pid, "paused", f"{label}が中止されたので一時停止しました")
+
+
+TAKE_FIELDS = ("clip", "thumb", "prompt", "direction", "seed", "elapsed_s", "peak_vram_gb")
+
+
+def scene_take_id(scene: dict) -> Optional[str]:
+    # Existing projects have one clip and no take ID.
+    return scene.get("take_id") or ("original" if scene.get("clip") else None)
+
+
+def scene_takes(scene: dict) -> list:
+    takes = list(scene.get("takes") or [])
+    take_id = scene_take_id(scene)
+    if scene.get("clip") and not any(t["id"] == take_id for t in takes):
+        takes.append({"id": take_id, **{key: scene.get(key) for key in TAKE_FIELDS}})
+    return takes
+
+
+def take_file(work: Path, name: Optional[str]) -> Optional[Path]:
+    if not name or name in (".", "..") or "/" in name or "\\" in name:
+        return None
+    path = work / name
+    try:
+        return path if path.resolve().parent == work.resolve() and path.is_file() else None
+    except (OSError, RuntimeError):
+        return None
 
 
 def _int(value, name: str) -> int:
