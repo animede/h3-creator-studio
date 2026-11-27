@@ -148,12 +148,21 @@ function render(s) {
 
 // 同梱 LLM(llama-server)の行: 状態(停止 / 起動中 / GPU で準備完了 / CPU で準備完了)・RAM・停止ボタン。止めても、次に LLM を使うときに起動し直す
 const LLM_STATE = { stopped: t("停止"), starting: t("起動中"), "ready-gpu": t("準備完了(GPU)"), "ready-cpu": t("準備完了(CPU)") };
+// LLM の初回の取得(llama-server・モデル・投影ファイル)の進み具合。黙って数 GB 取得していて、止まったように見えた(2026-11-28)
+const LLM_DOWNLOAD = { binary: t("LLM の実行ファイル(llama-server)"), model: t("LLM のモデル(Gemma 4 E4B、約 4.4GB)"),
+  mmproj: t("画像・音声を読む投影ファイル(約 0.56GB)") };
+function llmDownloadText(d) {
+  const what = LLM_DOWNLOAD[d.what] || d.what;
+  const gb = (b) => (b / 1e9).toFixed(2);
+  return d.total ? t("{what}をダウンロードしています(初回だけ): {done} / {total} GB({pct}%)", { what, done: gb(d.done), total: gb(d.total), pct: Math.floor(d.done * 100 / d.total) })
+    : t("{what}をダウンロードしています(初回だけ): {done} GB", { what, done: gb(d.done) });
+}
 let llmRow = null;
 function renderLlm(l) {
   if (!llmRow) {
     const row = el("div", "row");
     llmRow = { label: el("span", "label", t("同梱 LLM")), badge: el("span", "badge"), ext: el("span", "tag ext", t("外部")),
-      port: el("span", "meta"), rss: el("span", "meta"), btns: el("span", "btns") };
+      port: el("span", "meta"), rss: el("span", "meta"), dl: el("span", "meta"), btns: el("span", "btns") };
     llmRow.bStop = el("button", "", LANG === "en" ? "Stop" : "停止");      // i18n-skip エンジンの行と同じ(状態の「停止」と鍵を分ける)
     llmRow.bStop.title = t("止めても、次に LLM を使うときに自動で起動し直します");
     llmRow.bStop.onclick = async () => {
@@ -161,12 +170,13 @@ function renderLlm(l) {
       poll();
     };
     llmRow.btns.append(llmRow.bStop);
-    row.append(llmRow.label, llmRow.badge, llmRow.ext, llmRow.port, llmRow.rss, llmRow.btns);
+    row.append(llmRow.label, llmRow.badge, llmRow.ext, llmRow.port, llmRow.rss, llmRow.dl, llmRow.btns);
     $("rows").append(row);
   }
   const state = l.state || "stopped";
-  llmRow.badge.textContent = LLM_STATE[state] || state;
-  llmRow.badge.className = "badge " + (state.startsWith("ready") ? "ready" : state);
+  llmRow.badge.textContent = l.download ? t("ダウンロード中") : LLM_STATE[state] || state;
+  llmRow.badge.className = "badge " + (l.download ? "starting" : state.startsWith("ready") ? "ready" : state);
+  llmRow.dl.textContent = l.download ? llmDownloadText(l.download) : "";
   llmRow.ext.hidden = !l.external;
   llmRow.port.textContent = l.port ? `:${l.port}` : "";
   llmRow.rss.textContent = l.rss_mib != null ? `RSS ${gib(l.rss_mib)} GiB` : "";
@@ -183,6 +193,7 @@ function summarize(s) {
   const starting = comps.find((c) => c.state === "starting" || c.state === "stopping");
   if (op && op.steps.length) text += " - " + op.steps[op.steps.length - 1].msg;
   else if (starting) text += ` - ${starting.label}: ${STATE_LABEL[starting.state]}`;
+  if (s.llm && s.llm.download) text += " - " + llmDownloadText(s.llm.download);      // 畳んでいても見えるように
   return { text, error: !!(s.operation && s.operation.error) || comps.some((c) => c.state === "error") };
 }
 

@@ -13,6 +13,7 @@
 import asyncio
 import base64
 import contextlib
+import functools
 import io
 import logging
 import os
@@ -131,16 +132,46 @@ def extract_archive(archive: Path, dest_dir: Path) -> None:
         shutil.rmtree(sub, ignore_errors=True)
 
 
-def http_fetch(url: str, dest: Path) -> None:
+# 取得の進み具合: progress(取得済みのバイト数, 全体のバイト数 or None)。初回の強化などで LLM を黙って数 GB 取得していて、
+# 止まったように見えた(2026-11-28)ので、画面(エンジンの欄・見出し・強化の説明)に出す
+Progress = Callable[[int, Optional[int]], None]
+
+
+def http_fetch(url: str, dest: Path, progress: Optional[Progress] = None) -> None:
     """url を dest へ取得する(0.8GB 級なのでメモリに載せず、ファイルへ流す)。"""
     log.info("取得しています: %s", url)
     tmp = dest.with_suffix(dest.suffix + ".part")
     with httpx.stream("GET", url, follow_redirects=True, timeout=httpx.Timeout(60.0, read=600.0)) as r:
         r.raise_for_status()
+        total = int(r.headers["content-length"]) if r.headers.get("content-length", "").isdigit() else None
+        done = 0
         with open(tmp, "wb") as f:
             for chunk in r.iter_bytes(1 << 20):
                 f.write(chunk)
+                done += len(chunk)
+                if progress is not None:
+                    progress(done, total)
     tmp.replace(dest)
+
+
+def hf_progress_class(progress: Progress):
+    """hf_hub_download の tqdm_class に渡す、進み具合を progress に知らせるバー(管理役の画面には何も出さない)。
+    Xet の取得はバーを 2 本(受信・書き込み)作るので、多い方を知らせる(どちらも増える一方なので、数字が戻らない)。"""
+    from huggingface_hub.utils import tqdm as hf_tqdm
+    bars: dict = {}
+
+    class _Reporting(hf_tqdm):
+        def __init__(self, *args, **kwargs):
+            kwargs["disable"] = True
+            super().__init__(*args, **kwargs)
+            bars[id(self)] = kwargs.get("initial") or 0
+
+        def update(self, n=1):
+            bars[id(self)] = bars.get(id(self), 0) + (n or 0)
+            progress(max(bars.values()), self.total)
+            return super().update(n)
+
+    return _Reporting
 
 
 def install_binary(dest_dir: Path, gpu: bool, fetch: Callable = http_fetch, tag: str = TAG) -> Path:
@@ -230,7 +261,7 @@ def find_mmproj(cfg: Settings, gguf: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def _download(cfg: Settings, filename: str, hint: str, setting: str) -> Path:
+def _download(cfg: Settings, filename: str, hint: str, setting: str, progress: Optional[Progress] = None) -> Path:
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
@@ -239,15 +270,16 @@ def _download(cfg: Settings, filename: str, hint: str, setting: str) -> Path:
     dest = tools_dir_of(cfg)
     dest.mkdir(parents=True, exist_ok=True)
     log.info("モデルを取得しています: %s/%s(%s)", MODEL_REPO, filename, hint)
-    return Path(hf_hub_download(repo_id=MODEL_REPO, filename=filename, local_dir=str(dest)))
+    extra = {"tqdm_class": hf_progress_class(progress)} if progress is not None else {}
+    return Path(hf_hub_download(repo_id=MODEL_REPO, filename=filename, local_dir=str(dest), **extra))
 
 
-def download_model(cfg: Settings) -> Path:
-    return _download(cfg, MODEL_FILE, MODEL_SIZE_HINT, "gguf")
+def download_model(cfg: Settings, progress: Optional[Progress] = None) -> Path:
+    return _download(cfg, MODEL_FILE, MODEL_SIZE_HINT, "gguf", progress)
 
 
-def download_mmproj(cfg: Settings) -> Path:
-    return _download(cfg, MMPROJ_FILE, MMPROJ_SIZE_HINT, "mmproj")
+def download_mmproj(cfg: Settings, progress: Optional[Progress] = None) -> Path:
+    return _download(cfg, MMPROJ_FILE, MMPROJ_SIZE_HINT, "mmproj", progress)
 
 
 def shrink_image(data: bytes, mime: str, max_side: int = IMAGE_MAX_SIDE) -> tuple:
@@ -329,6 +361,7 @@ class Llm:
         self._starting = False
         self._error: Optional[str] = None
         self._users = 0               # chat / 強化の最中の数(release_before_gpu はこれが 0 になるのを待つ)
+        self._download: Optional[dict] = None   # 取得中なら {what: binary / model / mmproj, done, total}(画面に進み具合を出す)
         self._start_lock = asyncio.Lock()
 
     @property
@@ -392,21 +425,32 @@ class Llm:
         except LlmError:
             return False
 
+    def _reporter(self, what: str) -> Progress:
+        """取得の進み具合を self._download に書く関数(取得はスレッドで走り、画面は /api/status で読む)。"""
+        self._download = {"what": what, "done": 0, "total": None}
+
+        def report(done: int, total: Optional[int]) -> None:
+            self._download = {"what": what, "done": int(done), "total": int(total) if total else None}
+        return report
+
     async def _start(self) -> None:
         gpu = await asyncio.to_thread(use_gpu, self.mode)
         cpu_only = gpu and bool(self.busy())       # GPU の仕事が走っている(待っている)間は、GPU を隠して CPU だけで動かす
         try:
             exe = find_binary(self.cfg, gpu)
             if exe is None:
-                exe = await asyncio.to_thread(install_binary, binary_dir(tools_dir_of(self.cfg), gpu), gpu)
+                fetch = functools.partial(http_fetch, progress=self._reporter("binary"))
+                exe = await asyncio.to_thread(install_binary, binary_dir(tools_dir_of(self.cfg), gpu), gpu, fetch)
             gguf = find_gguf(self.cfg)
             if gguf is None:
-                gguf = await asyncio.to_thread(download_model, self.cfg)
+                gguf = await asyncio.to_thread(download_model, self.cfg, self._reporter("model"))
         except LlmError:
             raise
         except Exception as e:  # noqa: BLE001  ネットワーク・ディスクなど
             raise LlmError(f"LLM の用意に失敗しました: {type(e).__name__}: {e}"
                            "(studio.local.toml の [llm] に llama_server と gguf のパスを書けば、取得は不要です)")
+        finally:
+            self._download = None
         try:
             mmproj = find_mmproj(self.cfg, gguf)       # 画像・音声を読む投影ファイル。取得は、画像・音声を頼まれたときだけ(テキストの起動を遅らせない)
         except LlmError as e:
@@ -474,7 +518,7 @@ class Llm:
         rss = procman.rss_bytes(self._proc) if self._proc is not None and running else None
         return {"label": "同梱 LLM", "state": state, "external": self._external, "port": self.port, "in_use": self._users,
                 "rss_mib": round(rss / 1048576) if rss else None, "vram_mib": None, "can_stop": bool(self._proc is not None and not self._external),
-                "error": self._error}
+                "error": self._error, "download": dict(self._download) if self._download else None}
 
     async def release_before_gpu(self) -> bool:
         """GPU エンジンを載せる直前に呼ぶ。GPU を使っている子プロセスが居れば止めて VRAM を返す(次の chat で、CPU 専用の子として起こし直す)。
@@ -538,10 +582,12 @@ class Llm:
         if await asyncio.to_thread(find_mmproj, self.cfg) is not None or (self._proc is None and await self._healthy()):
             return
         try:
-            await asyncio.to_thread(download_mmproj, self.cfg)
+            await asyncio.to_thread(download_mmproj, self.cfg, self._reporter("mmproj"))
         except Exception as e:  # noqa: BLE001  ネットワーク・ディスクなど
             raise LlmError(f"画像・音声を読む投影ファイル({MMPROJ_FILE}、{MMPROJ_SIZE_HINT})を取得できませんでした: {getattr(e, 'message', e)}。"
                            "ネットワークを確かめて `setup --llm` で取得するか、studio.local.toml の [llm] mmproj にファイルのパスを書いてください")
+        finally:
+            self._download = None
 
     async def chat_image(self, system: str, user: str, image_bytes: bytes, mime: str = "image/png", max_tokens: int = 700, temperature: float = 0.0) -> str:
         """画像を見て答える(MV の人物の説明)。OpenAI 互換のメッセージで、画像は data URI。大きな画像は縮めてから渡す(IMAGE_MAX_SIDE)。
@@ -589,4 +635,5 @@ class Llm:
                 "gpu_setting": str(self.mode),
                 "free_vram_mib": smi_mib("free"), "starts": self.starts, "port": self.port,
                 "gguf": str(gguf) if gguf else None, "mmproj": str(mmproj) if mmproj else None, "binary": str(binary) if binary else None,
-                "in_use": self._users, "gpu_work": bool(self.busy()), "error": self._error}
+                "in_use": self._users, "gpu_work": bool(self.busy()), "error": self._error,
+                "download": dict(self._download) if self._download else None}

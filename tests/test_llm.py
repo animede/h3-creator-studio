@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import io
 import json
 import tarfile
@@ -135,6 +136,33 @@ class FilesTest(unittest.TestCase):
         self.assertTrue((dest / "libcudart.so.12").is_file())
         self.assertFalse((dest / "_download").exists())          # 取得したアーカイブは消す
         self.assertEqual(fetched, ["llama-b1-bin-ubuntu-cuda-12.8-x64.tar.gz", "cudart-llama-b1-bin-ubuntu-cuda-12.8-x64.tar.gz"])
+
+    def test_http_fetch_reports_progress(self):
+        class FakeResponse:
+            headers = {"content-length": str(3 << 20)}
+
+            def raise_for_status(self):
+                pass
+
+            def iter_bytes(self, size):
+                yield from (b"x" * (1 << 20) for _ in range(3))
+
+        seen = []
+        with mock.patch.object(llm_mod.httpx, "stream", return_value=contextlib.nullcontext(FakeResponse())):
+            llm_mod.http_fetch("https://example.invalid/a.zip", self.root / "a.zip", lambda d, t: seen.append((d, t)))
+        self.assertEqual(seen, [(1 << 20, 3 << 20), (2 << 20, 3 << 20), (3 << 20, 3 << 20)])
+        self.assertEqual((self.root / "a.zip").stat().st_size, 3 << 20)
+
+    def test_hf_progress_class_reports_the_larger_of_two_bars(self):
+        # Xet の取得は受信と書き込みの 2 本のバーを作る。多い方を知らせるので、数字が戻らない
+        seen = []
+        cls = llm_mod.hf_progress_class(lambda d, t: seen.append((d, t)))
+        received, written = cls(total=100), cls(total=100)
+        received.update(30)
+        written.update(10)
+        written.update(30)
+        received.update(70)
+        self.assertEqual(seen, [(30, 100), (30, 100), (40, 100), (100, 100)])
 
     def test_install_binary_unsupported_platform(self):
         with mock.patch("sys.platform", "darwin"), mock.patch("platform.machine", return_value="arm64"):
@@ -451,8 +479,12 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
         self.gpu_files()
         calls, started, fetched = [], [], []
 
-        def fake_download(cfg):
+        seen_download = []
+
+        def fake_download(cfg, progress):
             fetched.append(1)
+            progress(300 << 20, 600 << 20)                                                              # 取得の途中: 画面に進み具合が出る
+            seen_download.append((llm.panel()["download"], llm.status()["download"]))
             return touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
         llm = self.make(calls)
         llm.transport = chat_transport(calls, health_after=3)                                           # 自分で起こす(外部の llama-server は居ない)
@@ -463,6 +495,10 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await asyncio.wait_for(llm.chat_image("s", "u", self.png()), 5), "こんにちは")
             await llm.chat_image("s", "u", self.png())                                                  # 2 回目は、取得しない
         self.assertEqual((len(fetched), llm.starts, llm._with_projector), (1, 1, True))
+        want = {"what": "mmproj", "done": 300 << 20, "total": 600 << 20}
+        with mock.patch.object(llm_mod, "smi_mib", return_value=None):
+            self.assertEqual(seen_download, [(want, want)])
+            self.assertIsNone(llm.panel()["download"])                                                   # 終わったら消える
         (spec,) = started
         self.assertEqual(spec.cmd[spec.cmd.index("--mmproj") + 1], str(self.root / "tools" / llm_mod.MMPROJ_FILE))
 
@@ -614,7 +650,7 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
         self.gpu_files()
         calls, started, fetched = [], [], []
 
-        def fake_download(cfg):
+        def fake_download(cfg, progress=None):
             fetched.append(1)
             return touch(self.root / "tools" / llm_mod.MMPROJ_FILE)
         llm = self.make(calls)
@@ -660,6 +696,23 @@ class LlmTest(unittest.IsolatedAsyncioTestCase):
             await llm.chat_audio("s", "u", [self.wav()])
         self.assertIn("音声を読めません", cm.exception.message)
         self.assertEqual(llm.starts, 2)                                                                 # 投影ファイルつき → なし(1 回だけ起動し直す)
+
+    async def test_model_download_progress_shows_while_starting(self):
+        llm = self.make()
+        llm.transport = httpx.MockTransport(lambda r: httpx.Response(503))
+        seen = []
+
+        def fake_model(cfg, progress):
+            progress(1 << 30, 4 << 30)
+            seen.append(llm.panel()["download"])
+            raise OSError("network down")
+        with mock.patch.object(llm_mod, "use_gpu", return_value=False), \
+                mock.patch.object(llm_mod, "find_binary", return_value=self.root / "llama-server"), \
+                mock.patch.object(llm_mod, "find_gguf", return_value=None), mock.patch.object(llm_mod, "download_model", fake_model):
+            with self.assertRaises(LlmError):
+                await llm.ensure_running()
+        self.assertEqual(seen, [{"what": "model", "done": 1 << 30, "total": 4 << 30}])
+        self.assertIsNone(llm.panel()["download"])                  # 失敗しても残さない
 
     async def test_missing_files_raise_japanese_error(self):
         llm = self.make()

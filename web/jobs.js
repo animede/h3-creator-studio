@@ -118,7 +118,13 @@ function wireEnhance({ tab, ta, btn, undo, note, body = () => ({}), showMsg }) {
     showMsg("");
     btn.disabled = true;
     undo.hidden = true;
-    note.textContent = t("強化しています…(エンジンや LLM を起こすので、数分かかることがあります)");
+    const waiting = t("強化しています…(エンジンや LLM を起こすので、数分かかることがあります)");
+    note.textContent = waiting;
+    // 初回は LLM を数 GB 取得する。その間は進み具合を出す(/api/status の llm.download。lastStatus は app.js が更新する)
+    const tick = setInterval(() => {
+      const d = lastStatus && lastStatus.llm && lastStatus.llm.download;
+      note.textContent = d ? llmDownloadText(d) : waiting;
+    }, 1000);
     try {
       const r = await fetch("/api/enhance", { method: "POST", headers: langHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ tab, text, ...body() }) });
       const js = await r.json().catch(() => ({}));
@@ -132,6 +138,7 @@ function wireEnhance({ tab, ta, btn, undo, note, body = () => ({}), showMsg }) {
       note.textContent = "";
       showMsg(t("強化できませんでした: {error}", { error: e.message || e }));
     } finally {
+      clearInterval(tick);
       btn.disabled = false;
     }
   };
