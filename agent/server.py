@@ -37,8 +37,10 @@ OUTPUTS_DIR = settings.root / "outputs"
 TERMINAL_JOB = ("completed", "failed", "cancelled")
 TERMINAL_PROJECT = ("completed", "failed", "cancelled")
 POLL_S = 3.0
-PREVIEW_FRAMES = 4             # 1 シーンから切り出すコマの数(時間の順に横に並べる)
+PREVIEW_FRAMES = 4             # 1 シーンから切り出すコマの数の既定(時間の順に横に並べる)
+PREVIEW_FRAMES_MIN, PREVIEW_FRAMES_MAX = 2, 8   # preview_scenes の frames で選べる範囲(動きの大きいシーン・乗り物は 8 で細かく見る)
 PREVIEW_BOX = 288              # 1 コマを収める正方形の一辺(px)。横長でも縦長でも同じくらいの大きさになる
+PREVIEW_SHEET_WIDTH = 1600     # コマ数が多いときは、横幅がこれに収まるよう 1 コマを小さくする(8 コマで 200px)
 PREVIEW_MAX_SCENES = 8         # 1 回に見せるシーンの数(画像が大きいとエージェントの文脈を圧迫する)
 PREVIEW_LABEL_PX = 24
 PREVIEW_IMAGE_PX = 768         # 生成した画像を見せるときの長辺(px)
@@ -496,23 +498,28 @@ async def control_project(project_id: str, action: str, kind: str = "mv") -> dic
     return project_view(await client.call("POST", f"/api/{_kind(kind)}/{project_id}/{action}"))
 
 
-def _scene_strip(ffmpeg: str, clip: Path, duration: float):
-    """1 シーンの動画から PREVIEW_FRAMES コマを切り出し、横に並べた画像(Pillow)にする。コマは等分した区間の真ん中の時刻
-    (6 秒なら 0.75・2.25・3.75・5.25 秒)。1 コマずつ時刻を指定して取る(fps フィルタでまとめて取ると、端数でコマが 1 つ欠けた)。
+def preview_box(frames: int) -> int:
+    """1 コマを収める正方形の一辺。4 コマまでは PREVIEW_BOX、それより多ければ横幅が PREVIEW_SHEET_WIDTH に収まる大きさ。"""
+    return min(PREVIEW_BOX, PREVIEW_SHEET_WIDTH // max(1, frames))
+
+
+def _scene_strip(ffmpeg: str, clip: Path, duration: float, frames: int = PREVIEW_FRAMES):
+    """1 シーンの動画から frames コマを切り出し、横に並べた画像(Pillow)にする。コマは等分した区間の真ん中の時刻
+    (6 秒・4 コマなら 0.75・2.25・3.75・5.25 秒)。1 コマずつ時刻を指定して取る(fps フィルタでまとめて取ると、端数でコマが 1 つ欠けた)。
     長さは ffprobe で読み、読めなければ duration(シーンの区間)を使う。"""
     from PIL import Image as PILImage
     length = media.probe(clip).get("duration_s") or max(float(duration or 0.0), 0.5)
-    frames = []
-    for i in range(PREVIEW_FRAMES):
-        cmd = [ffmpeg, "-v", "error", "-ss", f"{length * (i + 0.5) / PREVIEW_FRAMES:.3f}", "-i", str(clip), "-frames:v", "1",
-               "-vf", f"scale={PREVIEW_BOX}:{PREVIEW_BOX}:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "-"]
+    box, shots = preview_box(frames), []
+    for i in range(frames):
+        cmd = [ffmpeg, "-v", "error", "-ss", f"{length * (i + 0.5) / frames:.3f}", "-i", str(clip), "-frames:v", "1",
+               "-vf", f"scale={box}:{box}:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "-"]
         out = subprocess.run(cmd, capture_output=True, timeout=60)
         if out.returncode != 0 or not out.stdout:
             raise StudioError(f"ffmpeg could not read {clip.name}: {out.stderr.decode(errors='replace').strip()[:200]}")
-        frames.append(PILImage.open(io.BytesIO(out.stdout)).convert("RGB"))
-    strip = PILImage.new("RGB", (sum(f.width for f in frames), max(f.height for f in frames)))
+        shots.append(PILImage.open(io.BytesIO(out.stdout)).convert("RGB"))
+    strip = PILImage.new("RGB", (sum(f.width for f in shots), max(f.height for f in shots)))
     x = 0
-    for f in frames:
+    for f in shots:
         strip.paste(f, (x, 0))
         x += f.width
     return strip
@@ -534,12 +541,19 @@ def _contact_sheet(rows: list) -> bytes:
     return buf.getvalue()
 
 
-async def preview_scenes(project_id: str, kind: str = "mv", scenes: Optional[list[int]] = None) -> list[Union[str, Image]]:
+async def preview_scenes(project_id: str, kind: str = "mv", scenes: Optional[list[int]] = None,
+                         frames: int = PREVIEW_FRAMES) -> list[Union[str, Image]]:
     """Look at a music video ("mv") or short video ("short"): returns one image with a row per finished scene (labelled
-    "Scene N", 4 frames left to right in time) and a short note. Use it before calling the video done and after retry_scene.
-    Check: the same face and clothes in every scene, singing / speaking scenes move the mouth, scenes without singing keep
-    it closed, the framing is not the same in every scene, no garbled faces or hands, no text in the picture.
-    scenes: scene numbers to show (default all finished ones, at most 8 per call)."""
+    "Scene N", frames left to right in time) and a short note. Use it before calling the video done and after retry_scene.
+    Check the people: the same face and clothes in every scene, singing / speaking scenes move the mouth, scenes without
+    singing keep it closed, no duplicated person, no garbled faces or hands. Check the world: vehicles, buildings and other
+    objects keep their shape (a train must not melt or flatten into a wall), people stand only where people can be (not
+    on rails, between moving trains or in mid-air), the framing is not the same in every scene, no text in the picture.
+    scenes: scene numbers to show (default all finished ones, at most 8 per call). frames: 2-8 per scene (default 4);
+    use 8 for scenes with vehicles or large motion, since things can change between the frames you see."""
+    if not PREVIEW_FRAMES_MIN <= int(frames) <= PREVIEW_FRAMES_MAX:
+        raise StudioError(f"frames must be {PREVIEW_FRAMES_MIN}-{PREVIEW_FRAMES_MAX}")
+    frames = int(frames)
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise StudioError("ffmpeg is not installed on this PC, so the scenes cannot be previewed")
@@ -557,11 +571,11 @@ async def preview_scenes(project_id: str, kind: str = "mv", scenes: Optional[lis
         for s in shown:
             clip = await _media_file(s["clip_url"], Path(tmp), f"scene_{s['index']}.mp4")
             duration = float(s.get("end") or 0) - float(s.get("start") or 0)
-            strip = await asyncio.to_thread(_scene_strip, ffmpeg, clip, duration)
+            strip = await asyncio.to_thread(_scene_strip, ffmpeg, clip, duration, frames)
             label = f"Scene {s['index']}  {s.get('kind') or ''}  {float(s.get('start') or 0):.1f}-{float(s.get('end') or 0):.1f} s"
             rows.append((label, strip))
     note = (f"Project {project_id}: rows top to bottom are scenes {[s['index'] for s in shown]}, "
-            f"{PREVIEW_FRAMES} frames each, left to right in time.")
+            f"{frames} frames each, left to right in time.")
     if waiting:
         note += f" Not rendered yet: {waiting}."
     if later:

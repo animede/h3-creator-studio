@@ -307,6 +307,14 @@ class McpServerTest(unittest.TestCase):
         sheet = Image.open(io.BytesIO(base64.b64decode(image.data)))
         self.assertEqual(sheet.size, (4 * 288, 2 * (ms.PREVIEW_LABEL_PX + 162)))      # 320x180 → 288x162 のコマが 4 つ、2 行
         self.assertIn(("GET", "/outputs/other/scene_002.mp4"), [c[:2] for c in self.studio.calls])
+        r = self.run_tool("preview_scenes", {"project_id": "p1", "scenes": [1], "frames": 8})          # 乗り物・動きの大きいシーンは 8 コマ
+        self.assertIn("8 frames each", r.content[0].text)
+        sheet8 = Image.open(io.BytesIO(base64.b64decode(r.content[1].data)))
+        self.assertEqual(sheet8.size, (8 * 200, ms.PREVIEW_LABEL_PX + 113))           # 横幅 1600 に収めるので 1 コマ 200px(320x180 → 200x113)
+        for bad in (1, 9):
+            r = self.run_tool("preview_scenes", {"project_id": "p1", "frames": bad})
+            self.assertTrue(r.is_error)
+            self.assertIn("frames must be 2-8", r.content[0].text)
         with mock.patch.object(ms, "PREVIEW_MAX_SCENES", 1):
             r = self.run_tool("preview_scenes", {"project_id": "p1", "scenes": [1, 2]})
         self.assertIn("More scenes: call again with scenes=[2]", r.content[0].text)

@@ -84,7 +84,7 @@ Windows(PowerShell):
 | `listen_song` | 同梱 LLM が曲を聞いて、言語・ジャンル・雰囲気・楽器・ボーカル・テンポを答える(エージェントは曲を聞けないので、確かめる用。歌詞は聞き取らない) |
 | `get_job` | 画像・動画・曲のジョブの様子 |
 | `create_music_video` / `create_short_video` | MV / ショート動画の制作を始める |
-| `preview_scenes` | 制作の各シーンから 4 コマずつ切り出して並べた画像を返す(エージェントが結果を見て確かめる。ffmpeg を使う) |
+| `preview_scenes` | 制作の各シーンから 4 コマずつ切り出して並べた画像を返す(エージェントが結果を見て確かめる。乗り物や動きの大きいシーンは `frames` で 8 コマまで細かく。ffmpeg を使う) |
 | `list_projects` / `get_project` / `wait_for_project` | 制作の一覧 / 様子(`include_prompts` でシーンごとの演出)/ 終わるまで待つ |
 | `retry_scene` | 1 シーンをやり直す(そのシーンの演出の文だけを直して、または seed を変えて。公式の形への組み立ては管理役がする)。全部そろうと自動で結合し直す |
 | `control_project` | 一時停止・再開・中止・結合し直す |

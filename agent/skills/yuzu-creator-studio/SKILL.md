@@ -79,16 +79,20 @@ One 5-15 second clip with sound (for a whole song, use a music video).
 4. **Wait**: call `wait_for_project` again and again (up to 1800 s per call; use a shorter `timeout_s` if your MCP client times out long calls). Report progress between calls.
 5. **Review** before calling it done:
    - `preview_scenes project_id=...` returns one image: a row per finished scene ("Scene N"), 4 frames left to right in time. It shows up to 8 scenes per call; pass `scenes=[...]` for the rest.
-   - Check:
-     - the same face and clothes in every scene
+   - Things can change between the frames you see. For scenes with vehicles, crowds or large motion, look again with `frames=8`.
+   - Check the people:
+     - the same face and clothes in every scene, and only one copy of each person
      - singing scenes move the mouth; scenes without singing keep it closed
-     - scenes are not all the same framing
      - no garbled faces or hands
-     - no text in the picture
+   - Check the world, not only the people:
+     - vehicles, buildings and objects keep their shape through the scene (a train must not melt or flatten into a wall after someone steps off)
+     - people stand only where people can be: not on rails, between trains, in the road in front of a car, or in mid-air
+     - doors, windows and paths lead somewhere plausible
+   - Check the film: scenes are not all the same framing, the story beats asked for are actually there, no text in the picture.
 6. **Show the user** the final `output.file` and your notes. Ask which scenes to change.
 7. **Refine**:
    - `retry_scene index=N direction=...` changes one scene. The seed is kept, so the change comes from the direction.
-   - When it is done (`wait_for_project`), check it with `preview_scenes scenes=[N]` before showing the user.
+   - When it is done (`wait_for_project`), check it with `preview_scenes scenes=[N]` (`frames=8` if it has vehicles or large motion) before showing the user.
    - With no direction and no seed, you get a new take of the same direction.
    - When every scene is done, the video is reassembled automatically. Earlier versions stay in the gallery.
 

@@ -84,7 +84,7 @@ If `mcp` is not installed, the server stops and the agent's MCP log shows the co
 | `listen_song` | The bundled LLM listens to a song and reports language, genre, mood, instruments, vocal and tempo (agents cannot hear; not a lyrics transcription) |
 | `get_job` | State of an image, video or music job |
 | `create_music_video` / `create_short_video` | Start a Music Video / Short Video project |
-| `preview_scenes` | Returns one image with 4 frames from each scene of a project (so the agent can look at the result; uses ffmpeg) |
+| `preview_scenes` | Returns one image with 4 frames from each scene of a project (so the agent can look at the result; `frames` up to 8 for scenes with vehicles or large motion; uses ffmpeg) |
 | `list_projects` / `get_project` / `wait_for_project` | List projects / show one (`include_prompts` adds each scene's direction) / wait until it finishes |
 | `retry_scene` | Re-render one scene (with a new direction for that scene, or a new seed; the supervisor rebuilds the official prompt around the direction); the video is reassembled automatically when all scenes are done |
 | `control_project` | Pause, resume, cancel or reassemble |
