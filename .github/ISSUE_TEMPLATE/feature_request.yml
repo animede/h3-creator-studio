@@ -1,0 +1,21 @@
+name: 要望 / Feature request
+description: こうなるとうれしい / Something that would make the studio better
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: ほしいもの / What you would like
+      description: 日本語でも英語でも構いません / Japanese or English is fine
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 使い方・理由 / How you would use it
+      description: どんな作品・作業で困っているか / What you are making, and what gets in the way
+  - type: input
+    id: env
+    attributes:
+      label: 環境(任意)/ Your setup (optional)
+      placeholder: Windows 11, RTX 4060 8GB, RAM 32GB, v1.1.0

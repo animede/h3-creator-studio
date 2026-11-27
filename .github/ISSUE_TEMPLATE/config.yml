@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: トラブルシューティング(README)/ Troubleshooting (README)
+    url: https://github.com/animede/h3-creator-studio/blob/main/README.en.md#troubleshooting
+    about: よくある問題と対処 / Common problems and fixes
+  - name: AI エージェントから使う(MCP)/ Using it from an AI agent (MCP)
+    url: https://github.com/animede/h3-creator-studio/blob/main/agent/README.en.md
+    about: 登録のしかた・道具の一覧 / How to register it and the list of tools

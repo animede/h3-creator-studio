@@ -1,0 +1,91 @@
+name: 不具合の報告 / Bug report
+description: 動かない・エラーが出る・結果がおかしい / Something does not work, shows an error or gives a wrong result
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。先に README の「[トラブルシューティング](https://github.com/animede/h3-creator-studio#トラブルシューティング)」もご覧ください。日本語でも英語でも構いません。
+        Thank you for reporting. Please check [Troubleshooting](https://github.com/animede/h3-creator-studio/blob/main/README.en.md#troubleshooting) first. Japanese or English is fine.
+  - type: input
+    id: version
+    attributes:
+      label: 版 / Version
+      description: 画面のいちばん下に出る版(例 v1.1.0)。setup の途中なら「setup」/ Shown at the bottom of the screen (e.g. v1.1.0). Write "setup" if it failed during setup
+      placeholder: v1.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux
+        - その他(Google Colab など)/ Other (Google Colab etc.)
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU と VRAM / GPU and VRAM
+      description: 複数あればすべて / All of them if you have more than one
+      placeholder: RTX 4060 8GB
+    validations:
+      required: true
+  - type: input
+    id: ram
+    attributes:
+      label: メモリ(RAM)/ RAM
+      placeholder: 32GB
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: どこで / Where
+      options:
+        - インストール(setup)/ Installation (setup)
+        - 起動 / Starting the studio
+        - 画像タブ / Image tab
+        - 動画タブ / Video tab
+        - 音楽タブ / Music tab
+        - MV タブ / Music Video tab
+        - ショート動画タブ / Short Video tab
+        - 編集タブ / Edit tab
+        - AI エージェント(MCP、agent/)/ AI agent (MCP, agent/)
+        - その他 / Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: したこと / What you did
+      description: 押したボタン、選んだ設定(画質・画角・秒数など)を順に / The buttons you pressed and the settings you chose (quality, aspect, length ...), in order
+      placeholder: |
+        1. MV タブで曲と画像を入れた / Put a song and an image in the Music Video tab
+        2. 画質「高速」、16:9 で「MV を作る」/ Quality "Fast", 16:9, pressed "Make MV"
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 起きたこと / What happened
+      description: 画面に出たエラーの文はそのまま貼ってください(スクリーンショットも可)/ Paste the error message as it is (screenshots welcome)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ / Logs
+      description: |
+        エンジンのログ(スタジオのフォルダの logs/ の h3.log・h3image.log・ace.log・llm.log)のうち、関係しそうなものの最後の 50〜100 行と、run.bat / run.sh の画面の最後の部分。setup の失敗なら setup の画面の最後の部分。
+        The last 50-100 lines of the related engine log (logs/h3.log, h3image.log, ace.log, llm.log in the studio folder) and the end of the run.bat / run.sh window. For a setup failure, the end of the setup window.
+      render: text
+  - type: textarea
+    id: settings
+    attributes:
+      label: 自分の設定 / Your settings
+      description: studio.local.toml を書き換えていれば、その中身(無ければ空のまま)/ The contents of studio.local.toml if you changed it (leave empty otherwise)
+      render: toml
