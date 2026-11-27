@@ -109,9 +109,9 @@ If you stop partway, run setup again and it picks up where it left off.
 
    The audio processing tools used by the Music Video tab and the Short Video tab (when using a song), about 1.3GB, are installed by the same line. To skip them, use `.\setup.bat --no-mv`. You can add them later with the **Install tools** button on the Music Video tab or `.\setup.bat --only mvtools`.
 
-   If it tells you to reopen PowerShell and run it again ("PowerShell を開き直してもう一度実行"), reopen it and run `cd C:\h3-creator-studio; .\setup.bat` again.
+   If it tells you to reopen PowerShell and run it again ("PowerShell を開き直してもう一度実行"), reopen it and run `cd C:\h3-creator-studio; .\setup.bat` again. If it stops for another reason, the reason is shown at the end (the progress is also kept in `logs\setup.log`).
 
-3. At the end setup asks whether to create a desktop launcher (YUZU Creator Studio) — press Enter. From then on, **double-click the desktop icon**: the studio starts and opens **http://127.0.0.1:8700** in your browser once it is ready (if it is already running, it just opens the browser). Without the icon, start it with `.\run.bat` and open the address in your browser.
+3. At the end setup asks whether to create a desktop launcher (YUZU Creator Studio) — press Enter. From then on, **double-click the desktop icon**: the studio starts and opens **http://127.0.0.1:8700** in your browser once it is ready (if it is already running, it just opens the browser). Without the icon, start it with `.\run.bat` and open the address in your browser. If the question did not appear, or to create only the icon later, run `.\setup.bat --shortcut` (it tells you why when it cannot create one).
 
 If you run into trouble, see "Windows (detailed)" and "Troubleshooting" below.
 
@@ -510,6 +510,7 @@ Engine names are `h3` / `h3image` / `ace` / `aivis`.
 
 ## Troubleshooting
 
+- **You cannot tell where setup stopped**: the progress is appended to `logs\setup.log` (Linux: `logs/setup.log`). Just above the last "===== 終わり … 終了コード N =====" line you find the step that stopped and why (the engines' own scripts print only to the screen). The previous setup.bat could wipe its last messages off the screen in Windows Terminal (fixed on 2026-11-28).
 - **An engine shows "Error"**: open "Log" on that row. The same content is in `logs\<name>.log` (`logs/h3.log`, etc.). If the model or environment is missing, run setup again.
 - **"The Python environment of ... is incomplete (module uvicorn is missing)"**: that engine's virtual environment was only partly installed (its log has `No module named ...`). Stop the studio, then run `.\setup.bat --only <name>` (Linux: `./setup.sh --only <name>`). The name (h3 / h3image / ace, etc.) is in the message.
 - **Port already in use**: another app is using one of 8700 (supervisor), 8701 (bundled LLM), 8611 (video), 8633 (image), 8001 (music) or 10101 (TTS). Stop it, or change the port in `studio.local.toml`.

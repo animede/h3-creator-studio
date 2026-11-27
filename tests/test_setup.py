@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 import os
 import shutil
@@ -771,19 +772,65 @@ class SetupBatTest(unittest.TestCase):
         self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))          # CRLF だけ
         return raw.split(b"\r\n")
 
-    def test_japanese_only_while_utf8(self):
+    def test_ascii_only_and_no_code_page_switch(self):
+        # chcp は 932 との切り替えで画面を消す(microsoft/terminal#9446)。Windows Terminal で setup.py の最後の
+        # 「失敗しました」「もう一度実行」が消え、プロンプトだけが上に残った(2026-11-28、Windows 11)。
+        # 切り替えない以上、cmd は .bat を画面のコードページ(932 など)で読むので、ASCII だけで書く
         lines = self.lines()
-        first = lines.index(b"chcp 65001 >nul")
-        self.assertTrue(all(line.isascii() for line in lines[:first]))   # 切り替える前は ASCII だけ
+        self.assertTrue(all(line.isascii() for line in lines))
+        self.assertFalse(any(b"chcp" in line.lower() for line in lines if not line.lower().startswith(b"rem ")))
+        self.assertIn(b".venv\\Scripts\\python.exe scripts\\setup.py %*", lines)
 
-    def test_python_runs_with_the_original_code_page(self):
-        # Windows 10 のコンソールは 65001 で日本語の無い字体に替わり、setup.py の質問が読めなかった(2026-11-26)
-        lines = self.lines()
-        run = next(i for i, line in enumerate(lines) if line.startswith(b".venv\\Scripts\\python.exe scripts\\setup.py"))
-        back = max(i for i in range(run) if b"chcp %OLDCP%" in lines[i])
-        utf8 = next(i for i in range(run, len(lines)) if lines[i] == b"chcp 65001 >nul")
-        self.assertTrue(all(not line.strip() or line.startswith(b"rem ") for line in lines[back + 1:run]))
-        self.assertTrue(all(line.isascii() for line in lines[back:utf8 + 1]))   # 元のコードページで読む行は ASCII だけ
+    def test_notices_come_from_the_ps1(self):
+        import re
+        bat = b"\n".join(self.lines()).decode("ascii")
+        keys = set(re.findall(r"call :notice (\w+) ", bat))
+        self.assertEqual(keys, {"uv_reopen", "venv_failed", "uv_new"})
+        raw = (_path.parent / "setup_notice.ps1").read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))                 # BOM: Windows PowerShell 5.1 が UTF-8 と読む
+        ps1 = raw.decode("utf-8-sig")
+        for k in keys:
+            self.assertIn(f'"{k}" = @(', ps1)
+        self.assertNotIn("OutputEncoding", ps1)                            # コードページを変えない(画面が消える)
+        self.assertIn("もう一度実行してください", ps1)
+
+
+class SetupLogTest(unittest.TestCase):
+    """logs/setup.log(画面が消えても、どこで止まったか後から分かるように)。"""
+
+    def tearDown(self):
+        if S._log_file is not None:
+            S._log_file.close()
+        S._log_file, S._log_path = None, None
+
+    def test_records_steps_and_exit_code(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+
+            def fake_main(argv):
+                S.say("== 事前確認 ==")
+                with mock.patch.object(S.subprocess, "call", return_value=3), mock.patch("builtins.print"):
+                    S.run_step(S.Step("h3: 環境の作成", ["x"]), root)
+                return 1
+            with mock.patch.object(S, "main", fake_main), mock.patch("builtins.print"):
+                self.assertEqual(S.run_logged(["--only", "h3"], root), 1)
+            text = (root / "logs" / "setup.log").read_text(encoding="utf-8")
+        self.assertIn("args: --only h3", text)
+        self.assertIn("== 事前確認 ==", text)
+        self.assertIn(">>> h3: 環境の作成", text)
+        self.assertIn("(終了コード 3、", text)
+        self.assertIn("失敗しました: h3: 環境の作成(終了コード 3)", text)
+        self.assertIn("setup の経過の記録:", text)
+        self.assertIn("終了コード 1 =====", text)
+
+    def test_records_a_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            with mock.patch.object(S, "main", side_effect=RuntimeError("boom")), self.assertRaises(RuntimeError):
+                S.run_logged([], root)
+            S._log_file.close()
+            text = (root / "logs" / "setup.log").read_text(encoding="utf-8")
+        self.assertIn("RuntimeError: boom", text)
 
 
 class ShortcutTest(unittest.TestCase):
@@ -801,9 +848,13 @@ class ShortcutTest(unittest.TestCase):
 
     def fake_run(self, argv, **kw):
         self.calls.append((argv, kw.get("env") or {}))
+        self.assertIs(kw.get("stdin"), subprocess.DEVNULL)                 # この画面の入力を PowerShell に触らせない
         if "GetFolderPath" in argv[-1]:
-            return types.SimpleNamespace(returncode=0, stdout=(str(self.desk) + "\r\n").encode("utf-8"))
-        return types.SimpleNamespace(returncode=0, stdout=b"")
+            b64 = base64.b64encode(str(self.desk).encode("utf-8")).decode("ascii")
+            return types.SimpleNamespace(returncode=0, stdout=(b64 + "\r\n").encode("ascii"), stderr=b"")
+        if "CreateShortcut" in argv[-1]:
+            Path(kw["env"]["YCS_LNK"]).write_bytes(b"lnk")
+        return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     def test_other_os_does_nothing(self):
         self.assertIsNone(S.offer_shortcut(Path("/r"), "linux", self.fake_run))
@@ -821,6 +872,43 @@ class ShortcutTest(unittest.TestCase):
                          (str(root / "run.bat"), str(root), str(self.desk / "YUZU Creator Studio.lnk")))
         self.assertTrue(env["YCS_ICON"].endswith("favicon.ico"))
         self.assertIn("ダブルクリックでスタジオが起動し", "\n".join(self.lines))
+        self.assertNotIn("OutputEncoding", self.calls[0][0][-1])            # 画面のコードページを変えない(Windows 10 で日本語が消える)
+
+    def test_desktop_unknown_is_reported(self):
+        # 2026-11-28: デスクトップの場所が取れないと、何も言わずに終わっていた
+        def broken(argv, **kw):
+            return types.SimpleNamespace(returncode=1, stdout=b"", stderr="#< CLIXML\r\n何かのエラー\r\n".encode("utf-8"))
+        with mock.patch.object(S, "ask_yes") as ask:
+            self.assertIsNone(S.offer_shortcut(Path("/r"), "win32", broken))
+            ask.assert_not_called()
+        text = "\n".join(self.lines)
+        self.assertIn("デスクトップの場所が分かりません(PowerShell のエラー: 何かのエラー)", text)
+        self.assertIn(".\\setup.bat --shortcut", text)
+
+        def missing(argv, **kw):
+            raise FileNotFoundError("powershell")
+        self.lines.clear()
+        self.assertIsNone(S.offer_shortcut(Path("/r"), "win32", missing))
+        self.assertIn("PowerShell を起動できません", "\n".join(self.lines))
+
+    def test_create_failure_is_reported(self):
+        def no_file(argv, **kw):
+            if "GetFolderPath" in argv[-1]:
+                return self.fake_run(argv, **kw)
+            return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")    # 終わったがファイルができていない
+        with mock.patch.object(S, "ask_yes", return_value=True):
+            self.assertIsNone(S.offer_shortcut(Path("/r"), "win32", no_file))
+        self.assertIn("アイコンのファイルができていません", "\n".join(self.lines))
+
+    def test_shortcut_flag_does_only_that(self):
+        with mock.patch.object(S, "offer_shortcut", return_value=Path("x.lnk")) as offer, \
+                mock.patch.object(S, "check_prerequisites") as pre, mock.patch.object(S.sys, "platform", "win32"):
+            self.assertEqual(S.main(["--shortcut"]), 0)
+        offer.assert_called_once()
+        pre.assert_not_called()
+        with mock.patch.object(S.sys, "platform", "linux"):
+            self.assertEqual(S.main(["--shortcut"]), 0)
+        self.assertIn("./run.sh --open", "\n".join(self.lines))
 
     def test_existing_or_declined(self):
         (self.desk / "YUZU Creator Studio.lnk").write_bytes(b"x")

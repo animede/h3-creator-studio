@@ -1,16 +1,18 @@
 @echo off
-for /f "tokens=2 delims=:" %%a in ('chcp') do set "OLDCP=%%a"
-set "OLDCP=%OLDCP: =%"
-rem UTF-8 first: every line below (Japanese text included) is parsed with this code page
-chcp 65001 >nul
-rem YUZU Creator Studio のセットアップ(Windows)。uv を用意し、管理役の .venv を作って、scripts\setup.py に渡す。
-rem   .\setup.bat                  エンジンの取り込み + 環境 + モデル + MV の音声処理の道具(合計 約 175GB、回線次第で数時間)
-rem   .\setup.bat --no-models      環境だけ(モデルは後で)
-rem   .\setup.bat --only h3,ace    指定したエンジンだけ
-rem   .\setup.bat --llm            同梱 LLM(約 5GB)も先に取得する
-rem   .\setup.bat --no-mv          MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB。既定で入れる)を入れない
-rem   .\setup.bat --only mvtools   その道具だけ
-rem 何度実行してもよい。済んでいる所は飛ばし、途中で止まっても続きから進む。
+rem YUZU Creator Studio setup for Windows: prepares uv and the studio's .venv, then hands over to scripts\setup.py.
+rem   .\setup.bat                  engines + environments + models + MV audio tools (about 175GB in total; hours, depending on the line)
+rem   .\setup.bat --no-models      environments only (models later)
+rem   .\setup.bat --only h3,ace    only the given engines
+rem   .\setup.bat --llm            also fetch the bundled LLM (about 5GB) up front
+rem   .\setup.bat --no-mv          skip the MV audio tools (Demucs + librosa, CPU torch, about 1.3GB; installed by default)
+rem   .\setup.bat --only mvtools   only those tools
+rem   .\setup.bat --shortcut       only the desktop launcher icon
+rem Safe to run again: finished parts are skipped and an interrupted run continues where it stopped.
+rem
+rem This file is ASCII only and never changes the code page. chcp clears the screen when it switches to or from 932
+rem (microsoft/terminal#9446): in Windows Terminal it wiped the last messages of setup.py ("failed ..." / "run setup again")
+rem and left only a prompt at the top (2026-11-28, Windows 11). Japanese text is printed by scripts\setup.py and
+rem scripts\setup_notice.ps1, which write Unicode to the console themselves.
 setlocal
 cd /d "%~dp0"
 set "UV_NEW=0"
@@ -18,10 +20,10 @@ set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
 
 where uv >nul 2>nul
 if not errorlevel 1 goto have_uv
-echo [1/3] uv を入れます
+echo [1/3] Installing uv
 where winget >nul 2>nul
 if not errorlevel 1 goto uv_winget
-echo winget が見つからないので、公式の PowerShell インストーラで入れます
+echo winget was not found, so uv is installed with the official PowerShell installer
 powershell -ExecutionPolicy ByPass -NoProfile -Command "irm https://astral.sh/uv/install.ps1 | iex"
 goto uv_installed
 :uv_winget
@@ -36,50 +38,28 @@ echo [1/3] uv
 :uv_ok
 uv --version
 
-echo [2/3] 管理役の Python 環境 .venv
+echo [2/3] Studio Python environment (.venv)
 if not exist ".venv\Scripts\python.exe" (
   uv venv --python 3.12 .venv || goto failed
 )
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt || goto failed
 
-echo [3/3] エンジンの取り込みと準備
-rem While Python runs, go back to the original code page. Python writes Unicode to the console by itself, and the Windows 10
-rem console swaps to a font without Japanese under 65001 (the setup questions were unreadable, 2026-11-26). The lines up to
-rem the next "chcp 65001" are parsed with the original code page, so they must stay ASCII.
-if defined OLDCP chcp %OLDCP% >nul
+echo [3/3] Engines: download and prepare
 .venv\Scripts\python.exe scripts\setup.py %*
 set "RC=%ERRORLEVEL%"
-chcp 65001 >nul
-if "%UV_NEW%"=="1" call :notice_after
-chcp %OLDCP% >nul
+if "%UV_NEW%"=="1" call :notice uv_new "uv was newly installed. Reopen PowerShell to use uv yourself; .\run.bat works as it is."
 endlocal & exit /b %RC%
 
 :uv_notice
-echo.
-echo ============================================================
-echo  uv を入れましたが、この画面からはまだ見えません。
-echo  この画面を閉じて、PowerShell を開き直し、
-echo      .\setup.bat
-echo  をもう一度実行してください。
-echo  ここまでで入れたのは uv だけです。本番の準備は 2 回目の実行で始まります。
-echo  (uv was installed. Close this window, open PowerShell again and run .\setup.bat once more.)
-echo ============================================================
-chcp %OLDCP% >nul
+call :notice uv_reopen "uv was installed. Close this window, open PowerShell again and run .\setup.bat once more."
 endlocal & exit /b 1
 
 :failed
-echo.
-echo 管理役の環境を作れませんでした。上の出力を確認して、.\setup.bat をもう一度実行してください。
-echo (Could not create the studio environment. Check the output above and run .\setup.bat again.)
-chcp %OLDCP% >nul
+call :notice venv_failed "Could not create the studio environment. Check the output above and run .\setup.bat again."
 endlocal & exit /b 1
 
-:notice_after
-echo.
-echo ============================================================
-echo  今回 uv を新しく入れました。
-echo  この画面で uv コマンドを自分で使うなら、PowerShell を
-echo  開き直してください。.\run.bat だけなら、このままで動きます。
-echo  (uv was newly installed. Reopen PowerShell to use uv yourself; .\run.bat works as it is.)
-echo ============================================================
+:notice
+rem %1 = message key in scripts\setup_notice.ps1 (Japanese + English), %2 = the English text if PowerShell cannot run
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup_notice.ps1" %1
+if errorlevel 1 echo %~2
 exit /b 0

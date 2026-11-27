@@ -11,11 +11,15 @@
   python scripts/setup.py --llm           # 同梱 LLM(llama-server + Gemma 4 E4B + 画像・音声を読む投影ファイル 約 0.56GB)も先に取得する
   python scripts/setup.py --no-mv         # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB。既定で入れる)を入れない
   python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける。--only のときは書いた分だけ)
+  python scripts/setup.py --shortcut      # Windows のデスクトップの起動アイコンだけ作る
   (--mv は以前の名残。既定で入れるので、付けても何も変わらない)
+
+経過は logs/setup.log にも追記する(画面が消えても、どこで止まったか後から分かるように)。
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import os
 import re
 import shlex
@@ -23,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -75,8 +80,37 @@ MV_IMPORTS = "import torch, soundfile, librosa, demucs.apply, demucs.pretrained"
 MV_WARMUP = "from demucs.pretrained import get_model; get_model('htdemucs')"
 
 
+# setup の記録(logs/setup.log に追記)。Windows Terminal で画面が消え、どこで止まったか分からなかった(2026-11-28)。
+# エンジン自身のスクリプトの出力は画面にだけ出る(記録には手順の始まりと終了コードが残る)
+_log_file = None
+_log_path: Optional[Path] = None
+
+
 def say(msg: str = "") -> None:
     print(msg, flush=True)
+    log_line(msg)
+
+
+def log_line(msg: str) -> None:
+    """記録にだけ書く(開いていなければ何もしない)。"""
+    if _log_file is None:
+        return
+    try:
+        _log_file.write(msg + "\n")
+        _log_file.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def open_log(root: Path) -> Optional[Path]:
+    global _log_file, _log_path
+    try:
+        (root / "logs").mkdir(exist_ok=True)
+        _log_path = root / "logs" / "setup.log"
+        _log_file = open(_log_path, "a", encoding="utf-8")
+    except OSError:
+        _log_file, _log_path = None, None
+    return _log_path
 
 
 def is_win(plat: str = None) -> bool:
@@ -541,55 +575,105 @@ def plan_existing_h3image(img_dir: Path, steps: int = None, env: dict = None, pl
 # ---- Windows: デスクトップの起動アイコン ----
 # アイコンは run.bat --open を呼ぶ: 黒い画面(管理役)が開き、準備ができるとブラウザが開く。既に動いていればブラウザを開くだけ。
 # 作るのは PowerShell の WScript.Shell(Windows に標準)。パスは環境変数で渡す(日本語や空白を含むパスでも引用符を考えずに済む)。
+# デスクトップの場所は Base64 で受け取る: 出力が ASCII だけになり、コードページにも BOM にも左右されない。
+# ([Console]::OutputEncoding を変えるとこの黒い画面全体のコードページが 65001 になり、Windows 10 では日本語が読めなくなる)
+# うまくいかないときも黙って飛ばさず、理由と代わりの起動方法を出す(2026-11-28: 何も出ずに終わったという報告)。
 
 SHORTCUT_NAME = "YUZU Creator Studio.lnk"
-PS_DESKTOP = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')"
+PS_DESKTOP = "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([Environment]::GetFolderPath('Desktop')))"
 PS_SHORTCUT = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:YCS_LNK); $s.TargetPath = $env:YCS_TARGET; "
                "$s.Arguments = '--open'; $s.WorkingDirectory = $env:YCS_DIR; $s.IconLocation = $env:YCS_ICON + ',0'; "
                "$s.Description = 'YUZU Creator Studio'; $s.Save()")
+SHORTCUT_FALLBACK = "  .\\run.bat --open で同じように起動できます。後でアイコンだけ作るなら .\\setup.bat --shortcut"
 
 
-def desktop_dir(run: Callable = subprocess.run) -> Optional[Path]:
-    """デスクトップの場所(OneDrive に移したものも、Windows が返すとおりに)。分からなければ None。"""
+def powershell_exe() -> str:
+    """Windows PowerShell の場所(PATH に無くても標準の場所を使う)。"""
+    std = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    return str(std) if std.exists() else "powershell"
+
+
+def _ps_text(data) -> str:
+    """PowerShell の出力を文字に(エラーは元のコードページで出るので UTF-8 で読めなければ oem / mbcs)。"""
+    if not isinstance(data, bytes):
+        return str(data or "")
+    for enc in ("utf-8", "oem", "mbcs"):
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("utf-8", "replace")
+
+
+def _ps_error(out) -> str:
+    """PowerShell のエラーの要点(最初の意味のある 1 行、長ければ切る)。"""
+    for line in _ps_text(getattr(out, "stderr", b"")).splitlines():
+        line = line.strip()
+        if line and not line.startswith("#< CLIXML"):
+            return line[:200]
+    return f"終了コード {out.returncode}"
+
+
+def _run_ps(command: str, run: Callable, env: dict = None):
+    """PowerShell を 1 回走らせる。入力はつながない(この画面の入力を PowerShell に触らせない)。"""
+    return run([powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+               env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+
+
+def desktop_dir(run: Callable = subprocess.run) -> tuple:
+    """(デスクトップの場所 or None, 分からなかった理由)。OneDrive に移したものも、Windows が返すとおりに。"""
     try:
-        out = run(["powershell", "-NoProfile", "-Command", PS_DESKTOP], capture_output=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    text = out.stdout.decode("utf-8", "replace").strip() if isinstance(out.stdout, bytes) else str(out.stdout or "").strip()
-    return Path(text) if out.returncode == 0 and text else None
+        out = _run_ps(PS_DESKTOP, run)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, f"PowerShell を起動できません: {e}"
+    if out.returncode != 0:
+        return None, f"PowerShell のエラー: {_ps_error(out)}"
+    try:
+        text = base64.b64decode(_ps_text(out.stdout).strip(), validate=True).decode("utf-8").strip()
+    except (ValueError, UnicodeDecodeError):
+        return None, "PowerShell の出力を読めません"
+    if not text:
+        return None, "Windows がデスクトップの場所を返しませんでした"
+    return Path(text), ""
 
 
-def make_shortcut(lnk: Path, root: Path, run: Callable = subprocess.run) -> bool:
+def make_shortcut(lnk: Path, root: Path, run: Callable = subprocess.run) -> str:
+    """アイコンを作る。できたら ""、できなければ理由。"""
     env = {**os.environ, "YCS_LNK": str(lnk), "YCS_TARGET": str(root / "run.bat"), "YCS_DIR": str(root),
            "YCS_ICON": str(root / "web" / "favicon.ico")}
     try:
-        out = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", PS_SHORTCUT],
-                  env=env, capture_output=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return out.returncode == 0
+        out = _run_ps(PS_SHORTCUT, run, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"PowerShell を起動できません: {e}"
+    if out.returncode != 0:
+        return f"PowerShell のエラー: {_ps_error(out)}"
+    return "" if lnk.exists() else "PowerShell は終わりましたが、アイコンのファイルができていません"
 
 
 def offer_shortcut(root: Path, plat: str = None, run: Callable = subprocess.run) -> Optional[Path]:
     """Windows で、デスクトップに起動アイコンが無ければ作るか聞く(既定は「はい」。端末でなければ作らない)。作った・あったら場所。"""
     if not is_win(plat):
         return None
-    desk = desktop_dir(run)
+    desk, why = desktop_dir(run)
     if desk is None:
+        say(f"\nデスクトップの起動アイコンを作れませんでした: デスクトップの場所が分かりません({why})")
+        say(SHORTCUT_FALLBACK)
         return None
     lnk = desk / SHORTCUT_NAME
     if lnk.exists():
         say(f"\nデスクトップの起動アイコン: {lnk}(作成済み)")
         return lnk
     if not ask_yes("\nデスクトップに起動アイコン(YUZU Creator Studio)を作りますか?"):
-        say("  作らずに終わります。後で作るなら、setup.bat をもう一度実行してください")
+        say("  作らずに終わります。後で作るなら .\\setup.bat --shortcut")
         return None
-    if make_shortcut(lnk, Path(root), run):
+    why = make_shortcut(lnk, Path(root), run)
+    if not why:
         say(f"  作りました: {lnk}")
         say("  ダブルクリックでスタジオが起動し、準備ができるとブラウザが開きます(起動中ならブラウザを開くだけ)。"
             "止めるときは、開いた黒い画面を閉じるか Ctrl+C")
         return lnk
-    say("  作れませんでした。.\\run.bat --open で同じように起動できます")
+    say(f"  作れませんでした({why})")
+    say(SHORTCUT_FALLBACK)
     return None
 
 
@@ -749,6 +833,8 @@ def fail(step_label: str, argv: list, cwd: Path, rc: Optional[int] = None) -> in
     say("この手順だけをやり直すなら:")
     say(f"  cd {cwd}")
     say(f"  {format_command(argv)}")
+    if _log_path is not None:
+        say(f"setup の経過の記録: {_log_path}")
     return 1
 
 
@@ -757,11 +843,13 @@ def run_step(step: Step, comp_dir: Path) -> bool:
     argv = resolve_argv(step.argv, cwd)
     say(f"\n>>> {step.label}\n    ({cwd} で {format_command(step.argv)})")
     env = {**os.environ, "PYTHONUNBUFFERED": "1", **step.env}
+    t0 = time.time()
     try:
         rc = subprocess.call(argv, cwd=cwd, env=env)
     except OSError as e:
         say(f"実行できませんでした: {e}")
         rc = 127
+    log_line(f"    (終了コード {rc}、{time.time() - t0:.0f} 秒)")
     if rc != 0:
         fail(step.label, step.argv, cwd, rc)
         return False
@@ -983,6 +1071,7 @@ def parse_args(argv: list = None) -> argparse.Namespace:
     p.add_argument("--llm", action="store_true", help="同梱 LLM(llama-server と GGUF、約 5GB。画像・音声を読む投影ファイル 約 0.56GB を含む)も先に取得する")
     p.add_argument("--no-mv", action="store_true", help="MV の音声処理の道具(Demucs + librosa + CPU 版 torch、約 1.3GB。既定で入れる)を入れない")
     p.add_argument("--mv", action="store_true", help="以前の名残(道具は既定で入れるので、何も変わらない)")
+    p.add_argument("--shortcut", action="store_true", help="Windows のデスクトップの起動アイコンだけを作る(ほかは何もしない)")
     return p.parse_args(argv)
 
 
@@ -994,6 +1083,11 @@ def main(argv: list = None) -> int:
             pass
     args = parse_args(argv)
     cfg = load_settings(REPO_ROOT)
+    if args.shortcut:
+        if not is_win():
+            say("起動アイコンを作るのは Windows だけです。Linux は ./run.sh --open で、準備ができたらブラウザが開きます。")
+            return 0
+        return 0 if offer_shortcut(Path(cfg.root)) else 1
     if args.components_dir:
         cfg.components_dir = args.components_dir
         say(f"エンジンの取り込み先: {cfg.component_dir('h3').parent}(この場所を使い続けるなら studio.local.toml に components_dir = '...' を書いてください)")
@@ -1100,5 +1194,24 @@ def main(argv: list = None) -> int:
     return 0
 
 
+def run_logged(argv: list = None, root: Path = REPO_ROOT) -> int:
+    """main を記録つきで走らせる(始まり・終わりの時刻と終了コード、落ちたときはトレースバックも残す)。"""
+    open_log(root)
+    log_line(f"\n===== setup {time.strftime('%Y-%m-%d %H:%M:%S')}  args: {' '.join(sys.argv[1:] if argv is None else argv)}"
+             f"  ({sys.platform}, Python {sys.version.split()[0]}) =====")
+    rc = 1
+    try:
+        rc = main(argv)
+    except SystemExit as e:
+        rc = e.code if isinstance(e.code, int) else 1
+        raise
+    except BaseException:
+        log_line(traceback.format_exc().rstrip())
+        raise
+    finally:
+        log_line(f"===== 終わり {time.strftime('%H:%M:%S')}  終了コード {rc} =====")
+    return rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run_logged())
