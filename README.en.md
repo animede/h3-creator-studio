@@ -514,9 +514,12 @@ Clients configured with a file, such as Claude Desktop (example `claude_desktop_
 |---|---|
 | `studio_status` | Version, GPU and memory use, engine states, running / waiting jobs |
 | `list_media` / `upload_media` | List the gallery (ids and the local file paths) / add a file from the PC to the gallery |
-| `generate_image` | An image (MiniMax-H3-Image; with reference image ids it edits) |
-| `generate_music` | A song (ACE-Step; a theme is enough, the LLM writes the lyrics and caption) |
-| `get_job` | State of an image or music job |
+| `enhance_prompt` | Rewrites a short idea into a prompt with the engine's official rules (images: MiniMax-H3-Image's rules, videos: the official h3-prompt-writing; same as Enhance in the UI) |
+| `generate_image` | An image (MiniMax-H3-Image; with reference image ids it edits). Also returns the image itself, so the agent can look at it |
+| `generate_video` | One 5-15 second clip (MiniMax-H3; from text / from first and last frames / from references). Also returns 4 frames |
+| `generate_music` | A song (ACE-Step; a theme is enough, the LLM writes the lyrics and caption). Returns the lyrics, caption, BPM and key used |
+| `listen_song` | The bundled LLM listens to a song and reports language, genre, mood, instruments, vocal and tempo (agents cannot hear; not a lyrics transcription) |
+| `get_job` | State of an image, video or music job |
 | `create_music_video` / `create_short_video` | Start a Music Video / Short Video project |
 | `preview_scenes` | Returns one image with 4 frames from each scene of a project (so the agent can look at the result; uses ffmpeg) |
 | `list_projects` / `get_project` / `wait_for_project` | List projects / show one (`include_prompts` adds each scene's direction) / wait until it finishes |

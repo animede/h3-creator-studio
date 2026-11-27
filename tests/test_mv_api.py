@@ -318,6 +318,14 @@ class MvApiTest(unittest.TestCase):
         self.addCleanup(p.stop)
         return cuts
 
+    def test_describe_song_with_listen_true_listens_to_a_studio_song_too(self):
+        cuts = self.patch_cut()
+        heard = {"language": "Japanese", "genre": "Ballad", "vocal": "female", "tempo": "slow"}
+        self.llm.audio, self.llm.texts = [heard], [CONCEPT_TEXT]
+        r = self.client.post("/api/mv/describe/song", json={"song_id": self.song["id"], "listen": True})       # MCP の listen_song
+        self.assertEqual((r.status_code, r.json()), (200, {"text": CONCEPT_TEXT, "source": "listen", "listen": heard}))
+        self.assertEqual(len(cuts), 1)
+
     def test_describe_song_of_an_external_song_listens_and_answers_in_one_call(self):
         ext = self.add("audio", "ext.mp3", {"uploaded": True})                                      # 長さ 30 秒(add が入れる): 先頭の 1 か所
         cuts = self.patch_cut()

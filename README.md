@@ -513,9 +513,12 @@ Claude Desktop など、設定ファイルに書く利用側(`claude_desktop_con
 |---|---|
 | `studio_status` | 版・GPU とメモリ・エンジンの状態・動いている / 待っているジョブ |
 | `list_media` / `upload_media` | ギャラリーの一覧(id と、この PC のファイルの場所)/ PC のファイルをギャラリーに足す |
-| `generate_image` | 画像(MiniMax-H3-Image。参照画像の id があれば edit) |
-| `generate_music` | 曲(ACE-Step。テーマだけでも、歌詞とキャプションは LLM が書く) |
-| `get_job` | 画像・曲のジョブの様子 |
+| `enhance_prompt` | 短い思いつきを、エンジンの公式ルールでプロンプトに書き直す(画像: MiniMax-H3-Image の公式ルール、動画: 公式の h3-prompt-writing。画面の「強化」と同じ) |
+| `generate_image` | 画像(MiniMax-H3-Image。参照画像の id があれば edit)。できた画像そのものも返し、エージェントが見て確かめられる |
+| `generate_video` | 5〜15 秒の動画 1 本(MiniMax-H3。文章から / 最初と最後のコマから / 参照から)。4 コマの画像も返す |
+| `generate_music` | 曲(ACE-Step。テーマだけでも、歌詞とキャプションは LLM が書く)。使った歌詞・キャプション・BPM・調を返す |
+| `listen_song` | 同梱 LLM が曲を聞いて、言語・ジャンル・雰囲気・楽器・ボーカル・テンポを答える(エージェントは曲を聞けないので、確かめる用。歌詞は聞き取らない) |
+| `get_job` | 画像・動画・曲のジョブの様子 |
 | `create_music_video` / `create_short_video` | MV / ショート動画の制作を始める |
 | `preview_scenes` | 制作の各シーンから 4 コマずつ切り出して並べた画像を返す(エージェントが結果を見て確かめる。ffmpeg を使う) |
 | `list_projects` / `get_project` / `wait_for_project` | 制作の一覧 / 様子(`include_prompts` でシーンごとの演出)/ 終わるまで待つ |

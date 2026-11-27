@@ -60,7 +60,7 @@ class McpServerTest(unittest.TestCase):
         server = ms.build_server()
         tools = asyncio.run(server.list_tools())
         self.assertEqual([t.name for t in tools], [f.__name__ for f in ms.TOOLS])
-        self.assertEqual(len(tools), 14)
+        self.assertEqual(len(tools), 17)
         self.assertTrue(all(t.description for t in tools))
         self.assertIn("retry_scene", server.instructions)
         gen = next(t for t in tools if t.name == "generate_image")
@@ -89,21 +89,25 @@ class McpServerTest(unittest.TestCase):
         self.assertIn('kind must be "mv"', r.content[0].text)
         self.assertEqual(self.studio.calls, [])
 
-    def test_generate_image_waits_and_returns_file(self):
+    def test_generate_image_waits_and_returns_file_and_picture(self):
+        from PIL import Image
         (self.tmp / "images").mkdir()
-        (self.tmp / "images" / "a.png").write_bytes(b"png")
+        Image.new("RGB", (1536, 1024), (200, 120, 40)).save(self.tmp / "images" / "a.png")
         polls = iter([{"id": "j1", "status": "running", "progress": 0.5},
                       {"id": "j1", "kind": "h3image.t2i", "status": "completed", "outputs": ["m1"]}])
         self.use({("POST", "/api/jobs"): {"id": "j1", "status": "queued"},
                   ("GET", "/api/jobs/j1"): lambda req: next(polls),
                   ("GET", "/api/gallery"): [{"id": "m1", "kind": "image", "url": "/outputs/images/a.png", "width": 768,
                                              "height": 768, "params": {"prompt": "a cafe"}}, {"id": "other", "url": "/x"}]})
-        out = asyncio.run(ms.generate_image("a cafe", width=768, height=768, seed=7))
+        text, picture = asyncio.run(ms.generate_image("a cafe", width=768, height=768, seed=7))
         method, path, body, _ = self.studio.calls[0]
         self.assertEqual((method, path), ("POST", "/api/jobs"))
         self.assertEqual(body, {"tab": "image", "kind": "h3image.t2i",
                                 "params": {"prompt": "a cafe", "width": 768, "height": 768, "style": "none", "seed": 7}})
+        out = json.loads(text)
         self.assertEqual(out["status"], "completed")
+        self.assertIsInstance(picture, ms.Image)                               # できた画像そのもの(縮小)も返す
+        self.assertEqual(Image.open(io.BytesIO(picture.data)).size, (768, 512))
         self.assertEqual(out["outputs"], [{"id": "m1", "kind": "image", "width": 768, "height": 768, "prompt": "a cafe",
                                            "url": "http://studio:8700/outputs/images/a.png",
                                            "file": str(self.tmp / "images" / "a.png")}])
@@ -115,7 +119,78 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(body["kind"], "h3image.edit")
         self.assertEqual(body["params"]["references"], ["i1", "i2"])
         self.assertEqual(body["params"]["steps"], 3)
-        self.assertEqual(out, {"job_id": "j2", "status": "queued"})      # wait=False は 1 回見るだけ
+        self.assertEqual([json.loads(t) for t in out], [{"job_id": "j2", "status": "queued"}])      # wait=False は 1 回見るだけ
+
+    def test_generate_video_modes(self):
+        self.use({("POST", "/api/jobs"): {"id": "v1"}, ("GET", "/api/jobs/v1"): {"id": "v1", "status": "queued"}})
+        asyncio.run(ms.generate_video("A lighthouse at dawn", wait=False))
+        asyncio.run(ms.generate_video("It ends at dusk", mode="fl2va", first_image_id="f1", seconds=8, resolution="1344x768", wait=False))
+        asyncio.run(ms.generate_video("<Picture 1> sings with <Audio 1>", mode="REF2VA", reference_ids=["i1", "a1"], vocal_lock=True,
+                                      seconds=0, seed=3, wait=False))
+        posts = [c[2] for c in self.studio.calls if c[0] == "POST"]
+        self.assertEqual(posts[0], {"tab": "video", "kind": "h3.t2va", "params": {"prompt": "A lighthouse at dawn", "seconds": 5, "style": "none"}})
+        self.assertEqual(posts[1]["kind"], "h3.fl2va")
+        self.assertEqual(posts[1]["params"], {"prompt": "It ends at dusk", "seconds": 8, "style": "none", "resolution": "1344x768",
+                                              "first_image": "f1", "last_image": None})
+        self.assertEqual(posts[2]["kind"], "h3.ref2va")
+        self.assertEqual(posts[2]["params"], {"prompt": "<Picture 1> sings with <Audio 1>", "seconds": 0, "style": "none", "seed": 3,
+                                              "references": ["i1", "a1"], "vocal_lock": True})
+        r = self.run_tool("generate_video", {"prompt": "x", "mode": "i2v"})
+        self.assertIn("mode must be one of", r.content[0].text)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg が要る")
+    def test_finished_video_comes_back_as_frames(self):
+        from PIL import Image
+        self.make_clip(self.tmp / "video" / "v1.mp4")
+        self.use({("POST", "/api/jobs"): {"id": "v1"},
+                  ("GET", "/api/jobs/v1"): {"id": "v1", "kind": "h3.t2va", "status": "completed", "outputs": ["o1"]},
+                  ("GET", "/api/gallery"): [{"id": "o1", "kind": "video", "url": "/outputs/video/v1.mp4", "duration_s": 2.0}]})
+        r = self.run_tool("generate_video", {"prompt": "A lighthouse at dawn"})
+        self.assertEqual([c.type for c in r.content], ["text", "image"])
+        sheet = Image.open(io.BytesIO(base64.b64decode(r.content[1].data)))
+        self.assertEqual(sheet.size, (4 * 288, ms.PREVIEW_LABEL_PX + 162))
+
+    def test_preview_failures_do_not_fail_the_job(self):
+        self.use({("GET", "/api/jobs/j1"): {"id": "j1", "status": "completed", "outputs": ["m1"]},
+                  ("GET", "/api/gallery"): [{"id": "m1", "kind": "image", "url": "/outputs/gone.png"}]})     # この PC に無く、取ってきても 404
+        out = asyncio.run(ms.get_job("j1"))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(json.loads(out[0])["status"], "completed")
+
+    def test_music_result_lists_the_lyrics_used(self):
+        rec = {"id": "s1", "kind": "audio", "url": "/outputs/audio/s1.mp3", "duration_s": 50.0,
+               "params": {"theme": "冬の灯り", "caption": "warm j-pop ballad", "lyrics": "[verse]\n木枯らしが吹く帰り道", "bpm": 88,
+                          "key_scale": "C major", "time_signature": "4"}}
+        self.use({("POST", "/api/jobs"): {"id": "m1"},
+                  ("GET", "/api/jobs/m1"): {"id": "m1", "kind": "ace.simple", "status": "completed", "outputs": ["s1"]},
+                  ("GET", "/api/gallery"): [rec]})
+        (text,) = asyncio.run(ms.generate_music(theme="冬の灯り", duration=50))
+        song = json.loads(text)["outputs"][0]
+        self.assertEqual((song["lyrics"], song["bpm"], song["key_scale"]), ("[verse]\n木枯らしが吹く帰り道", 88, "C major"))
+        self.assertIn("冬の灯り", text)                                          # 日本語のまま(\u エスケープしない)
+        self.assertNotIn("lyrics", ms.media_view(rec))                           # 一覧では歌詞を出さない
+
+    def test_enhance_prompt(self):
+        self.use({("POST", "/api/enhance"): lambda req: {"text": "An expanded prompt.", "aspect_ratio": "16:9", "suggested_width": 1344,
+                                                         "suggested_height": 768} if json.loads(req.content)["tab"] == "image" else
+                                                        {"text": "integrated_multimodal_description: [Shot 1] ..."}})
+        v = asyncio.run(ms.enhance_prompt("夜明けの灯台", reference_ids=["i1"]))
+        self.assertEqual(v, {"prompt": "An expanded prompt.", "aspect_ratio": "16:9", "suggested_width": 1344, "suggested_height": 768})
+        self.assertEqual(self.studio.calls[0][2], {"tab": "image", "text": "夜明けの灯台", "references": ["i1"]})
+        v = asyncio.run(ms.enhance_prompt("夜明けの灯台", tab="video", task="ref2va", seconds=8))
+        self.assertEqual(v, {"prompt": "integrated_multimodal_description: [Shot 1] ..."})
+        self.assertEqual(self.studio.calls[1][2], {"tab": "video", "text": "夜明けの灯台", "mode": "h3-official", "task": "ref2va",
+                                                   "lang": "en", "seconds": 8})
+        for args, word in (({"text": "x", "tab": "music"}, 'tab must be "image" or "video"'),
+                           ({"text": "x", "tab": "video", "task": "t2i"}, "task must be one of")):
+            r = self.run_tool("enhance_prompt", args)
+            self.assertIn(word, r.content[0].text)
+
+    def test_listen_song(self):
+        heard = {"language": "Japanese", "genre": "J-Pop", "vocal": "female", "tempo": "slow"}
+        self.use({("POST", "/api/mv/describe/song"): {"text": "冬の街の歌", "source": "listen", "listen": heard}})
+        self.assertEqual(asyncio.run(ms.listen_song("s1")), {"heard": heard, "description": "冬の街の歌"})
+        self.assertEqual(self.studio.calls[0][2], {"song_id": "s1", "listen": True})
 
     def test_project_view_scene_files_and_prompts(self):
         (self.tmp / "work" / "p1").mkdir(parents=True)

@@ -1,6 +1,6 @@
 ---
 name: yuzu-creator-studio
-description: Make images, songs, lip-synced music videos and narrated short videos with YUZU Creator Studio (a local app running on the user's own GPU) through its MCP server, then refine them scene by scene with the user. Use when the user asks to create, review or fix a music video, short video, song or image with YUZU Creator Studio (h3-creator-studio).
+description: Make images, video clips, songs, lip-synced music videos and narrated short videos with YUZU Creator Studio (a local app running on the user's own GPU) through its MCP server, then refine them scene by scene with the user. Use when the user asks to create, review or fix a music video, short video, song or image with YUZU Creator Studio (h3-creator-studio).
 compatibility: Needs the yuzu-studio MCP server from github.com/animede/h3-creator-studio (scripts/mcp_server.py) and a running studio on the same PC (with ffmpeg, which the studio also uses). Reviewing scenes needs an agent that can see images returned by tools.
 ---
 
@@ -10,11 +10,19 @@ The studio turns a song and one character image into a music video (MiniMax-H3, 
 
 The user is the director. You draft, render and repeat; the user decides what is good. Show results and ask before redoing scenes the user has not asked about.
 
-## Prompt rules: the official guide, applied by the studio
+## Prompt rules: the official guides, applied by the studio
 
-MiniMax publishes the official H3 prompt-writing rules as a skill: `h3-prompt-writing` in [github.com/MiniMax-AI/MiniMax-H3](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) (install: `npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing`). This skill does not repeat those rules.
+This skill does not repeat the official prompt rules. They are published by the model makers, and the studio applies them for you:
 
-You rarely need them. The studio writes every scene in the official Ref2VA six-section format itself. When you change a scene, pass only its **direction** (`retry_scene direction=...`) and the studio rebuilds the official prompt around it. A whole-prompt edit (`prompt=...`) is checked and refused if it breaks the sections, the single `[Shot 1]` or the reference labels.
+| Model | Official guide | Applied by |
+|---|---|---|
+| MiniMax-H3 (video) | the `h3-prompt-writing` skill in [MiniMax-AI/MiniMax-H3](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) (install: `npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing`) | music video / short video scenes (always); `enhance_prompt tab="video"` |
+| MiniMax-H3-Image | the `h3-image-prompt-writing` skill in [MiniMax-AI/MiniMax-H3-Image](https://github.com/MiniMax-AI/MiniMax-H3-Image/tree/main/skills/h3-image-prompt-writing) and the rules in [MiniMax-H3-Image-PE](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image-PE) | `enhance_prompt tab="image"` |
+| ACE-Step 1.5 (music) | [Tutorial](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/Tutorial.md) and the [musician's guide](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/ace_step_musicians_guide.md) | `generate_music` (the studio's LLM writes lyrics and caption by these rules) |
+
+For single images and clips, turn a short idea into the official form with `enhance_prompt`, show the result to the user, and generate from what they approve.
+
+For music videos and short videos you rarely need the video rules: the studio writes every scene in the official Ref2VA six-section format itself. When you change a scene, pass only its **direction** (`retry_scene direction=...`) and the studio rebuilds the official prompt around it. A whole-prompt edit (`prompt=...`) is checked and refused if it breaks the sections, the single `[Shot 1]` or the reference labels.
 
 How to write a direction (follows the official guide's advice on detail):
 - Write concrete English, about 120-180 words, in this order:
@@ -25,6 +33,34 @@ How to write a direction (follows the official guide's advice on detail):
 - Prefer concrete details (lanterns, wet asphalt, breath in cold air) over words like "cinematic" or "beautiful".
 - One continuous shot. No cuts, no timestamps, no on-screen text, no lyrics.
 - Change only what the user asked. Start from the current direction (`get_project include_prompts=true`).
+
+## Image
+
+1. Write the idea, or run `enhance_prompt tab="image"` on a short idea (any language). It returns an English prompt and a suggested aspect ratio (`suggested_width` / `suggested_height`). Show it to the user.
+2. `generate_image prompt=... width=... height=...`.
+   - With `reference_ids` it edits or combines gallery images; refer to them as `<Picture 1>`, `<Picture 2>` ... in the order given.
+   - `steps`: 6 by default (best). 2-3 is faster, but wide flat areas can show a grid-like texture.
+3. The finished image comes back as a picture. Look at it (faces, hands, text, the user's request) before showing the user.
+
+For a music video character, the face must be clearly visible: front or three-quarter view, upper body.
+
+## Video clip
+
+One 5-15 second clip with sound (for a whole song, use a music video).
+1. Write the idea, or run `enhance_prompt tab="video" task=... seconds=...` to get the official H3 form. Show it to the user.
+2. `generate_video prompt=... mode=...`:
+   - `t2va`: from text.
+   - `fl2va`: from a first and/or last frame (`first_image_id`, `last_image_id`).
+   - `ref2va`: from references (`reference_ids`: images, videos, audio). In the prompt, write `<Picture 1>`, `<Video 1>`, `<Audio 1>` ..., numbered per kind in the order given. To make a person speak or sing a given audio, add `vocal_lock=true` and `seconds=0` (follows the audio's length).
+3. The result comes back as 4 frames of the clip. Look at them before showing the user.
+
+## Song
+
+1. `generate_music theme=...`. A one-line theme is enough; the studio's LLM writes the lyrics and an English caption by ACE-Step's rules.
+   - Your own lyrics: section tags in square brackets (`[verse]`, `[chorus]`, `[bridge]`, `[outro]` ...), no timestamps, no romanization.
+   - `caption`: genre, instruments, vocal, tempo, in English.
+2. The result lists the lyrics and caption actually used, the BPM and the key. Check them against the request.
+3. You cannot hear the song. Run `listen_song song_id=...`: the studio's LLM listens to two excerpts and reports language, genre, mood, instruments, vocal and tempo (not the lyrics). Tell the user what it heard and let them listen.
 
 ## Music video
 
@@ -88,6 +124,8 @@ The studio adds these from testing on real hardware. Work with them, not against
 | RTX PRO 6000 96GB | about 6-8 min |
 | RTX 3080 Ti 12GB | about 10 min |
 | RTX 3060 12GB / RTX 4060 8GB | about 21 min |
+
+On a 96GB GPU, an image takes about 20 seconds, a 50-second song about a minute, and a 5-second 768px clip about a minute (more when an engine has to load first). Small GPUs take several times longer.
 
 - Time grows with the song's length.
 - The first scene also loads the model.
