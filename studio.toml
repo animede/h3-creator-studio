@@ -51,6 +51,10 @@ devices = "auto"
 #   (管理役が起動した AivisSpeech と同梱 LLM。使っている最中のものは止めない)を止めて RAM を空けるか。止めたものは次に使うときに起動し直す。
 #   "auto" = 搭載 RAM が 32GiB 未満のときだけ / "always" = いつも / "never" = 止めない
 free_cpu_engines = "auto"
+# stop_on_switch = GPU のエンジンを切り替えるとき、降ろしたエンジンのプロセスも止めて RAM を返すか(次に使うときは起動し直すので、少し遅くなる)。
+#   降ろしただけのプロセスは RAM を持ったままで、RAM 16GB の PC では、次のエンジンが読み込みの途中で落ちることがある(画像の後に MV など)。
+#   "auto" = 搭載 RAM が 32GiB 未満のときだけ / "always" = いつも / "never" = 止めない(降ろすだけ)
+stop_on_switch = "auto"
 
 # MV・ショート動画タブの音声処理(Demucs のボーカル分離、シーン分割、読み上げの分割)を動かす Python。
 # 空なら setup が既定で作る components/mvtools/.venv を使う(--no-mv で飛ばせる。--only mvtools でこれだけ入れる)。すでに Demucs と librosa の入った環境があれば、その python を書く。

@@ -232,6 +232,8 @@ class FreeCpuTest(RunnerBase):
         self.assertTrue(J.should_free_cpu("bogus", 8 * gib))
         self.assertEqual(Settings({"gpu": {"free_cpu_engines": "Never"}}, REPO_ROOT).free_cpu_engines, "never")
         self.assertEqual(Settings({}, REPO_ROOT).free_cpu_engines, "auto")
+        self.assertEqual(Settings({"gpu": {"stop_on_switch": "Always"}}, REPO_ROOT).stop_on_switch, "always")
+        self.assertEqual(Settings({}, REPO_ROOT).stop_on_switch, "auto")
 
     def sched_with_aivis(self, **aivis):
         sched = DyingSched()

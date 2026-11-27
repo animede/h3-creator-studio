@@ -90,6 +90,44 @@ class SchedulerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cm.exception.message, "生成中のエンジンがあるので切り替えられません")
         self.assertEqual(s.gpu_resident, "h3image")
 
+    async def test_low_ram_stops_the_engine_it_switches_away_from(self):
+        # RAM の少ない PC: 降ろしただけのプロセスが RAM を持ったままで、次のエンジンが読み込みの途中で落ちた(2026-11-28)
+        fake = Fake()
+        s = self.make(fake)
+        s.stop_on_switch = True
+        await s.ensure("h3image")
+        fake.calls.clear()
+        op = s.new_operation("ensure", "h3")
+        await s.ensure("h3", op)
+        self.assertEqual(fake.calls, [("post", "unload", "12"), ("stop", "h3image"), ("start", "h3")])      # unload を通してから止める
+        self.assertEqual((s.comps["h3image"].state, s.comps["h3"].state, s.gpu_resident), ("stopped", "ready", "h3"))
+        self.assertIn("RAM が少ないので h3image を止めます(次に使うときに起動し直します)", [x["msg"] for x in op.steps])
+        fake.calls.clear()
+        await s.ensure("h3image")                                      # 次に使うときは起動し直す(reload ではない)
+        self.assertEqual(fake.calls, [("post", "unload", "11"), ("stop", "h3"), ("start", "h3image")])
+
+    async def test_low_ram_does_not_stop_a_busy_engine(self):
+        fake = Fake(unload_code=409)                                   # 生成中: unload が断られる
+        s = self.make(fake)
+        s.stop_on_switch = True
+        await s.ensure("h3image")
+        with self.assertRaises(Busy):
+            await s.ensure("h3")
+        self.assertNotIn(("stop", "h3image"), fake.calls)
+        self.assertEqual((s.comps["h3image"].state, s.gpu_resident), ("ready", "h3image"))
+
+    async def test_low_ram_stops_engines_left_unloaded(self):
+        fake = Fake()
+        s = self.make(fake)
+        await s.ensure("h3image")
+        await s.ensure("h3")                                           # まだ降ろすだけ(h3image は unloaded のまま残る)
+        self.assertEqual(s.comps["h3image"].state, "unloaded")
+        s.stop_on_switch = True
+        fake.calls.clear()
+        await s.ensure("ace")                                          # h3 を降ろして止め、残っていた h3image も止める
+        self.assertEqual(fake.calls, [("post", "unload", "11"), ("stop", "h3"), ("stop", "h3image"), ("start", "ace")])
+        self.assertEqual([s.comps[n].state for n in ("h3", "h3image", "ace")], ["stopped", "stopped", "ready"])
+
     async def test_aivis_never_touches_resident(self):
         fake = Fake()
         s = self.make(fake)

@@ -127,6 +127,8 @@ EN = {
     "{} の unload に失敗しました(HTTP {})": "Unload of {0} failed (HTTP {1})",
     "{} はもう動いていないので、止まったものとして扱います": "{0} is no longer running; treating it as stopped",
     "{} を停止しています": "Stopping {0}",
+    "RAM が少ないので {} を止めます(次に使うときに起動し直します)": "This PC has little RAM, so {0} is stopped (it starts again when next needed)",
+    "RAM が少ないので、GPU から降ろしてある {} を止めます": "This PC has little RAM, so {0}, already off the GPU, is stopped",
     "GPU メモリが空くのを待っています": "Waiting for GPU memory to free up",
     "GPU メモリが完全には空きませんでした(続行します)": "GPU memory did not fully free up (continuing)",
     "{} を GPU に戻しています(モデルの読み込みに数分かかります)": "Reloading {0} onto the GPU (loading the model takes a few minutes)",

@@ -848,6 +848,7 @@ Windows は VRAM があふれると、CPU メモリを GPU のメモリの代わ
 
 - **「動画(MiniMax-H3) が終了していました(RAM 不足の可能性があります)。ログの最後: …」と出る**: 生成の途中でエンジンのプロセスが終わっていた(多くは RAM 不足で OS に止められた)。管理役はそのエンジンを停止扱いにし、**1 回だけ自動で起動し直してやり直す**(MV・ショート動画のシーン、画像・動画・音楽のジョブ)。2 回目も終了したら失敗にする。他のアプリを閉じてから、やり直す・再開する。
 - **RAM の少ない PC(32GiB 未満)**: GPU の仕事を始める前に、待機中の AivisSpeech(管理役が起動したもの・読み上げ中でない)と同梱 LLM(使用中でない)を自動で止める(ジョブに「メモリを空けています(読み上げ・同梱 LLM を止めます)」と出る。次に使うときに起動し直す)。`[gpu] free_cpu_engines` = `"auto"`(既定)/ `"always"` / `"never"`。
+- **RAM の少ない PC(32GiB 未満)のエンジンの切り替え**: 画像 → 動画のようにエンジンを切り替えるとき、前のエンジンを GPU から降ろすだけでなく止めて、RAM を返す(エンジンの欄に「RAM が少ないので … を止めます」と出る。次に使うときは起動し直すので、少し時間がかかる)。止めずに残すなら `[gpu] stop_on_switch` = `"never"`(既定は `"auto"`、いつも止めるなら `"always"`)。
 - **画像の生成が「画像のエンジン(MiniMax-H3-Image)のモデルの準備が終わっていません」で失敗する**: スタジオを止めてから `.\setup.bat --only h3image` を最後まで実行する(テキストエンコーダの準備で約 67GB を取得する。画像タブにも同じ案内が出る)。
 - **最初の画像の生成が 1 時間以上かかる / ダウンロードが続く**(RAM が何度も埋まる): MiniMax-H3-Image の本体のキャッシュ(ステップ数ごと、約 11GB)が無く、最初の生成で bf16 の本体(約 62GB)をシャード 1 つずつ取得して量子化している(以前の setup は作らなかった)。待てば、その後は速い。先に作るなら、スタジオを止めて PowerShell で `cd <h3image のフォルダ>; .\.venv\Scripts\python.exe scripts\prepare_models.py --build-cache 6`(GPU を使う)。`.\setup.bat --only h3image` でも確かめて作れる。
 - **「〇〇 の Python 環境が不完全です(モジュール uvicorn がありません)」と出る**: そのエンジンの仮想環境の導入が途中で終わっている(ログに `No module named ...` がある)。スタジオを止めてから、`.\setup.bat --only <名前>`(Linux は `./setup.sh --only <名前>`)を実行する。名前は h3 / h3image / ace など、案内の文に出ているもの。
@@ -926,6 +927,7 @@ subtitle_font = "Meiryo"
 | `[gpu]` の `mode` | `auto`(既定)/ `exclusive`(1 つずつ)/ `share`(同時に複数) |
 | `[gpu]` の `devices` | GPU が 2 枚以上のとき、エンジンを動かす GPU。`auto`(管理役が数える 1 枚に寄せる)/ `all`(寄せない)/ `"1"` などの番号 |
 | `[gpu]` の `free_cpu_engines` | GPU の仕事の前に、待機中の読み上げと同梱 LLM を止めて RAM を空けるか。`auto`(搭載 RAM 32GiB 未満のときだけ)/ `always` / `never` |
+| `[gpu]` の `stop_on_switch` | エンジンを切り替えるとき、降ろしたエンジンも止めて RAM を返すか。`auto`(搭載 RAM 32GiB 未満のときだけ)/ `always` / `never` |
 | `[llm]` の `port` | 同梱 LLM のポート(既定 8701) |
 | `[llm]` の `gpu` | `auto`(空きに入る分だけ GPU)/ `off`(CPU のみ)/ `all` / 層数 |
 | `[llm]` の `gguf` / `llama_server` / `mmproj` / `tools_dir` | LLM のファイルを自分で指すとき / 取得先のフォルダ |

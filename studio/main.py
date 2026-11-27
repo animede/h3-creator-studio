@@ -30,7 +30,7 @@ from .genres import GenreError
 from . import gpu
 from .gpu import GpuMonitor
 from .handlers import HANDLERS
-from .jobs import TERMINAL, Ctx, JobRunner
+from .jobs import TERMINAL, Ctx, JobRunner, should_free_cpu, total_ram_bytes
 from .ledger import Ledger
 from .llm import Llm, LlmError
 from .mv import Director, concept_from_song, pick_image, pick_song, song_has_info
@@ -68,6 +68,10 @@ UPLOAD_KINDS = {"image": "image", "video": "video", "audio": "audio"}   # MIME �
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.sched = sched = Scheduler()
+    # RAM の少ない PC では、切り替えで降ろしたエンジンのプロセスも止める([gpu] stop_on_switch。auto は free_cpu_engines と同じく 32GiB 未満)
+    sched.stop_on_switch = should_free_cpu(settings.stop_on_switch, total_ram_bytes())
+    if sched.stop_on_switch:
+        logging.getLogger("studio.main").info("RAM が少ないので、エンジンを切り替えるときは降ろしたエンジンを止めます([gpu] stop_on_switch)")
     app.state.ledger = ledger = Ledger(OUTPUTS_DIR)
     stale = await asyncio.to_thread(ledger.remove_stale_parts)        # 前回の強制終了で残った作りかけ(*.part)。起動時はまだ何も書いていない
     if stale:

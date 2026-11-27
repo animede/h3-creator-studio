@@ -145,6 +145,9 @@ class Scheduler:
         self.mode = mode                         # exclusive: GPU の常駐は 1 エンジン / share: 利用枠が収まるかぎり複数(configure_gpu で決める)
         self.total_mib = total_mib               # 総 VRAM(share の利用枠の既定と、載せる判定に使う)
         self.gpu_wait_s = GPU_FREE_WAIT_S
+        # RAM の少ない PC: 切り替えで降ろしたエンジンのプロセスも止める([gpu] stop_on_switch。main が起動時に決める)。降ろしただけのプロセスは
+        # RAM を持ったままで、RAM 16GB の PC では次のエンジンの読み込みの途中で、エラーも出さずに落ちていた(2026-11-28、T2I の後の MV)
+        self.stop_on_switch = False
         self.residents: dict = {}                # GPU に載っているエンジンの名前 -> Resident(exclusive では高々 1 つ)
         self.baseline_mib: Optional[int] = None
         self.operations: dict = {}
@@ -331,8 +334,20 @@ class Scheduler:
                 self._note_baseline(name)
                 if self.gpu_resident and self.gpu_resident != name:
                     await self._release(self.comps[self.gpu_resident], op, target=c)
+                if self.stop_on_switch:
+                    await self._stop_unloaded(op, keep=name)
             await self._bring_up(c, op)
             op.add("準備完了")
+
+    async def _stop_unloaded(self, op: Operation, keep: str) -> None:
+        """RAM の少ない PC で、GPU から降ろしたまま残っている自分のエンジン(keep 以外・仕事中でない)を止める。
+        切り替えで止めるようになる前に降ろしたものや、画面の操作で降ろしたものが RAM を持ち続けないように。"""
+        for other in self.comps.values():
+            n = other.spec.name
+            if (n != keep and other.state == "unloaded" and not other.external and other.proc is not None
+                    and not self._busy.get(n)):
+                op.add(f"RAM が少ないので、GPU から降ろしてある {other.spec.label} を止めます")
+                await self._stop_process(other, op)
 
     async def _ensure_share(self, c: Component, op: Operation) -> None:
         """share: 載っていれば何もしない。利用枠が収まれば他を降ろさずに載せ、足りなければ仕事中でないエンジンを古い順に降ろす。
@@ -617,6 +632,10 @@ class Scheduler:
                 self._forget(c, op)
             elif code is None or code >= 300:
                 raise SwitchError(f"{spec.label} の unload に失敗しました(HTTP {code})", procman.log_tail(spec.name, 20))
+            elif self.stop_on_switch and not c.external and c.proc is not None:
+                # 先に unload を通す(生成中なら 409 で断られるので、仕事中のエンジンを止めない)。そのうえでプロセスも止めて RAM を返す
+                op.add(f"RAM が少ないので {spec.label} を止めます(次に使うときに起動し直します)")
+                await self._stop_process(c, op)
             else:
                 self._set(c, "unloaded")
         elif c.external:
