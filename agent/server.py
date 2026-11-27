@@ -1,11 +1,12 @@
 """YUZU Creator Studio の MCP サーバ(試作): エージェント(Claude など)から、言葉の指示でスタジオを操作する口。
+MCP を使う人だけのもの(agent/ にまとめ、依存の mcp は agent/requirements.txt。スタジオ本体は mcp が無くても動く)。
 
 動いているスタジオ(既定 http://127.0.0.1:8700)の API を呼ぶだけで、スタジオ自体は何も変えない。人が画面で直す場所(人物の説明、
 シーンのプロンプト、やり直し、結合し直し、編集タブ)はそのまま残り、エージェントは下書きと面倒な繰り返しを受け持つ。
 
 起動(MCP の利用側が子プロセスとして起こす。stdio):
-  Linux:   <スタジオ>/.venv/bin/python <スタジオ>/scripts/mcp_server.py
-  Windows: <スタジオ>\\.venv\\Scripts\\python.exe <スタジオ>\\scripts\\mcp_server.py
+  Linux:   <スタジオ>/.venv/bin/python <スタジオ>/agent/mcp_server.py
+  Windows: <スタジオ>\\.venv\\Scripts\\python.exe <スタジオ>\\agent\\mcp_server.py
 環境変数: YCS_URL(スタジオの URL。既定は studio.toml / studio.local.toml の host・port)、YCS_LANG(ja / en。スタジオの返す文言の言語)。
 """
 from __future__ import annotations
@@ -16,6 +17,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -27,8 +29,8 @@ import httpx
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import __version__, media, mvscript
-from .config import settings
+from studio import __version__, media
+from studio.config import settings
 
 DEFAULT_URL = f"http://{'127.0.0.1' if settings.host in ('', '0.0.0.0', '::') else settings.host}:{settings.port}"
 OUTPUTS_DIR = settings.root / "outputs"
@@ -52,6 +54,8 @@ music (ACE-Step), narrated short videos and simple edits on the user's own GPU.
 Single pieces: generate_image (MiniMax-H3-Image), generate_video (one 5-15 s MiniMax-H3 clip), generate_music (ACE-Step).
 enhance_prompt rewrites a short idea into MiniMax's official prompt form for images or videos; show the user the result first.
 Finished images and videos come back as pictures you can look at; songs cannot be heard, so use listen_song to check one.
+There are no editing tools: to trim or join, edit the files yourself (for example with ffmpeg) into new files, never overwriting the
+studio's outputs, then add the result with upload_media so the user sees it in the gallery.
 Typical flow for a music video: find or make a song (list_media kind=audio, or generate_music) and one character image (list_media kind=image,
 generate_image, or upload_media), then create_music_video, then wait_for_project. Short videos: create_short_video with a story and/or narration
 (spoken by text-to-speech) and up to 4 images (role "person" = the speaker, "scenery" = places and objects).
@@ -114,6 +118,33 @@ class StudioClient:
 
 
 client = StudioClient()
+
+
+# ---- プロンプト全文の検査 ----
+
+SECTION_NAMES = ("subject_definitions", "summary", "retention_analysis", "detailed_description", "integrated_multimodal_description",
+                 "overall_soundscape", "non_diegetic_music")
+_LABEL = re.compile(r"<(?:Subject|Picture|Video|Audio) \d+>")
+
+
+def prompt_problems(original: str, edited: str) -> list:
+    """プロンプト全文を書き換えたときに、公式の形(MiniMax H3 の Ref2VA 6 項目・t2va 3 項目)が崩れていないかを見る(retry_scene の
+    prompt の検査。画面で人が直すときは使わない)。
+    元と同じ項目が同じ順にあること、[Shot 1] が 1 つで時刻が付いていないこと、参照の記号(<Subject N> など)が増えも減りもしないこと。"""
+    def sections(text: str) -> list:
+        return re.findall(r"(?m)^(" + "|".join(SECTION_NAMES) + r"):", text)
+    problems = []
+    if sections(edited) != sections(original):
+        problems.append(f"sections must stay {sections(original)} in this order (got {sections(edited)})")
+    markers = re.findall(r"\[Shot \d+\](?![),])", edited)      # 「(appears in [Shot 1])」のような参照は数えない
+    if markers != ["[Shot 1]"]:
+        problems.append("there must be exactly one [Shot 1] (one continuous shot, no cuts)")
+    if re.search(r"\[Shot 1\]\s*At \d", edited):
+        problems.append("[Shot 1] must not have a timestamp")
+    before, after = set(_LABEL.findall(original)), set(_LABEL.findall(edited))
+    if before != after:
+        problems.append(f"reference labels must stay {sorted(before)} (got {sorted(after)})")
+    return problems
 
 
 # ---- 整形(エージェントに返す形。大きなものは省く) ----
@@ -271,7 +302,8 @@ async def list_media(kind: str = "all", limit: int = 20) -> list:
 
 
 async def upload_media(path: str) -> dict:
-    """Add a local image, song (audio) or video file to the studio's gallery and return its record (use the id in other tools)."""
+    """Add a local image, song (audio) or video file to the studio's gallery and return its record (use the id in other tools).
+    Also the way to hand back something you edited yourself (for example with ffmpeg), so the user sees it in the gallery."""
     p = Path(path).expanduser()
     if not p.is_file():
         raise StudioError(f"No such file: {p}")
@@ -448,7 +480,7 @@ async def retry_scene(project_id: str, index: int, kind: str = "mv", direction: 
     if prompt is not None:
         proj = await client.call("GET", path)
         original = next((s.get("prompt") or "" for s in proj.get("scenes") or [] if s.get("index") == int(index)), "")
-        problems = mvscript.prompt_problems(original, prompt) if original else []
+        problems = prompt_problems(original, prompt) if original else []
         if problems:
             raise StudioError("The edited prompt breaks the official H3 format: " + "; ".join(problems)
                               + ". Pass only the scene's direction instead (retry_scene direction=...).")

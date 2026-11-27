@@ -1,7 +1,7 @@
 ---
 name: yuzu-creator-studio
 description: Make images, video clips, songs, lip-synced music videos and narrated short videos with YUZU Creator Studio (a local app running on the user's own GPU) through its MCP server, then refine them scene by scene with the user. Use when the user asks to create, review or fix a music video, short video, song or image with YUZU Creator Studio (h3-creator-studio).
-compatibility: Needs the yuzu-studio MCP server from github.com/animede/h3-creator-studio (scripts/mcp_server.py) and a running studio on the same PC (with ffmpeg, which the studio also uses). Reviewing scenes needs an agent that can see images returned by tools.
+compatibility: Needs the yuzu-studio MCP server from github.com/animede/h3-creator-studio (agent/mcp_server.py; install its `mcp` package from agent/requirements.txt) and a running studio on the same PC (with ffmpeg, which the studio also uses). Reviewing scenes needs an agent that can see images returned by tools.
 ---
 
 # YUZU Creator Studio
@@ -105,6 +105,14 @@ What you get:
 - Narration without a person: an off-screen voice over scenery.
 - Neither song nor narration: give `length_s`, 30 seconds or more.
 - Review and refine as for music videos (`kind="short"`).
+
+## Editing
+
+The studio has no editing tools; use your own. If you can run commands, edit with ffmpeg (or similar) on the `file` paths from `list_media`:
+trim, join, crossfade, replace or mix the song, burn in subtitles.
+- Never overwrite files in the studio's `outputs` folder. Write the result to a new file, like the studio's Edit tab, which keeps originals.
+- Add the result back with `upload_media`, so the user sees it in the gallery and can keep adjusting it in the Edit tab.
+- If you cannot run commands, suggest the Edit tab to the user instead.
 
 ## The studio's own rules (not from the official guide)
 

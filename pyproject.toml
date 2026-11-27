@@ -15,8 +15,10 @@ dependencies = [
     "huggingface_hub",
     "py7zr",
     "multivolumefile",
-    "mcp>=2.3,<3",
 ]
+
+[project.optional-dependencies]
+agent = ["mcp>=2.3,<3"]          # agent/ の MCP サーバを使う人だけ(agent/requirements.txt と同じ)
 
 [tool.setuptools]
 packages = ["studio", "studio.handlers", "studio.mvtools"]

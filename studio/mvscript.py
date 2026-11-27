@@ -496,30 +496,6 @@ def rebuild_scene_prompt(params: dict, scenes: list, index: int, direction: str)
                         shot=shots.get(int(index)))
 
 
-SECTION_NAMES = ("subject_definitions", "summary", "retention_analysis", "detailed_description", "integrated_multimodal_description",
-                 "overall_soundscape", "non_diegetic_music")
-_LABEL = re.compile(r"<(?:Subject|Picture|Video|Audio) \d+>")
-
-
-def prompt_problems(original: str, edited: str) -> list:
-    """プロンプト全文を書き換えたときに、公式の形が崩れていないかを見る(エージェント向けの検査。画面で人が直すときは使わない)。
-    元と同じ項目が同じ順にあること、[Shot 1] が 1 つで時刻が付いていないこと、参照の記号(<Subject N> など)が増えも減りもしないこと。"""
-    def sections(text: str) -> list:
-        return re.findall(r"(?m)^(" + "|".join(SECTION_NAMES) + r"):", text)
-    problems = []
-    if sections(edited) != sections(original):
-        problems.append(f"sections must stay {sections(original)} in this order (got {sections(edited)})")
-    markers = re.findall(r"\[Shot \d+\](?![),])", edited)      # 「(appears in [Shot 1])」のような参照は数えない
-    if markers != ["[Shot 1]"]:
-        problems.append("there must be exactly one [Shot 1] (one continuous shot, no cuts)")
-    if re.search(r"\[Shot 1\]\s*At \d", edited):
-        problems.append("[Shot 1] must not have a timestamp")
-    before, after = set(_LABEL.findall(original)), set(_LABEL.findall(edited))
-    if before != after:
-        problems.append(f"reference labels must stay {sorted(before)} (got {sorted(after)})")
-    return problems
-
-
 # ---- シナリオ全体 ----
 
 def _items(result: Any) -> Optional[list]:

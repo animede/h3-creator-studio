@@ -237,7 +237,7 @@ class OfficialGuideTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RebuildTest(unittest.TestCase):
-    """やり直しで演出だけを書き換えたときの組み立て直し(台本と同じ規則)と、全文を書き換えたときの検査。"""
+    """やり直しで演出だけを書き換えたときの組み立て直し(台本と同じ規則)。全文を書き換えたときの検査は agent/server.py(tests/test_mcp_server.py)。"""
     PARAMS = {"character_facts": {"subject": "a woman"}, "script": {"visual_theme": "dusk"}, "width": 1024, "height": 576,
               "lipsync": True, "style": "none"}
     SCENES = [scene(1, 0.0), scene(2, 0.0), scene(3, 0.9)]
@@ -258,18 +258,6 @@ class RebuildTest(unittest.TestCase):
         self.assertNotIn("Wide establishing", image_mv)
         self.assertTrue(M.names_framing("a low-angle view"))
         self.assertFalse(M.names_framing("she walks under the lanterns"))
-
-    def test_prompt_problems(self):
-        original = M.scene_prompt(scene(1, 0.9), "She sings", {"subject": "a woman"})
-        self.assertEqual(M.prompt_problems(original, original.replace("She sings", "She sings softly")), [])
-        no_audio = original.replace("<Audio 1>", "the audio")
-        self.assertIn("reference labels must stay", " ".join(M.prompt_problems(original, no_audio)))
-        no_summary = original.replace("summary:\n", "")
-        self.assertIn("sections must stay", " ".join(M.prompt_problems(original, no_summary)))
-        two_shots = original.replace("[Shot 1] ", "[Shot 1] At 00:02.000, ") + "\n[Shot 1] more"
-        problems = " ".join(M.prompt_problems(original, two_shots))
-        self.assertIn("exactly one [Shot 1]", problems)
-        self.assertIn("must not have a timestamp", problems)
 
 
 class ImageMvTest(unittest.IsolatedAsyncioTestCase):

@@ -1,4 +1,5 @@
-"""MCP サーバ(studio.mcp_server): 道具の一覧、スタジオの API への呼び方、断られたときの文、ファイルの場所。スタジオは偽物(MockTransport)。"""
+"""MCP サーバ(agent/server.py): 道具の一覧、スタジオの API への呼び方、断られたときの文、ファイルの場所。スタジオは偽物(MockTransport)。
+MCP の部品(mcp)は MCP を使う人だけが入れる(agent/requirements.txt)ので、入っていなければ全部飛ばす。"""
 import asyncio
 import base64
 import io
@@ -10,10 +11,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import httpx
-import mcp
+import importlib.util
 
-from studio import mcp_server as ms
+import httpx
+
+if importlib.util.find_spec("mcp") is None:
+    raise unittest.SkipTest("mcp が入っていない(MCP を使う人だけが agent/requirements.txt から入れる)")
+
+import mcp  # noqa: E402
+
+from agent import server as ms  # noqa: E402
+from studio import mvscript  # noqa: E402
 
 
 class FakeStudio:
@@ -238,6 +246,18 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(self.studio.calls[-1][:3], ("POST", "/api/mv/p1/scenes/1/retry", {"direction": None, "prompt": ok, "seed": None}))
         r = self.run_tool("retry_scene", {"project_id": "p1", "index": 1, "prompt": ok, "direction": "x"})
         self.assertIn("either direction or prompt", r.content[0].text)
+
+    def test_prompt_problems(self):
+        original = mvscript.scene_prompt({"index": 1, "start": 0.0, "end": 8.0, "duration": 8.0, "vocal_ratio": 0.9}, "She sings", {"subject": "a woman"})
+        self.assertEqual(ms.prompt_problems(original, original.replace("She sings", "She sings softly")), [])
+        no_audio = original.replace("<Audio 1>", "the audio")
+        self.assertIn("reference labels must stay", " ".join(ms.prompt_problems(original, no_audio)))
+        no_summary = original.replace("summary:\n", "")
+        self.assertIn("sections must stay", " ".join(ms.prompt_problems(original, no_summary)))
+        two_shots = original.replace("[Shot 1] ", "[Shot 1] At 00:02.000, ") + "\n[Shot 1] more"
+        problems = " ".join(ms.prompt_problems(original, two_shots))
+        self.assertIn("exactly one [Shot 1]", problems)
+        self.assertIn("must not have a timestamp", problems)
 
     def test_include_prompts_shows_the_direction(self):
         self.use({("GET", "/api/mv/p1"): {"id": "p1", "scenes": [{"index": 1, "prompt": "LONG", "direction": "She walks"},

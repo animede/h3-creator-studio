@@ -478,62 +478,9 @@ git pull
 
 **エンジンを入れ直したいとき**は、そのフォルダを消して、`setup` を実行し直す(消したフォルダだけ、取り込みから用意する)。`studio.local.toml` の `dir` で指しているフォルダは、setup は消さない。自分で消す。
 
-## エージェントから使う(MCP サーバ、試作)
+## AI エージェントから使う(任意)
 
-Claude などの AI エージェントから、言葉の指示でスタジオを操作できる([MCP](https://modelcontextprotocol.io/))。エージェントは動いているスタジオの API を呼ぶだけで、画面で直す場所(人物の説明、シーンのプロンプト、やり直し、結合し直し、編集タブ)はそのまま残る。下書き(曲・人物の画像・MV の制作)と繰り返しはエージェントに任せ、気になるシーンは画面で、またはエージェントへの指示でプロンプトを直してやり直す、という使い方を想定している。
-
-**先にスタジオを起動しておく**(MCP サーバはスタジオを起動しない)。登録は一度だけ(パスは自分の置き場所に変える)。
-
-Claude Code(Linux):
-
-```bash
-claude mcp add -s user yuzu-studio -- ~/h3-creator-studio/.venv/bin/python ~/h3-creator-studio/scripts/mcp_server.py
-```
-
-Claude Code(Windows、PowerShell):
-
-```powershell
-claude mcp add -s user yuzu-studio -- C:\h3-creator-studio\.venv\Scripts\python.exe C:\h3-creator-studio\scripts\mcp_server.py
-```
-
-Claude Desktop など、設定ファイルに書く利用側(`claude_desktop_config.json` の例。Windows のパスは `\\` で書く):
-
-```json
-{
-  "mcpServers": {
-    "yuzu-studio": {
-      "command": "C:\\h3-creator-studio\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\h3-creator-studio\\scripts\\mcp_server.py"]
-    }
-  }
-}
-```
-
-| 道具 | すること |
-|---|---|
-| `studio_status` | 版・GPU とメモリ・エンジンの状態・動いている / 待っているジョブ |
-| `list_media` / `upload_media` | ギャラリーの一覧(id と、この PC のファイルの場所)/ PC のファイルをギャラリーに足す |
-| `enhance_prompt` | 短い思いつきを、エンジンの公式ルールでプロンプトに書き直す(画像: MiniMax-H3-Image の公式ルール、動画: 公式の h3-prompt-writing。画面の「強化」と同じ) |
-| `generate_image` | 画像(MiniMax-H3-Image。参照画像の id があれば edit)。できた画像そのものも返し、エージェントが見て確かめられる |
-| `generate_video` | 5〜15 秒の動画 1 本(MiniMax-H3。文章から / 最初と最後のコマから / 参照から)。4 コマの画像も返す |
-| `generate_music` | 曲(ACE-Step。テーマだけでも、歌詞とキャプションは LLM が書く)。使った歌詞・キャプション・BPM・調を返す |
-| `listen_song` | 同梱 LLM が曲を聞いて、言語・ジャンル・雰囲気・楽器・ボーカル・テンポを答える(エージェントは曲を聞けないので、確かめる用。歌詞は聞き取らない) |
-| `get_job` | 画像・動画・曲のジョブの様子 |
-| `create_music_video` / `create_short_video` | MV / ショート動画の制作を始める |
-| `preview_scenes` | 制作の各シーンから 4 コマずつ切り出して並べた画像を返す(エージェントが結果を見て確かめる。ffmpeg を使う) |
-| `list_projects` / `get_project` / `wait_for_project` | 制作の一覧 / 様子(`include_prompts` でシーンごとの演出)/ 終わるまで待つ |
-| `retry_scene` | 1 シーンをやり直す(そのシーンの演出の文だけを直して、または seed を変えて。公式の形への組み立ては管理役がする)。全部そろうと自動で結合し直す |
-| `control_project` | 一時停止・再開・中止・結合し直す |
-
-指示の例: 「ギャラリーの最新の曲と、カフェの女性の画像で 16:9 の MV を作って。できたら 3 番目のシーンだけ、カメラをもっとゆっくりにしてやり直して」
-
-**エージェント用の手順書(スキル)**: [`skills/yuzu-creator-studio/SKILL.md`](skills/yuzu-creator-studio/SKILL.md) に、制作の流れ(素材 → 制作 → `preview_scenes` で全シーンを見る → 利用者に見せる → 演出を直してやり直し)と、このスタジオの実用規則(歌わないシーンの構図など)をまとめた。Claude Code なら、このフォルダを `~/.claude/skills/` に写すと使える(`npx skills add https://github.com/animede/h3-creator-studio --skill yuzu-creator-studio` でも入る)。
-**プロンプトの書き方の公式の規則**は、MiniMax が公開しているスキル [`h3-prompt-writing`](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) にある(ライセンスの表記が無いので、このリポジトリには写さない)。管理役は MV・ショート動画の各シーンをその公式の形(参照画像を使うシーンは Ref2VA の 6 項目、使わないシーンは 3 項目)で書くので、エージェントが渡すのはシーンの演出の文だけ。プロンプト全文を書き換えると、項目・`[Shot 1]`・参照の記号(`<Subject 1>` など)が崩れていないかを確かめ、崩れていれば断る。
-
-- 生成は時間がかかる(30 秒の MV で、PRO 6000 は約 6 分、8〜12GB の GPU は約 20 分)。エージェントは制作を始めて、あとで様子を見る。
-- 環境変数: `YCS_URL`(スタジオの URL。既定は `studio.toml` / `studio.local.toml` の host・port)、`YCS_LANG=en`(スタジオの返す文言を英語に)。Claude Code なら `claude mcp add -s user yuzu-studio -e YCS_LANG=en -- …`。
-- 同じ PC の中で使う前提(エージェントに返すファイルの場所は、この PC のパス)。スタジオの画面と同じく、認証はない。
-- 試作: 編集タブ・プリセット・サンプルの道具はまだない。v1.0.0 から更新した人は、`setup` を一度実行し直す(MCP の部品 `mcp` を入れる。`--no-models` でよい)。
+Claude などの AI エージェントから、言葉の指示でスタジオを操作することもできる(MCP サーバ、試作)。使う人向けの説明は [agent/README.md](agent/README.md)。**使わない人は何もしなくてよい**(setup は MCP の部品を入れず、スタジオの使い方も変わらない)。
 
 ## 設定
 
@@ -606,8 +553,7 @@ h3-creator-studio/
 ├── setup.bat / setup.sh   セットアップ(uv を入れ、scripts/setup.py を呼ぶ)
 ├── run.bat / run.sh       管理役の起動
 ├── scripts/setup.py       エンジンの取り込み、環境とモデルの準備(エンジン自身のスクリプトを呼ぶ)
-├── scripts/mcp_server.py  エージェント用の MCP サーバ(試作。本体は studio/mcp_server.py)
-├── skills/                エージェント用の手順書(SKILL.md)
+├── agent/                 AI エージェントから使う人向け(MCP サーバとスキル。任意。使わない人は不要)
 ├── studio/                管理役(FastAPI): エンジンの起動と停止、載せ替え、メモリ監視、ジョブ、LLM、MV・ショート動画の制作、編集
 ├── studio/mvtools/        MV・ショート動画の音声処理(ボーカル分離・シーン分割。components/mvtools の Python で動かす)
 ├── presets/               同梱のプリセット(タブごとの JSON)
