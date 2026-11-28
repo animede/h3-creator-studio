@@ -502,6 +502,16 @@
           <option value="original" data-i18n>元の音</option><option value="music" data-i18n>曲に差し替え</option><option value="mix" data-i18n>元の音 + 曲</option><option value="none" data-i18n>音なし</option></select></label>
         <div class="refs frame edmini" id="ed-song" aria-label="曲のドロップ欄" data-i18n-aria><div class="frame-body" id="ed-song-body"></div><div class="uploading"><span class="spin"></span><span data-i18n>アップロード中…</span></div></div>
       </fieldset>
+      <fieldset class="edbody edup" id="ed-upscale" disabled>
+        <h3 class="edh"><span data-i18n>拡大(AI アップスケール)</span> <small data-i18n>(書き出しのときに掛かります)</small></h3>
+        <div class="fld two">
+          <label><span class="fl" data-i18n>大きさ</span><select id="ed-up-scale">
+            <option value="1" data-i18n>元のまま</option><option value="2" data-i18n>2 倍</option><option value="3" data-i18n>3 倍</option><option value="4" data-i18n>4 倍</option></select></label>
+          <label><span class="fl" data-i18n>方式</span><select id="ed-up-method"><option value="auto" data-i18n>おすすめ(自動)</option></select></label>
+        </div>
+        <div class="note" id="ed-up-note"></div>
+        <div class="msg" id="ed-up-tools" hidden></div>
+      </fieldset>
       <div class="edfoot">
         <div class="msg" id="ed-msg" hidden></div>
         <div class="actions">
@@ -524,7 +534,16 @@
     <div class="viewer" id="viewer"><div class="placeholder" data-i18n>まだ生成物がありません</div></div>
     <div class="vmeta" id="vmeta" hidden>
       <span class="vname" id="vname"></span><span class="vinfo" id="vinfo"></span>
-      <span class="vbtns"><a id="vsave" class="btn" download data-i18n>保存</a><button id="vdel" type="button" title="この生成物を削除します(ファイルも消え、元に戻せません)" data-i18n-title data-i18n>削除</button><span id="vacts"></span></span>
+      <span class="vbtns"><a id="vsave" class="btn" download data-i18n>保存</a><button id="vdel" type="button" title="この生成物を削除します(ファイルも消え、元に戻せません)" data-i18n-title data-i18n>削除</button><button id="vup" type="button" title="この動画・画像を AI で拡大します(2〜4 倍)" aria-expanded="false" aria-controls="vup-panel" hidden data-i18n-title data-i18n>拡大</button><span id="vacts"></span></span>
+      <div class="vup" id="vup-panel" hidden>
+        <label><span class="fl" data-i18n>大きさ</span><select id="vup-scale">
+          <option value="2" data-i18n>2 倍</option><option value="3" data-i18n>3 倍</option><option value="4" data-i18n>4 倍</option></select></label>
+        <label><span class="fl" data-i18n>方式</span><select id="vup-method"><option value="auto" data-i18n>おすすめ(自動)</option></select></label>
+        <span class="vupbtns"><button id="vup-go" type="button" class="primary" disabled data-i18n>拡大する</button><button id="vup-stop" type="button" hidden data-i18n>中止</button></span>
+        <div class="note" id="vup-note"></div>
+        <div class="msg" id="vup-tools" hidden></div>
+        <div class="vupprog" id="vup-prog" hidden><div class="pbar"><i></i></div><div class="vupmsg"></div></div>
+      </div>
     </div>
     <div class="mvproj" id="mv-project"></div>
     <div class="mvproj" id="short-project"></div>
@@ -611,6 +630,7 @@
 <script src="i18n.js"></script>
 <script src="app.js"></script>
 <script src="viz.js"></script>
+<script src="upscale.js"></script>
 <script src="gallery.js"></script>
 <script src="dnd.js"></script>
 <script src="jobs.js"></script>

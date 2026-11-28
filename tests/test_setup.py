@@ -531,6 +531,123 @@ class MvToolsTest(unittest.TestCase):
         self.assertEqual(S.run_step.call_args_list[0].args[1], self.root / "elsewhere" / "mvtools")
 
 
+class UpscaleToolsTest(unittest.TestCase):
+    """編集タブの AI 拡大の道具(--only upscale-realesrgan / upscale-rtxvsr)。"""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = Path(self._t.name)
+        self.cfg = Settings({"upscale": {"tools_dir": str(self.root / "up")}}, self.root)
+        self.lines = []
+        p = mock.patch.object(S, "say", self.lines.append)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_split_upscale(self):
+        self.assertEqual(S.split_upscale("upscale-rtxvsr, h3 ,upscale-realesrgan"), (["rtxvsr", "realesrgan"], "h3"))
+        self.assertEqual(S.split_upscale("upscale-realesrgan"), (["realesrgan"], ""))
+        self.assertEqual(S.split_upscale(""), ([], ""))
+
+    def test_tiny_png_is_a_valid_image(self):
+        from PIL import Image
+        import io
+        im = Image.open(io.BytesIO(S._tiny_png()))
+        self.assertEqual((im.size, im.mode), ((16, 16), "RGB"))
+
+    def fake_zip(self, url, dest, names=None):
+        import zipfile
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        exe = "realesrgan-ncnn-vulkan.exe" if url.endswith("windows.zip") else "realesrgan-ncnn-vulkan"
+        with zipfile.ZipFile(dest, "w") as z:
+            for n in names or [exe, "models/realesr-animevideov3-x2.param", "models/realesr-animevideov3-x2.bin", "onepiece_demo.mp4"]:
+                z.writestr(n, b"x")
+
+    def fake_run(self, argv, **kw):
+        Path(argv[argv.index("-o") + 1]).write_bytes(b"png")       # GPU(Vulkan)で 1 枚拡大できた
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def test_realesrgan_downloads_extracts_and_checks_the_gpu(self):
+        got = []
+        ok = S.setup_realesrgan(self.cfg, "linux", fetch=lambda u, d: (got.append(u), self.fake_zip(u, d)), run=self.fake_run)
+        self.assertTrue(ok)
+        d = self.root / "up" / "realesrgan"
+        self.assertTrue(got[0].endswith("ubuntu.zip"))
+        self.assertTrue(os.access(d / "realesrgan-ncnn-vulkan", os.X_OK))
+        self.assertFalse((d / "onepiece_demo.mp4").exists() or (d / "_download").exists() or (d / "_check").exists())
+        self.assertIn("GPU(Vulkan)で動くことを確かめました", "\n".join(self.lines))
+        got.clear()
+        self.assertTrue(S.setup_realesrgan(self.cfg, "linux", fetch=lambda u, d: got.append(u), run=self.fake_run))
+        self.assertEqual(got, [])                                       # 入っていれば取り直さない(動くかだけ確かめる)
+
+    def test_realesrgan_reports_vulkan_failure_and_bad_zip(self):
+        def no_vulkan(argv, **kw):
+            return types.SimpleNamespace(returncode=255, stdout="", stderr="vkCreateInstance failed -9")
+        self.assertFalse(S.setup_realesrgan(self.cfg, "linux", fetch=self.fake_zip, run=no_vulkan))
+        text = "\n".join(self.lines)
+        self.assertIn("libvulkan1", text)
+        self.assertIn("vkCreateInstance failed", text)
+        self.lines.clear()
+        cfg2 = Settings({"upscale": {"tools_dir": str(self.root / "up2")}}, self.root)
+        evil = lambda u, d: self.fake_zip(u, d, ["../escape.txt"])
+        self.assertFalse(S.setup_realesrgan(cfg2, "linux", fetch=evil, run=self.fake_run))
+        self.assertFalse((self.root / "escape.txt").exists())
+        self.assertIn("不正な名前", "\n".join(self.lines))
+
+    def test_realesrgan_windows_zip_and_unsupported_os(self):
+        got = []
+        self.assertTrue(S.setup_realesrgan(self.cfg, "win32", fetch=lambda u, d: (got.append(u), self.fake_zip(u, d)), run=self.fake_run))
+        self.assertTrue(got[0].endswith("windows.zip"))
+        self.assertFalse(S.setup_realesrgan(Settings({"upscale": {"tools_dir": str(self.root / "m")}}, self.root), "darwin",
+                                            fetch=self.fake_zip, run=self.fake_run))
+        self.assertIn("Windows と Linux だけ", "\n".join(self.lines))
+
+    def test_rtxvsr_needs_the_license_and_a_supported_gpu(self):
+        smi = mock.Mock(return_value=["NVIDIA RTX A4000", "580.82.07", "8.6"])
+        self.assertFalse(S.setup_rtxvsr(self.cfg, False, "linux", smi=smi))
+        smi.assert_not_called()                                         # 同意が無ければ、GPU も調べずに断る
+        self.assertIn("--accept-nvidia-license", "\n".join(self.lines))
+        self.lines.clear()
+        with mock.patch.object(S, "run_step") as step:
+            self.assertFalse(S.setup_rtxvsr(self.cfg, True, "linux", smi=lambda: ["NVIDIA GeForce GTX 1080", "580.82.07", "6.1"]))
+            self.assertFalse(S.setup_rtxvsr(self.cfg, True, "win32", smi=lambda: ["NVIDIA GeForce RTX 3060", "566.36", "8.6"]))
+            step.assert_not_called()                                    # 使えない GPU なら、数 GB を取得する前に断る
+        text = "\n".join(self.lines)
+        self.assertIn("RTX 20 以降", text)
+        self.assertIn("570.65 以降", text)
+
+    def test_rtxvsr_steps_and_install(self):
+        venv = self.root / "up" / "rtxvsr" / ".venv"
+        py = venv / "bin" / "python"
+        steps = S.rtxvsr_steps(venv, py)
+        self.assertEqual([s.argv[:2] for s in steps], [["uv", "venv"], ["uv", "pip"], ["uv", "pip"]])
+        self.assertIn(S.RTXVSR_TORCH_INDEX, steps[1].argv)
+        self.assertIn("torch==2.11.0", steps[1].argv)
+        self.assertEqual(steps[2].argv[steps[2].argv.index("--extra-index-url") + 1], "https://pypi.nvidia.com")
+        self.assertIn("nvidia-vfx==0.2.0.0", steps[2].argv)
+        self.assertEqual(len(S.rtxvsr_steps(venv, py, have_venv=True)), 2)
+        ready = iter([False, True])
+        with mock.patch.object(S, "run_step", return_value=True) as step, mock.patch.object(S, "ensure_uv_on_path", return_value=True), \
+                mock.patch.object(S, "rtxvsr_ready", side_effect=lambda py, run=None: next(ready)):
+            self.assertTrue(S.setup_rtxvsr(self.cfg, True, "linux", smi=lambda: ["NVIDIA RTX PRO 4000", "580.178.04", "12.0"]))
+        self.assertEqual(step.call_count, 3)
+
+    def test_only_upscale_touches_no_engine_and_skips_the_shortcut(self):
+        with mock.patch.object(S, "check_prerequisites") as pre, mock.patch.object(S, "setup_upscale", return_value=True) as up, \
+                mock.patch.object(S, "offer_shortcut") as icon, mock.patch.object(S, "setup_mv") as mv, \
+                mock.patch.object(S, "load_settings", return_value=self.cfg):
+            self.assertEqual(S.main(["--only", "upscale-rtxvsr", "--accept-nvidia-license"]), 0)
+        pre.assert_not_called()
+        mv.assert_not_called()
+        icon.assert_not_called()
+        up.assert_called_once_with(self.cfg, "rtxvsr", accept_license=True)
+        with mock.patch.object(S, "setup_upscale", return_value=False), mock.patch.object(S, "load_settings", return_value=self.cfg):
+            self.assertEqual(S.main(["--only", "upscale-realesrgan"]), 1)
+        with mock.patch.object(S, "load_settings", return_value=self.cfg):
+            self.assertEqual(S.main(["--only", "upscale-nope"]), 2)
+        self.assertIn("upscale-realesrgan", "\n".join(self.lines))      # 使える名前の案内に出る
+
+
 class PrefetchLlmTest(unittest.TestCase):
     """setup --llm: llama-server と GGUF に加えて、画像・音声を読む投影ファイル(約 0.56GB)も、管理役と同じ関数で取得する。"""
 

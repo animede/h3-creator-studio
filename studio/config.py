@@ -32,6 +32,8 @@ def _read_toml(path: Path) -> dict:
 
 
 LLM_DEFAULTS = {"port": 8701, "gpu": "auto", "gguf": "", "mmproj": "", "llama_server": "", "tools_dir": "components/llm"}
+# 編集タブの書き出しの AI 拡大(studio/upscale.py)。tools_dir = 道具(Real-ESRGAN・RTX VSR の venv)の置き場所、max_edge = 拡大後の長辺の上限(px)
+UPSCALE_DEFAULTS = {"tools_dir": "components/upscale", "max_edge": 3840, "rtxvsr_quality": "ULTRA"}
 GPU_MODES = ("auto", "exclusive", "share")
 
 
@@ -59,6 +61,7 @@ class Settings:
         self.free_cpu_engines = str(data.get("gpu", {}).get("free_cpu_engines", "auto")).strip().lower()
         self.stop_on_switch = str(data.get("gpu", {}).get("stop_on_switch", "auto")).strip().lower()
         self.mv = dict(data.get("mv", {}))     # MV・ショート動画の音声処理などの設定。tools_python = Demucs と librosa の入った Python
+        self.upscale = {**UPSCALE_DEFAULTS, **data.get("upscale", {})}     # 編集タブの書き出しの AI 拡大(道具の置き場所・長辺の上限・RTX VSR の品質)
 
     def component_names(self) -> list[str]:
         return [n for n, c in self.components.items() if c.get("enabled", True)]

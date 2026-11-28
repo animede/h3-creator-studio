@@ -111,6 +111,23 @@ def smi_mib(field: str) -> Optional[int]:
         return None
 
 
+def smi_fields(fields: list) -> Optional[list]:
+    """管理する GPU の nvidia-smi の値(--query-gpu の項目名の並び。name, driver_version, compute_cap など)を、同じ並びの文字列で返す。
+    nvidia-smi が無い・項目を知らない古いドライバ・読めないときは None。名前にカンマが入っても、後ろの項目から数えて分ける。"""
+    exe = find_nvidia_smi()
+    if exe is None or not fields:
+        return None
+    try:
+        out = subprocess.run([exe, "-i", str(_gpu_index()), f"--query-gpu={','.join(fields)}", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if out.returncode != 0:
+            return None
+        row = [x.strip() for x in out.stdout.strip().splitlines()[0].rsplit(",", len(fields) - 1)]
+        return row if len(row) == len(fields) else None
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return None
+
+
 def parse_smi(text: str, index: int = 0) -> Optional[dict]:
     """nvidia-smi の csv(index,name,used,total,util)から指定の GPU を取り出す。"""
     rows = []

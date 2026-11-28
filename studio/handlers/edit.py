@@ -2,11 +2,15 @@
 
   preview : いまの状態を短辺 480 の軽い MP4 にして outputs/edit/<プロジェクトの ID>/preview_<N>.mp4 に置き、台帳の preview に(state の指紋と一緒に)記録する。
             これより古い番号のプレビューは消す。ギャラリーには載せない
-  export  : 元の寸法の MP4 を outputs/video/edit_<ID>.mp4(2 回目以降 _2…)に作り、ギャラリー(kind = video、tab = edit)に載せて、プロジェクトの output_id にする
-ジョブの params は {"project_id", "state"(頼んだ時点の状態の写し), ("seq": プレビューの番号)}。ffmpeg の引数は studio/editclip.py の render_args。
-ffmpeg は子プロセスとして別スレッドで走らせ、標準出力の -progress(out_time)から進みを出す。中止(cancel)は子プロセスを止める。
+  export  : 元の寸法の MP4 を outputs/video/edit_<ID>.mp4(2 回目以降 _2…)に作り、ギャラリー(kind = video、tab = edit)に載せて、プロジェクトの output_id にする。
+            params["upscale"]({"method", "scale", "width", "height"}。EditManager が studio/upscale.py の resolve で検証したもの)があれば、続けて
+            その動画を AI で拡大して edit_<ID>_x<倍率>.mp4 に作り、2 本目としてギャラリーに載せる(output_id は拡大したほう)。拡大の道具は GPU の
+            VRAM を使うので、GPU のエンジンの生成が終わるのを待ってから始める。拡大だけが失敗したら、元の大きさの動画は残っている旨を添えて失敗にする
+ジョブの params は {"project_id", "state"(頼んだ時点の状態の写し), ("seq": プレビューの番号), ("upscale": 拡大の指定)}。ffmpeg の引数は studio/editclip.py の render_args。
+ffmpeg は子プロセスとして別スレッドで走らせ、標準出力の -progress(out_time)から進みを出す。中止(cancel)は子プロセスを止める(拡大の道具も同じ _procs に入る)。
 """
 import asyncio
+import functools
 import logging
 import os
 import re
@@ -18,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from .. import edit as edit_mod
-from .. import editclip, media, mv_audio
+from .. import editclip, media, mv_audio, upscale
 from ..jobs import Ctx, Handler, Job, JobCancelled, JobFailed
 from .mv import final_path
 
@@ -48,6 +52,9 @@ def normalize(kind: str, params: dict, ledger=None) -> dict:
             out["seq"] = max(1, int(params.get("seq") or 1))
         except (TypeError, ValueError, OverflowError):
             raise ValueError("プレビューの番号を整数で指定してください") from None
+    elif params.get("upscale"):
+        # 使えるか(道具・GPU)の検証は設定の要る EditManager.export(upscale.resolve)で済んでいる。ここは形(方式・倍率・寸法)だけそろえる
+        out["upscale"] = upscale.check_params(params["upscale"], state)
     return out
 
 
@@ -133,15 +140,20 @@ async def cancel_ffmpeg(job: Job, ctx: Ctx) -> None:
         proc.kill()
 
 
-async def _encode(job: Job, argv: list, dst: Path, total_s: float, label: str) -> None:
-    """run_ffmpeg を別スレッドで走らせて待つ。待っている側が取り消された(管理役の停止)ら、ffmpeg も止める。"""
+async def _in_thread(job: Job, fn) -> None:
+    """止まる処理 fn()(_procs に子プロセスを登録する)を別スレッドで走らせて待つ。待っている側が取り消された(管理役の停止)ら、子プロセスも止める。"""
     try:
-        await asyncio.to_thread(run_ffmpeg, job, argv, dst, total_s, label)
+        await asyncio.to_thread(fn)
     except asyncio.CancelledError:
         proc = _procs.get(job.id)
         if proc is not None:
             proc.kill()
         raise
+
+
+async def _encode(job: Job, argv: list, dst: Path, total_s: float, label: str) -> None:
+    """run_ffmpeg を別スレッドで走らせて待つ。"""
+    await _in_thread(job, functools.partial(run_ffmpeg, job, argv, dst, total_s, label))
 
 
 # ---- 入力の用意 ----
@@ -222,21 +234,63 @@ async def run_export(job: Job, ctx: Ctx) -> None:
     duration = editclip.export_duration(state)
     await _encode(job, argv, dest, duration, "書き出しています")
     job.progress, job.message = 0.99, "ギャラリーに登録しています"
-    name = re.sub(r'[\\/:*?"<>|\s]+', "_", proj["name"])[:40] + "_edit.mp4"
-    rec = await asyncio.to_thread(ctx.ledger.add_output, "video", dest, job.tab, job.id, name,
+    base = re.sub(r'[\\/:*?"<>|\s]+', "_", proj["name"])[:40]
+    rec = await asyncio.to_thread(ctx.ledger.add_output, "video", dest, job.tab, job.id, base + "_edit.mp4",
                                   {"project_id": pid, "state": state, "name": proj["name"]},
                                   width=state["width"], height=state["height"], duration_s=duration, fps=state["fps"])
     job.outputs.append(rec["id"])
     ctx.ledger.update_edit_project(pid, output_id=rec["id"])
     log.info("編集 %s: 書き出しました → %s(%.1f 秒)", pid, dest.name, duration)
+    up = job.params.get("upscale")
+    if up:
+        await _upscale(job, ctx, pid, dest, rec, state, duration, base, proj["name"], up)
+
+
+# ---- 書き出した動画の AI 拡大 ----
+
+def _runner(job: Job, method: str, src: Path, dst: Path, scale: int, fps, work: Path):
+    """方式の実行(止まる処理)を、引数を束ねた関数にする。道具の場所は設定(studio.config.settings)から。"""
+    try:
+        ffmpeg = mv_audio._ffmpeg()
+    except mv_audio.MvAudioError as e:
+        raise JobFailed(e.message, e.log_tail) from e
+    if method == "realesrgan":
+        return functools.partial(upscale.run_realesrgan, job, upscale.realesrgan_exe(), src, dst, scale, fps, work, ffmpeg, _procs)
+    return functools.partial(upscale.run_rtxvsr, job, upscale.rtxvsr_python(), src, dst, scale, fps, work, ffmpeg, _procs, upscale.rtxvsr_quality())
+
+
+async def _upscale(job: Job, ctx: Ctx, pid: str, dest: Path, rec: dict, state: dict, duration: float, base: str, proj_name: str, up: dict) -> None:
+    """書き出した動画(dest。ギャラリーの行 rec)を up の方式・倍率で拡大し、2 本目の生成物として載せる。プロジェクトの output_id は拡大したほう。
+    拡大の失敗は、元の大きさの動画が残っている旨を添える(ギャラリーには入っているので、やり直しは拡大だけでよい)。"""
+    method, scale = up["method"], int(up["scale"])
+    out = upscale.upscaled_path(dest, scale)
+    try:
+        await upscale.wait_gpu_idle(job, ctx)          # GPU のエンジンの生成が終わるまで待つ(ギャラリーの拡大と共通)
+        fn = _runner(job, method, dest, out, scale, state["fps"], edit_mod.work_dir(ctx.outputs_dir, pid) / "upscale")
+        await _in_thread(job, fn)
+    except JobFailed as e:
+        raise JobFailed(f"{e.message}(元の大きさの動画はギャラリーに入っています)", e.log_tail) from e
+    if job.cancel_requested:
+        out.unlink(missing_ok=True)
+        raise JobCancelled()
+    job.progress, job.message = 0.99, "ギャラリーに登録しています"
+    rec2 = await asyncio.to_thread(ctx.ledger.add_output, "video", out, job.tab, job.id, f"{base}_edit_x{scale}.mp4",
+                                   {"project_id": pid, "state": state, "name": proj_name,
+                                    "upscale": {"method": method, "scale": scale, "source_output_id": rec["id"]}},
+                                   width=up["width"], height=up["height"], duration_s=duration, fps=state["fps"])
+    job.outputs.append(rec2["id"])
+    ctx.ledger.update_edit_project(pid, output_id=rec2["id"])
+    log.info("編集 %s: %s ×%d で拡大しました → %s(%d×%d)", pid, upscale.METHODS[method]["ja"], scale, out.name, up["width"], up["height"])
 
 
 def record(params: dict) -> dict:
-    """台帳(jobs 表)に残す params: プロジェクトの ID・プレビューの番号と、state の指紋だけ。state の写し(クリップ・効果の全部)は残さない
+    """台帳(jobs 表)に残す params: プロジェクトの ID・プレビューの番号・拡大の指定と、state の指紋だけ。state の写し(クリップ・効果の全部)は残さない
     (プレビューは操作のたびに走るので、写しを残すと台帳が増え続けた)。写しはメモリのジョブにあり、ギャラリーの削除の保護はそちらを見る。"""
     out = {"project_id": params.get("project_id"), "state_hash": editclip.state_hash(params["state"]) if isinstance(params.get("state"), dict) else None}
     if "seq" in params:
         out["seq"] = params["seq"]
+    if params.get("upscale"):
+        out["upscale"] = params["upscale"]
     return out
 
 

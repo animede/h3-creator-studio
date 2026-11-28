@@ -13,8 +13,9 @@ WEB = REPO_ROOT / "web"
 NODE_PRELUDE = r"""
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
 const edPath = process.argv[process.argv.length - 1];
-// 画面の文言の t() などを先に読む(ページと同じ順)
-const src = fs.readFileSync(require("path").join(require("path").dirname(edPath), "i18n.js"), "utf8") + "\n" + fs.readFileSync(edPath, "utf8");
+// 画面の文言の t() と、拡大の共通部分(UPSCALE)を先に読む(ページと同じ順)
+const near = (f) => fs.readFileSync(require("path").join(require("path").dirname(edPath), f), "utf8");
+const src = near("i18n.js") + "\n" + near("upscale.js") + "\n" + fs.readFileSync(edPath, "utf8");
 const fake = () => {
   const base = { value: "mono", dataset: {}, style: {}, hidden: false, textContent: "", classList: { toggle() {}, add() {}, remove() {} } };
   const p = new Proxy(base, { get: (t, k) => (k in t ? t[k] : k === "then" ? undefined : () => p), set: (t, k, v) => { t[k] = v; return true; } });
@@ -153,6 +154,27 @@ assert.deepStrictEqual([fixed.fade_in, fixed.fade_out], [3, 2]);
 fixed = L.fixup({ ...base(), clips: [V("a", 0, 4), V("b", 0, 4)], transitions: [{ after: 0, type: "crossfade", duration: 2 }], fade_in: 8, fade_out: 1 });
 assert.strictEqual(L.exportLength(fixed), 6);
 assert.deepStrictEqual([fixed.fade_in, fixed.fade_out], [6, 0]);
+
+// 拡大(AI アップスケール): 書き出しの本文(倍率 1 なら無し)と、道具の答え(GET /api/upscale/tools)との照らし合わせ
+assert.strictEqual(L.upscaleBody("auto", 1), undefined);
+assert.strictEqual(L.upscaleBody("auto", "1"), undefined);
+assert.deepStrictEqual(L.upscaleBody("auto", "2"), { upscale: { method: "auto", scale: 2 } });
+assert.deepStrictEqual(L.upscaleBody("rtxvsr", 4), { upscale: { method: "rtxvsr", scale: 4 } });
+const tools = { methods: [{ id: "rtxvsr", scales: [2, 3, 4], installed: false, usable: false, hint: "入っていません" },
+  { id: "realesrgan", scales: [2, 4], installed: true, usable: true, hint: null }], default: "auto", auto_method: "realesrgan", installing: null, max_edge: 3840 };
+let up = L.upscalePlan(tools, "auto", 2, 1024, 576);                 // auto はおすすめの方式に解決する
+assert.deepStrictEqual([up.method, up.scale, up.scales, up.size, up.tooBig, up.usable, up.hint], ["realesrgan", 2, [2, 4], [2048, 1152], false, true, ""]);
+up = L.upscalePlan(tools, "auto", 3, 1024, 576);                     // その方式に無い倍率は、元のまま(1)に戻る
+assert.deepStrictEqual([up.scale, up.size, up.tooBig], [1, [1024, 576], false]);
+up = L.upscalePlan(tools, "realesrgan", 4, 1344, 768);               // 長辺 5376 > 3840: 書き出しを止める
+assert.deepStrictEqual([up.scale, up.size, up.tooBig], [4, [5376, 3072], true]);
+up = L.upscalePlan(tools, "rtxvsr", 2, 1024, 576);                   // 入っていない方式: 倍率は選べるが使えない(理由は hint)
+assert.deepStrictEqual([up.method, up.scale, up.usable, up.hint], ["rtxvsr", 2, false, "入っていません"]);
+up = L.upscalePlan({ ...tools, auto_method: null }, "auto", 2, 1024, 576);      // 使える方式が無い: 倍率 2〜4 は選べない
+assert.deepStrictEqual([up.method, up.scale, up.scales], [null, 1, []]);
+up = L.upscalePlan(null, "auto", 2, 1024, 576);                      // 道具の答えが無い(古いサーバ・通信失敗): 拡大しない
+assert.deepStrictEqual([up.method, up.scale, up.scales, up.tooBig], [null, 1, [], false]);
+assert.strictEqual(L.upscalePlan(tools, "auto", 2, null, null).size, null);     // 寸法が分からなければ size は無し
 """
 
 # 画面が組み立てた state(整えたあと)を JSON で出す。サーバの validate_state が受けるか、サーバの delete_range / insert_at と同じクリップになるかを Python 側で確かめる
@@ -199,10 +221,31 @@ class EditPageTest(unittest.TestCase):
             self.assertIn(i, self.ids)
         self.assertIn('data-tab="edit"', self.css)      # 右上の既定の生成物ビューアを、編集タブでは隠す
 
+    def test_upscale_uses_the_tools_api_and_sends_the_body_at_export(self):
+        """拡大(AI アップスケール): 道具の様子は GET /api/upscale/tools、導入は POST /api/upscale/tools/install(RTX VSR は accept_license: true)、
+        書き出しは POST /api/edit/{id}/export の本文 {upscale: {method, scale}}(倍率 1 なら本文なし = 今までと同じ)。選びは localStorage の edit-upscale に覚える。"""
+        for i in ("ed-upscale", "ed-up-scale", "ed-up-method", "ed-up-note", "ed-up-tools"):
+            self.assertIn(i, self.ids)
+        scale_sel = self.html[self.html.index('id="ed-up-scale"'):self.html.index('id="ed-up-method"')]
+        for v in ("1", "2", "3", "4"):
+            self.assertIn(f'<option value="{v}"', scale_sel)
+        self.assertIn('<option value="auto"', self.html[self.html.index('id="ed-up-method"'):])
+        # 道具の様子・導入・選びを覚えるのは、生成物ビューアの「拡大」と共通の web/upscale.js(UPSCALE)
+        shared = (WEB / "upscale.js").read_text(encoding="utf-8")
+        self.assertIn('api("/api/upscale/tools")', shared)
+        self.assertIn('api("/api/upscale/tools/install", "POST", { method: m.id, accept_license: m.id === "rtxvsr" })', shared)
+        self.assertIn('"edit-upscale"', shared)
+        self.assertIn('m.id === "rtxvsr" && !confirm(', shared)
+        self.assertIn("const UP = UPSCALE;", self.js)
+        for call in ("UP.load()", 'UP.renderTools(ed("up-tools"))', 'UP.fillMethods(sel)', "UP.remember()", "UP.onChange("):
+            self.assertIn(call, self.js)
+        self.assertEqual(re.findall(r'["`](/api/upscale[^"`]*)["`]', self.js), [])          # 編集タブは道具の API を直に呼ばない
+        self.assertIn('api(`/api/edit/${id}/export`, "POST", L.upscaleBody(ed("up-method").value, ed("up-scale").value))', self.js)
+
     def test_edit_js_is_loaded_after_the_shared_scripts(self):
         order = re.findall(r'<script src="([\w.]+)"></script>', self.html)
         self.assertIn("edit.js", order)
-        self.assertLess(max(order.index(f) for f in ("app.js", "gallery.js", "dnd.js", "project.js")), order.index("edit.js"))
+        self.assertLess(max(order.index(f) for f in ("app.js", "upscale.js", "gallery.js", "dnd.js", "project.js")), order.index("edit.js"))
 
     def test_every_ed_id_edit_js_uses_is_in_the_page_and_the_other_way_round(self):
         used = {"ed-" + m for m in re.findall(r'\bed\("([\w-]+)"\)', self.js)}

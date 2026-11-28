@@ -12,6 +12,8 @@
   python scripts/setup.py --no-mv         # MV の音声処理の道具(Demucs + librosa、CPU 版 torch。約 1.3GB。既定で入れる)を入れない
   python scripts/setup.py --only mvtools  # その道具だけ(--only には h3,mvtools のように混ぜて書ける。--only のときは書いた分だけ)
   python scripts/setup.py --shortcut      # Windows のデスクトップの起動アイコンだけ作る
+  python scripts/setup.py --only upscale-realesrgan                        # 編集タブの AI 拡大: Real-ESRGAN(約 46MB)
+  python scripts/setup.py --only upscale-rtxvsr --accept-nvidia-license    # 同: RTX Video Super Resolution(NVIDIA の利用条件に同意して。約 3GB)
   (--mv は以前の名残。既定で入れるので、付けても何も変わらない)
 
 経過は logs/setup.log にも追記する(画面が消えても、どこで止まったか後から分かるように)。
@@ -28,6 +30,8 @@ import subprocess
 import sys
 import time
 import traceback
+import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -71,6 +75,15 @@ ORDER = ("h3", "h3image", "ace", "aivis")
 # MV の音声処理の道具(components/mvtools/.venv)。エンジンではなく、管理役が子プロセスで使う Python 環境(studio/mv_audio.py)
 MV_NAME = "mvtools"
 MV_LABEL = "MV の音声処理の道具(Demucs + librosa、CPU 版 torch)"
+
+# 編集タブの書き出しの AI 拡大の道具(v1.3.0)。エンジンでも MV の道具でもなく、既定では入れない(--only upscale-<方式> と書いたときだけ。
+# 画面の「入れる」も同じコマンドを動かす)。置き場所・方式の一覧・GPU の条件は studio/upscale.py が唯一の出どころ
+UPSCALE_TARGETS = {"upscale-realesrgan": "realesrgan", "upscale-rtxvsr": "rtxvsr"}
+RTXVSR_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+RTXVSR_TORCH = ["torch==2.11.0"]                     # Blackwell(sm_120)まで動く CUDA 12.8 版。この組み合わせで実機確認(2026-11-29)
+NVIDIA_INDEX = "https://pypi.nvidia.com"            # nvidia-vfx の本体(PyPI のものは、ここから取ってくる中継だけ)
+RTXVSR_PACKAGES = ["nvidia-vfx==0.2.0.0", "av", "numpy"]
+RTXVSR_IMPORTS = "import torch, av, numpy; from nvvfx import VideoSuperRes; assert torch.cuda.is_available(), 'CUDA が使えません'"
 MV_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 # torch / torchaudio は CPU 版の cp312 の wheel が manylinux_2_28_x86_64 と win_amd64 の両方にある版(2.11.0)。
 # Demucs 4.0.1 は torchaudio の上限を付けていないので、この版で動く(Linux で htdemucs の分離まで確認済み)
@@ -928,6 +941,12 @@ def parse_only(only: str, enabled: list, no_mv: bool = False) -> tuple:
     return [n for n in ORDER if n in want and n in enabled], MV_NAME in want, bad
 
 
+def split_upscale(only: str) -> tuple:
+    """--only の値 → (拡大の道具の方式の並び, 残りの --only)。拡大の道具はエンジンでも MV の道具でもないので、parse_only の前に取り分ける。"""
+    want = [x.strip() for x in (only or "").split(",") if x.strip()]
+    return [UPSCALE_TARGETS[x] for x in want if x in UPSCALE_TARGETS], ",".join(x for x in want if x not in UPSCALE_TARGETS)
+
+
 def mv_notice(plat: str = None) -> str:
     """導入の前に出す目安。ダウンロードは wheel の大きさの合計(実測): Linux で約 410MB(torch の CPU 版 約 190MB)、
     Windows で約 315MB(同 約 115MB)。どちらも Demucs の重み(約 80MB)を含む。ディスクは Linux の venv が約 1.2GB + 重み。"""
@@ -1018,6 +1037,154 @@ def setup_mv(cfg: Settings, models: bool = True) -> bool:
     return True
 
 
+# ---- 編集タブの AI 拡大の道具(--only upscale-realesrgan / upscale-rtxvsr) ----
+
+def _tiny_png() -> bytes:
+    """Real-ESRGAN が GPU(Vulkan)で動くかを確かめる 16×16 の灰色の PNG(Pillow を使わずに作る)。"""
+    import struct
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"\x80" * 48 for _ in range(16))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 16, 16, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def realesrgan_works(exe: Path, plat: str = None, run: Callable = subprocess.run) -> bool:
+    """小さな画像を 1 枚拡大して、実行ファイルが GPU(Vulkan)で動くかを確かめる。動かなければ理由と対処を出して False。"""
+    from studio import upscale
+    work = exe.parent / "_check"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True, exist_ok=True)
+    src, dst = work / "in.png", work / "out.png"
+    try:
+        src.write_bytes(_tiny_png())
+        try:
+            r = run([str(exe), "-i", str(src), "-o", str(dst), "-n", upscale.REALESRGAN_MODEL, "-s", "2"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180, cwd=str(exe.parent))
+            ok, tail = r.returncode == 0 and dst.is_file(), (r.stderr or r.stdout or "").strip().splitlines()[-3:]
+        except (OSError, subprocess.SubprocessError) as e:
+            ok, tail = False, [str(e)]
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if ok:
+        say("  GPU(Vulkan)で動くことを確かめました")
+        return True
+    hint = ("GPU のドライバを新しくしてください" if is_win(plat)
+            else "Vulkan の読み込み口が要ります(sudo apt install libvulkan1)。NVIDIA のドライバが入っていることも確かめてください")
+    say(f"失敗しました: Real-ESRGAN を GPU(Vulkan)で動かせません。{hint}")
+    for line in tail:
+        say(f"  {line}")
+    return False
+
+
+def setup_realesrgan(cfg: Settings, plat: str = None, fetch: Callable = download, run: Callable = subprocess.run) -> bool:
+    """Real-ESRGAN ncnn-vulkan の配布 zip(実行ファイルとモデル、約 46MB)を <tools_dir>/realesrgan に展開する。入っていれば、動くかだけ確かめる。"""
+    from studio import upscale
+    plat = plat or sys.platform
+    exe = upscale.realesrgan_exe(cfg, plat)
+    d = exe.parent
+    model = d / "models" / f"{upscale.REALESRGAN_MODEL}-x2.param"
+    if exe.is_file() and model.is_file():
+        say(f"  準備済みです: {exe}")
+        return realesrgan_works(exe, plat, run)
+    url = upscale.REALESRGAN_RELEASE.get("win32" if is_win(plat) else "linux" if plat.startswith("linux") else "")
+    if not url:
+        say("失敗しました: この OS 用の Real-ESRGAN はありません(Windows と Linux だけ)")
+        return False
+    archive = d / "_download" / url.rsplit("/", 1)[1]
+    try:
+        say(f"  取得しています: {url}(約 46MB)")
+        fetch(url, archive)
+        say("  展開しています")
+        with zipfile.ZipFile(archive) as z:
+            for name in z.namelist():           # 外へ書き出す名前(.. や絶対パス)は受け付けない
+                if name.startswith(("/", "\\")) or ".." in Path(name).parts or ":" in name:
+                    raise RuntimeError(f"zip の中に不正な名前があります: {name}")
+            z.extractall(d)
+    except Exception as e:  # noqa: BLE001  ネットワーク・ディスク・壊れた zip
+        say(f"失敗しました: Real-ESRGAN の取得と展開({e})。ネットワークを確かめて、もう一度実行してください")
+        return False
+    finally:
+        shutil.rmtree(d / "_download", ignore_errors=True)
+    for extra in ("onepiece_demo.mp4", "input.jpg", "input2.jpg"):       # 配布物の見本(要らない)
+        (d / extra).unlink(missing_ok=True)
+    if not (exe.is_file() and model.is_file()):
+        say(f"失敗しました: 展開しても {exe.name} か {model.name} がありません(配布物の構成が変わったかもしれません)")
+        return False
+    if not is_win(plat):
+        exe.chmod(exe.stat().st_mode | 0o111)
+    return realesrgan_works(exe, plat, run)
+
+
+def rtxvsr_steps(venv: Path, py: Path, have_venv: bool = False) -> list:
+    """RTX Video Super Resolution の道具を入れるコマンド(uv)。torch は CUDA 12.8 版のインデックスから、nvidia-vfx は NVIDIA の配布元から取る。"""
+    steps = []
+    if not have_venv:
+        steps.append(Step("upscale-rtxvsr: 仮想環境の作成(uv venv)", ["uv", "venv", "--python", "3.12", str(venv)]))
+    steps.append(Step("upscale-rtxvsr: torch(CUDA 12.8 版)の導入",
+                      ["uv", "pip", "install", "--python", str(py), "--index-url", RTXVSR_TORCH_INDEX] + RTXVSR_TORCH))
+    steps.append(Step("upscale-rtxvsr: nvidia-vfx / PyAV / numpy の導入",
+                      ["uv", "pip", "install", "--python", str(py), "--extra-index-url", NVIDIA_INDEX] + RTXVSR_PACKAGES))
+    return steps
+
+
+def rtxvsr_ready(py: Path, run: Callable = subprocess.run) -> bool:
+    """その Python が torch(CUDA)・PyAV・nvidia-vfx を読み込めるか。"""
+    if not Path(py).is_file():
+        return False
+    try:
+        r = run([str(py), "-c", RTXVSR_IMPORTS], capture_output=True, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def setup_rtxvsr(cfg: Settings, accept_license: bool = False, plat: str = None, smi: Callable = None,
+                 run: Callable = subprocess.run) -> bool:
+    """RTX Video Super Resolution(nvidia-vfx)を <tools_dir>/rtxvsr/.venv に入れる。NVIDIA の独自ライセンスなので、同意(--accept-nvidia-license)が
+    無ければ入れない。使えない GPU(Tensor コアの無い GTX・古いドライバ)なら、数 GB を取得する前に断る。"""
+    from studio import gpu, upscale
+    if not accept_license:
+        say(f"  nvidia-vfx は NVIDIA の独自ライセンスのソフトウェアです。利用条件({upscale.NVIDIA_LICENSE_URL})を読んで同意するなら、"
+            "--accept-nvidia-license を付けてもう一度実行してください(画面の「入れる」は、同意の確認のあとで付けます)")
+        say("失敗しました: NVIDIA の利用条件への同意がありません")
+        return False
+    ok, reason = upscale.rtxvsr_gpu_ok((smi or (lambda: gpu.smi_fields(upscale.SMI_FIELDS)))(), plat)
+    if not ok:
+        say(f"失敗しました: {reason}")
+        return False
+    venv, py = upscale.rtxvsr_venv(cfg), upscale.rtxvsr_python(cfg, plat)
+    if rtxvsr_ready(py, run):
+        say(f"  準備済みです: {py}")
+        return True
+    if not ensure_uv_on_path():
+        say("uv が見つかりません。setup.sh / setup.bat から実行してください(uv を入れます)。")
+        return False
+    say("  ※ 約 3GB のダウンロード(CUDA 版の torch と CUDA の部品、nvidia-vfx)で、ディスクには約 6.5GB 使います。回線次第で数分〜数十分かかります")
+    venv.parent.mkdir(parents=True, exist_ok=True)
+    for step in rtxvsr_steps(venv, py, have_venv=py.is_file()):
+        if not run_step(step, venv.parent):
+            return False
+    if not rtxvsr_ready(py, run):
+        say("失敗しました: 入れ終わりましたが、torch(CUDA)か nvidia-vfx を読み込めません。原因:")
+        try:
+            subprocess.call([str(py), "-c", RTXVSR_IMPORTS])
+        except OSError as e:
+            say(f"  実行できませんでした: {e}")
+        return False
+    say(f"  入りました: {py}")
+    return True
+
+
+def setup_upscale(cfg: Settings, method: str, accept_license: bool = False) -> bool:
+    from studio import upscale
+    say(f"\n>>> 編集タブの AI 拡大の道具: {upscale.METHODS[method]['ja']}(置き場所 {upscale.tools_dir(cfg)})")
+    if method == "realesrgan":
+        return setup_realesrgan(cfg)
+    return setup_rtxvsr(cfg, accept_license)
+
+
 def prefetch_llm(cfg: Settings) -> bool:
     """同梱 LLM(llama-server と GGUF と、画像・音声を読む投影ファイル)を、管理役と同じ関数で先に取得する。"""
     from studio import llm
@@ -1039,8 +1206,8 @@ def prefetch_llm(cfg: Settings) -> bool:
     return True
 
 
-def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> None:
-    """mv: MV の音声処理の道具を対象にしたときの結果(None なら対象外)。"""
+def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None, ups: Optional[dict] = None) -> None:
+    """mv: MV の音声処理の道具を対象にしたときの結果(None なら対象外)。ups: 拡大の道具の {方式: 結果}(対象にしたものだけ)。"""
     say("\n== まとめ ==")
     for name in selected:
         d = cfg.component_dir(name)
@@ -1054,6 +1221,12 @@ def print_summary(cfg: Settings, selected: list, mv: Optional[bool] = None) -> N
         say(f"  {MV_NAME:8} {MV_LABEL}")
         say(f"           場所: {mv_audio.tools_dir(cfg)}")
         say(f"           環境: {'あり' if mv else '未'}")
+    if ups:
+        from studio import upscale
+        for method, ok in ups.items():
+            say(f"  {'upscale-' + method:8} {upscale.METHODS[method]['ja']}(編集タブの AI 拡大)")
+            say(f"           場所: {upscale.tools_dir(cfg) / method}")
+            say(f"           環境: {'あり' if ok else '未'}")
     start = ".\\run.bat" if is_win() else "./run.sh"
     say(f"\n起動: {start}   → ブラウザで http://{cfg.host}:{cfg.port}")
     if any(component_status(n, cfg.component_dir(n), env=h3imgcache.engine_env(cfg))[1] is False for n in selected):
@@ -1072,6 +1245,8 @@ def parse_args(argv: list = None) -> argparse.Namespace:
     p.add_argument("--no-mv", action="store_true", help="MV の音声処理の道具(Demucs + librosa + CPU 版 torch、約 1.3GB。既定で入れる)を入れない")
     p.add_argument("--mv", action="store_true", help="以前の名残(道具は既定で入れるので、何も変わらない)")
     p.add_argument("--shortcut", action="store_true", help="Windows のデスクトップの起動アイコンだけを作る(ほかは何もしない)")
+    p.add_argument("--accept-nvidia-license", action="store_true",
+                   help="--only upscale-rtxvsr で、NVIDIA の利用条件(nvidia-vfx の独自ライセンス)に同意して入れる")
     return p.parse_args(argv)
 
 
@@ -1092,12 +1267,17 @@ def main(argv: list = None) -> int:
         cfg.components_dir = args.components_dir
         say(f"エンジンの取り込み先: {cfg.component_dir('h3').parent}(この場所を使い続けるなら studio.local.toml に components_dir = '...' を書いてください)")
     enabled = [n for n in ORDER if n in cfg.component_names()]
-    selected, want_mv, bad = parse_only(args.only, enabled, args.no_mv)
+    ups, rest = split_upscale(args.only)
+    if args.only.strip() and not rest:          # 拡大の道具だけ(エンジンも MV の道具も触らない)
+        selected, want_mv, bad = [], False, []
+    else:
+        selected, want_mv, bad = parse_only(rest, enabled, args.no_mv)
     if bad:
-        say(f"--only に使えない名前があります: {', '.join(bad)}(使えるのは {', '.join(enabled + [MV_NAME])})")
+        say(f"--only に使えない名前があります: {', '.join(bad)}(使えるのは {', '.join(enabled + [MV_NAME] + list(UPSCALE_TARGETS))})")
         return 2
     models = not args.no_models
-    say(f"対象のエンジン: {', '.join(selected + ([MV_NAME] if want_mv else []))}" + ("   [環境だけ。モデルは取得しません]" if not models else ""))
+    say(f"対象: {', '.join(selected + ([MV_NAME] if want_mv else []) + ['upscale-' + m for m in ups])}"
+        + ("   [環境だけ。モデルは取得しません]" if not models else ""))
 
     try:
         if selected and not check_prerequisites(selected, models, Path(cfg.root) / cfg.components_dir, ref=not args.no_ref):
@@ -1185,12 +1365,18 @@ def main(argv: list = None) -> int:
             mv_ok = setup_mv(cfg, models)
             if not mv_ok:
                 return 1
+        up_ok = {}
+        for method in ups:
+            up_ok[method] = setup_upscale(cfg, method, accept_license=args.accept_nvidia_license)
+            if not up_ok[method]:
+                return 1
     except KeyboardInterrupt:
         say("\n中断しました。setup をもう一度実行すると続きから進みます。")
         return 130
 
-    print_summary(cfg, selected, mv_ok)
-    offer_shortcut(Path(cfg.root))
+    print_summary(cfg, selected, mv_ok, up_ok)
+    if selected:        # 道具だけを入れたとき(画面の「入れる」も含む)は、起動アイコンの確認を出さない
+        offer_shortcut(Path(cfg.root))
     return 0
 
 

@@ -107,7 +107,7 @@ Thumbnail badges: **Imported** (取込) means it was imported from your PC, ▶ 
 | Video | Use as reference | Puts it into the Ref2VA references |
 | Music | Use as video reference (動画の参照に使う) | Puts the song into the Video tab's Ref2VA references (audio) |
 
-Every tab has **Save** (to your computer) and **Delete**.
+Every tab has **Save** (to your computer) and **Delete**. While a video or image is shown, there is also **Upscale** (拡大), which makes a new output upscaled 2–4× with AI (see "[Upscaling from the gallery](#upscaling-from-the-gallery)").
 
 ### Drag and drop
 
@@ -683,6 +683,37 @@ A list of what you've applied (type, value, and range, or "All"). Remove with **
 - Long videos take a few minutes (progress is shown). It runs separately from the preview.
 - The exported video can be viewed under **Last exported video** (最後に書き出した動画) below the preview, and **Save** gets it onto your computer. You can also drag it to other tabs' input fields.
 
+### Upscale (AI)
+
+Only at export, the resolution can be raised with AI (it doesn't apply while editing or to the preview; the source videos are unchanged). At the bottom of the left pane, under **Upscale (AI)** (拡大(AI アップスケール)), pick a **Size** (original / 2× / 3× / 4×) and a **Method**, then press **Export**. The note under the fields shows the export size ("1024×576 → 2048×1152") and the method that will be used. Progress appears inside the export progress as "拡大しています(… ×2) 37%" (upscaling).
+
+| Method | Good for | Requirements |
+|---|---|---|
+| **Real-ESRGAN (anime)** | Crisp lines. Best for anime and illustration styles. On realistic footage it can flatten textures | Any GPU. A few tens of seconds for a 5-second clip |
+| **RTX Video Super Resolution** | Fast and faithful to the source. Good for realistic footage | NVIDIA RTX 20 series or newer with driver 570 or later. Proprietary NVIDIA software, so the studio doesn't bundle it (you agree to NVIDIA's terms and install it from PyPI) |
+
+- **Recommended (auto)** (おすすめ(自動)): picks an installed, usable method automatically (RTX Video Super Resolution when both work). The note tells you which one.
+- **Install** (入れる): neither method is installed at first. Below the fields, each missing method is listed with an **Install** button, which starts the same install setup would do, in the background (progress shows right there; for RTX Video Super Resolution you're first asked to agree to NVIDIA's terms). From the command line: `.\setup.bat --only upscale-realesrgan` / `.\setup.bat --only upscale-rtxvsr --accept-nvidia-license` (Linux: `./setup.sh --only ...`). The tools live in `components/upscale/` (`[upscale] tools_dir`).
+- **The long edge is limited to 3840px** (`[upscale] max_edge`). If the chosen size would exceed it, the note says so and Export is disabled (pick a smaller size).
+- Both the upscaled video and **the original-size video** are added to the gallery (the upscaled one carries a tag such as "×2 Real-ESRGAN (anime)").
+- While a GPU generation (image, video, music video, short video) is running, upscaling waits for the GPU; the other edit operations and the preview don't wait.
+- **Recommended workflow**: make several versions at a small size (low VRAM / fast), compare them, join only the good takes in the Edit tab, and **upscale just that one export**. Far faster than generating everything large.
+- A higher-quality method (SeedVR2) is planned for the next version.
+
+#### Upscaling from the gallery
+
+You can also upscale a finished video or image on its own, without joining anything in the Edit tab.
+
+1. Show the video or image in the output area of the Image or Video tab (click it in History, or in the **Gallery**).
+2. Press **Upscale** (拡大) below it; a small panel opens underneath. Pick a **Size** (2× / 3× / 4×) and a **Method** (the choice is shared with the Edit tab's field above and remembered). The note shows the upscaled size ("1344×768 → 2688×1536") and the method that will be used.
+3. Press **Start upscaling** (拡大する). Progress appears in the panel as "拡大中: (source file name) …" (upscaling); **Cancel** (中止) stops it. If you open another output meanwhile, the upscaling keeps going and its progress stays visible.
+4. When it finishes, the result is added to the gallery (and that tab's history) as a **new output** and opens in the output area: videos become MP4, images PNG. **The original video or image stays as it is.** The upscaled one carries a tag such as "×2 Real-ESRGAN (anime)".
+
+- Images are written as **PNG**; **transparency (alpha) is not kept**.
+- The long-edge limit (3840px) and the **Install** buttons for missing methods work as above. **Start upscaling** is disabled when the size exceeds the limit or the method can't be used.
+- Only videos and images can be upscaled (**Upscale** doesn't appear for songs). One upscaling runs at a time.
+- If it fails, the panel shows "失敗: (reason)" (Failed) until you press **Start upscaling** again or close the panel.
+
 ### Fine print
 
 - All times are measured in **plain joined time** (before transitions shorten it).
@@ -934,6 +965,9 @@ Deleting files directly makes them go out of sync with the gallery. Use the on-s
 | `tools_python` in `[mv]` | Python for music video and short video audio processing (empty means `components/mvtools/.venv`) |
 | `device` in `[mv]` | Device for vocal separation. Empty means CPU (`cuda` for GPU) |
 | `subtitle_font` in `[mv]` | Caption font. Empty means Noto Sans CJK JP |
+| `tools_dir` in `[upscale]` | Where the Edit tab's upscaling tools (Real-ESRGAN, RTX Video Super Resolution) are installed. Default `components/upscale` |
+| `max_edge` in `[upscale]` | Upper limit of the long edge after upscaling (px). Default 3840 |
+| `rtxvsr_quality` in `[upscale]` | Quality level of RTX Video Super Resolution. Default `ULTRA` |
 
 ### Main API (for scripting)
 

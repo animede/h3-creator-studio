@@ -103,6 +103,35 @@ class InstallerTest(unittest.TestCase):
     def test_english_messages(self):
         for ja in (mvinstall.BUSY_MESSAGE, mvinstall.FAILED_MESSAGE.format(2), mvinstall.START_FAILED_MESSAGE.format("x")):
             self.assertNotRegex(i18n.tr(ja, "en"), r"[぀-ヿ一-鿿]", ja)
+        for target in mvinstall.LABELS:
+            label = mvinstall.label_of(target)
+            for ja in (mvinstall.BUSY_TEMPLATE.format(label), mvinstall.FAILED_TEMPLATE.format(label, 2, target), mvinstall.START_FAILED_TEMPLATE.format(label, "x")):
+                self.assertNotRegex(i18n.tr(ja, "en"), r"[぀-ヿ一-鿿]", ja)
+
+    def test_mvtools_messages_are_unchanged(self):
+        self.assertEqual(mvinstall.BUSY_MESSAGE, "MV の音声処理の道具を入れている最中です。終わるまでお待ちください")
+        self.assertEqual(mvinstall.FAILED_MESSAGE, "MV の音声処理の道具を入れられませんでした(終了コード {})。logs/mvtools-install.log を見てください")
+        self.assertEqual(mvinstall.START_FAILED_MESSAGE, "MV の音声処理の道具の導入を始められません: {}")
+        self.assertEqual(mvinstall.LOG_PATH, mvinstall.log_path_of("mvtools"))
+
+    def test_other_targets_get_their_own_command_log_and_messages(self):
+        inst = mvinstall.ToolsInstaller("upscale-rtxvsr", ("--accept-nvidia-license",), popen=self.popen(rc=1))
+        self.assertEqual(inst.command()[2:], ["--only", "upscale-rtxvsr", "--no-models", "--accept-nvidia-license"])
+        self.assertEqual(inst.log_path, mvinstall.REPO_ROOT / "logs" / "upscale-rtxvsr-install.log")
+        self.assertEqual(inst.label, "拡大の道具(RTX Video Super Resolution)")
+        inst = mvinstall.ToolsInstaller("upscale-realesrgan", popen=self.popen(rc=1), log_path=self.log)
+        self.assertEqual(inst.command()[2:], ["--only", "upscale-realesrgan", "--no-models"])
+        inst.start()
+        with self.assertRaises(mvinstall.InstallBusy) as cm:
+            inst.start()
+        self.assertEqual(str(cm.exception), "拡大の道具(Real-ESRGAN)を入れている最中です。終わるまでお待ちください")
+        self.assertEqual(self.calls[0][0], inst.command())
+        self.procs[0].release()
+        self.wait_done(inst)
+        self.assertEqual(inst.status()["error"], "拡大の道具(Real-ESRGAN)を入れられませんでした(終了コード 1)。logs/upscale-realesrgan-install.log を見てください")
+        self.assertIn("--only upscale-realesrgan --no-models", self.log.read_text(encoding="utf-8"))
+        default = mvinstall.ToolsInstaller()
+        self.assertEqual((default.target, default.command(), default.log_path), ("mvtools", mvinstall.command(), mvinstall.LOG_PATH))
 
 
 class InstallApiTest(unittest.TestCase):

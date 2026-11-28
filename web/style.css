@@ -509,6 +509,26 @@ fieldset.edbody:disabled { opacity: .55; }
 .edseltext { color: var(--text); }
 .edouthead .edoutname { color: var(--text); cursor: grab; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16em; display: inline-block; vertical-align: bottom; }
 #ed-adj-valwrap input[type=range], #ed-rng-valwrap input[type=range] { flex: 1; width: auto; min-width: 0; }      /* 値の字はスライダーの横に */
+/* 拡大(AI アップスケール)の欄: 別の fieldset なので、見出しが first-child でも音声の欄との間を空ける。道具の欄は MV の道具の案内と同じ .msg */
+.edup .edh:first-child { margin-top: 14px; }
+.edup .msg { margin: 6px 0 0; }
+.uptoolrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }      /* 拡大の道具の欄の 1 行(編集タブと生成物ビューアで共通。web/upscale.js) */
+.uptoolrow + .uptoolrow { margin-top: 4px; }
+.edtag { margin-left: 8px; }      /* 書き出した動画の寸法の横の「×2 方式」の印(生成物ビューアの拡大したものにも) */
+/* 生成物ビューアの「拡大」の欄: 保存・削除の行の下に、大きさ・方式・拡大する を 1 行に(狭ければ折り返す)。注意書き・道具の欄・進みはその下に幅いっぱい */
+.vup { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #0e1013; }
+.vup[hidden] { display: none; }
+.vup label { min-width: 0; }
+.vup select { width: auto; max-width: 100%; padding: 2px 6px; }
+.vupbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.vup button.primary { padding: 3px 16px; }
+.vup .note, .vup .msg, .vupprog { flex: 1 1 100%; margin: 0; }
+.vup .note:empty { display: none; }
+.vupprog[hidden] { display: none; }
+.vupprog .pbar { margin-bottom: 4px; }
+.vupmsg { font-size: 12px; overflow-wrap: anywhere; }
+.vupprog.err .vupmsg { color: var(--err); }
+#vup.active { border-color: var(--accent); }
 
 /* 幅の狭い画面(スマートフォン・縦のタブレット): 操作・生成物・履歴を 1 列に縦に並べ、高さは中身に合わせる(広い画面の見た目は変えない) */
 @media (max-width: 900px) {

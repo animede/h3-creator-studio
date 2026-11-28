@@ -78,3 +78,14 @@ gguf = ""
 mmproj = ""
 llama_server = ""
 tools_dir = "components/llm"
+
+# 編集タブの書き出しの AI 拡大(2 倍・3 倍・4 倍)。方式は Real-ESRGAN(Vulkan の動く GPU なら何でも。アニメ向けモデル)と
+# NVIDIA RTX Video Super Resolution(RTX 20 以降とドライバ 570 系以降。NVIDIA の利用条件に同意して入れる)。どちらも任意で、編集タブの「入れる」
+# (setup --only upscale-realesrgan / upscale-rtxvsr)で tools_dir に入る。
+# tools_dir      = 道具の置き場所(リポジトリ直下からの相対。絶対パス可)
+# max_edge       = 拡大後の長辺の上限(px)。超える指定は受け付けない(4K = 3840)
+# rtxvsr_quality = RTX Video Super Resolution の品質(ULTRA / HIGH / MEDIUM / LOW。ULTRA が最もきれいで、少し遅い)
+[upscale]
+tools_dir = "components/upscale"
+max_edge = 3840
+rtxvsr_quality = "ULTRA"

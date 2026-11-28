@@ -5,7 +5,8 @@
 
   set_state  → 検証して履歴に積む(プレビューは自動では作らない。画面が続けて preview を呼ぶ)
   preview    → 走っている(順番待ちを含む)プレビューを中止して、いまの状態の edit.preview ジョブを入れる
-  export     → edit.export ジョブを入れる。書き出しが走っていれば ExportBusy(API は 409)
+  export     → edit.export ジョブを入れる。書き出しが走っていれば ExportBusy(API は 409)。
+               upscale={"method", "scale"} を渡せば、書き出した動画を AI で拡大する(studio/upscale.py の resolve で検証し、params["upscale"] に入れる)
 プレビューは「作ったときの state の指紋」を台帳に残し、いまの state の指紋と違えば stale(最後の操作より古い)。
 ジョブの params に state の写しを入れる(順番待ちの間に操作が続いても、頼んだ時点の状態を作る。ギャラリーの削除の保護も、params に入った ID を見る)。
 状態の変更はイベントループのスレッドで行う(API のルートは async def)。
@@ -18,7 +19,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from . import editclip
+from . import config, editclip
+from . import upscale as upscale_mod
 from .jobs import TERMINAL
 
 log = logging.getLogger("studio.edit")
@@ -61,10 +63,12 @@ def sources_for(ledger, state: dict) -> dict:
 
 
 class EditManager:
-    """runner は JobRunner、ledger と outputs_dir は管理役のもの。"""
+    """runner は JobRunner、ledger と outputs_dir は管理役のもの。settings は書き出しの拡大の道具の場所と長辺の上限([upscale])を読む設定
+    (無ければ studio.config.settings)。"""
 
-    def __init__(self, runner, ledger, outputs_dir):
+    def __init__(self, runner, ledger, outputs_dir, settings=None):
         self.runner, self.ledger, self.outputs_dir = runner, ledger, Path(outputs_dir)
+        self.settings = settings if settings is not None else getattr(config, "settings", None)
         self._jobs: dict = {}      # プロジェクトの ID -> {"preview": ジョブの ID, "export": ジョブの ID, "last": 最後に入れたジョブの ID}
         self._seq: dict = {}       # プロジェクトの ID -> 最後に割り当てたプレビューの番号
 
@@ -119,13 +123,23 @@ class EditManager:
         self._track(pid, "preview", job)
         return self.view(pid)
 
-    def export(self, pid: str) -> dict:
-        """いまの状態を書き出すジョブを入れる。書き出しが走っていれば ExportBusy。"""
+    def export(self, pid: str, upscale: dict = None) -> dict:
+        """いまの状態を書き出すジョブを入れる。書き出しが走っていれば ExportBusy。
+        upscale = {"method": "auto" / 方式の id, "scale": 1〜4} なら、書き出した動画を AI で拡大する(倍率 1 は拡大しない)。使えない・大きすぎれば ValueError。"""
         proj = self._get(pid)
         if self._live(pid, "export") is not None:
             raise ExportBusy("書き出しの途中です。終わってからもう一度押してください")
         self._check_ready(proj["state"])
-        job = self.runner.submit("edit", "edit.export", {"project_id": pid, "state": proj["state"]})
+        params = {"project_id": pid, "state": proj["state"]}
+        if upscale:
+            if not isinstance(upscale, dict):
+                raise ValueError("upscale は {method, scale} の辞書で指定してください")
+            state = proj["state"]
+            resolved = upscale_mod.resolve(self.settings, upscale.get("method", upscale_mod.AUTO), upscale.get("scale"), state["width"], state["height"],
+                                           upscale_mod.max_edge(self.settings))
+            if resolved is not None:
+                params["upscale"] = resolved
+        job = self.runner.submit("edit", "edit.export", params)
         self._track(pid, "export", job)
         return self.view(pid)
 

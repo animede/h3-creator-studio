@@ -203,7 +203,13 @@ const EDIT_LOGIC = (() => {
     return r3(tl[j].start + Math.max(0, Math.min(p - starts[j], tl[j].end - tl[j].start)));
   }
 
-  return { r3, clone, clipLen, timeline, total, splitAt, deleteRange, insertAt, newClip, setClip, moveClip, setTransition, fixup, exportLength, outStarts, tlToOut, outToTl };
+  // 拡大(AI アップスケール)の選び(方式 method・倍率 scale)を、サーバの道具の答え(GET /api/upscale/tools)と照らす。中身は web/upscale.js の UPSCALE.planFor
+  // (生成物ビューアの「拡大」と共通)。auto は tools.auto_method に解決し、その方式で選べない倍率は 1(元のまま)に戻す
+  const upscalePlan = (tools, method, scale, w, h) => UPSCALE.planFor(tools, method, scale, w, h);
+  // 書き出し(POST /api/edit/{id}/export)に送る本文。倍率 1(元のまま)なら本文なし(undefined。今までと同じ呼び方)
+  const upscaleBody = (method, scale) => (Number(scale) > 1 ? { upscale: { method, scale: Number(scale) } } : undefined);
+
+  return { r3, clone, clipLen, timeline, total, splitAt, deleteRange, insertAt, newClip, setClip, moveClip, setTransition, fixup, exportLength, outStarts, tlToOut, outToTl, upscalePlan, upscaleBody };
 })();
 
 (() => {   // 他のタブと名前がぶつからないよう、タブごとに閉じる
@@ -291,6 +297,7 @@ const EDIT_LOGIC = (() => {
     current = id;
     remember(id);
     gen++;
+    loadUpscaleTools();          // 拡大の道具の様子も読み直す(別の画面やコマンドで入れたかもしれない)
     showMsg("");
     setView(null);
     renderProjSelect();
@@ -710,6 +717,43 @@ const EDIT_LOGIC = (() => {
     body.append(c);
   }
 
+  // ---- 拡大(AI アップスケール): 書き出しのときだけ掛ける(プレビューには掛からない)。道具の様子・導入・選びは web/upscale.js(UPSCALE。生成物ビューアの「拡大」と共通) ----
+  // タブを開いたとき・プロジェクトを選んだときに読み、導入(POST /api/upscale/tools/install)の間は 2 秒おきに読み直す。方式の名前・使えない理由はサーバの答えのまま出す
+
+  const UP = UPSCALE;
+  function loadUpscaleTools() { return UP.load(); }      // 読んでいる最中なら、その読みを待つ(重ねて読まない)
+  UP.onChange(() => {
+    renderFoot();
+    renderOutput();         // 書き出した動画の「×2 方式」の印は、方式の名前が分かってから付け直す
+  });
+
+  // 拡大の欄を描く。戻りは、書き出しを止めるか(長辺が上限を超える・選んだ方式が使えない)。方式の選択肢は、道具の一覧が変わったときだけ作り直す(開いている選択肢を閉じない)
+  function renderUpscale() {
+    const sel = ed("up-method"), sc = ed("up-scale"), job = view && view.job, st = view ? view.state : null, tools = UP.tools, pref = UP.pref;
+    UP.fillMethods(sel);
+    sel.value = UP.method(pref.method) ? pref.method : "auto";
+    const plan = L.upscalePlan(tools, sel.value, pref.scale, st && st.width, st && st.height);
+    for (const o of Array.from(sc.options || [])) o.disabled = o.value !== "1" && !plan.scales.includes(Number(o.value));
+    sc.value = String(plan.scale);
+    if (tools && plan.scale !== pref.scale) pref.scale = plan.scale;      // その方式で選べない倍率は、元のまま(1)に戻る(覚えるのは、自分で選び直したとき)
+    const parts = [];
+    if (UP.error) parts.push(UP.error);
+    else if (!tools) parts.push(t("拡大の方式を調べています…"));
+    else if (!plan.method && sel.value === "auto") parts.push(t("拡大の方式が入っていません。下の「入れる」で入れてください"));
+    else if (plan.scale > 1 && plan.size) {
+      parts.push(`${st.width}×${st.height} → ${plan.size[0]}×${plan.size[1]}` + (sel.value === "auto" ? `  ${UP.label(plan.method)}` : ""));
+      if (plan.tooBig) parts.push(t("拡大後の長辺が {max}px を超えます", { max: tools.max_edge }));
+      if (!plan.usable) parts.push(plan.hint || t("この方式はまだ使えません"));
+      if (plan.method === "rtxvsr" && !(UP.method("rtxvsr") || {}).installed) parts.push(t("NVIDIA の利用条件に同意して入れる方式です"));      // 入れる前の案内
+    } else if (st && st.width) parts.push(t("{w}×{h}(元のまま)", { w: st.width, h: st.height }));
+    ed("up-note").textContent = parts.join(" ");
+    UP.renderTools(ed("up-tools"));        // 道具の欄: 入っていない方式ごとに「入れる」。導入中はその進み、失敗の理由も
+    ed("upscale").disabled = !view || working || !!(job && job.kind === "edit.export");
+    return plan.scale > 1 && (plan.tooBig || !plan.usable);
+  }
+  ed("up-scale").onchange = () => { UP.pref.scale = Number(ed("up-scale").value) || 1; UP.remember(); renderFoot(); };
+  ed("up-method").onchange = () => { UP.pref.method = ed("up-method").value || "auto"; UP.remember(); renderFoot(); };
+
   // ---- ドロップ ----
 
   // PC のファイルは、取り込んでからギャラリーの生成物として使う(種類が合わないものはギャラリーに残すだけ)
@@ -926,7 +970,9 @@ const EDIT_LOGIC = (() => {
       makeDraggable(n, o.id);        // ふつうの動画として、他のタブへ落とせる
       ed("out-name").replaceChildren(n);
     }
-    ed("out-info").textContent = [o.width ? `${o.width}×${o.height}` : "", o.duration_s ? fmtSec(o.duration_s) : ""].filter(Boolean).join("  ");
+    const up = o.params && o.params.upscale;        // 拡大して書き出したもの: 寸法の後ろに「×2 Real-ESRGAN(アニメ向け)」の印
+    ed("out-info").replaceChildren([o.width ? `${o.width}×${o.height}` : "", o.duration_s ? fmtSec(o.duration_s) : ""].filter(Boolean).join("  "),
+      ...(up ? [el("span", "tag ext edtag", `×${up.scale} ${UP.label(up.method)}`)] : []));
     ed("out-save").href = o.url;
     ed("out-save").download = o.filename || "";
   }
@@ -935,10 +981,11 @@ const EDIT_LOGIC = (() => {
 
   function renderFoot() {
     const v = view, job = v && v.job;
+    const blocked = renderUpscale();          // 拡大の欄もここで描く(書き出しを止める理由 = 長辺の上限・使えない方式があれば true)
     ed("body").disabled = !v || working;
     ed("undo").disabled = !v || working || !v.can_undo;
     ed("redo").disabled = !v || working || !v.can_redo;
-    ed("export").disabled = !v || working || !v.state.clips.length || !!(job && job.kind === "edit.export");
+    ed("export").disabled = !v || working || !v.state.clips.length || !!(job && job.kind === "edit.export") || blocked;
     ed("ins-go").disabled = !insItem || !v || working;
     ed("fx-all").disabled = !v || working;
     ed("adj-all").disabled = !v || working;
@@ -1008,7 +1055,7 @@ const EDIT_LOGIC = (() => {
 
   ed("undo").onclick = () => work(async (id) => api(`/api/edit/${id}/undo`, "POST"));
   ed("redo").onclick = () => work(async (id) => api(`/api/edit/${id}/redo`, "POST"));
-  ed("export").onclick = () => work(async (id) => api(`/api/edit/${id}/export`, "POST"), false);
+  ed("export").onclick = () => work(async (id) => api(`/api/edit/${id}/export`, "POST", L.upscaleBody(ed("up-method").value, ed("up-scale").value)), false);      // 倍率 1 なら本文なし(今までと同じ)
 
   // ---- 右下: 編集プロジェクトの一覧(履歴の欄。ギャラリーに切り替え可) ----
 
@@ -1064,8 +1111,8 @@ const EDIT_LOGIC = (() => {
   };
 
   studio.on.tab.push((tab) => {
-    if (tab === "edit") { refresh(); }
-    else clearTimeout(timer);
+    if (tab === "edit") { refresh(); loadUpscaleTools(); }
+    else clearTimeout(timer);         // 拡大の道具の読み直し(導入の間だけ)は、生成物ビューアの「拡大」も使うので止めない
   });
   studio.on.items.push(() => renderSong());          // 曲の名前(ギャラリーが読み直されたとき)
 

@@ -193,9 +193,10 @@ class Ledger:
 
     def remove_stale_parts(self) -> int:
         """outputs/ の中の作りかけのファイル(*.part)を消し、消した数を返す。管理役の起動時に呼ぶ(まだ何も書いていない時。
-        強制終了で残った書き出し・プレビュー・ダウンロード・分離の途中のファイルで、名前が .part なので、どこからも使われない)。"""
+        強制終了で残った書き出し・プレビュー・ダウンロード・分離の途中のファイルで、名前が .part なので、どこからも使われない)。
+        *.part.png は画像の拡大の作りかけ(Real-ESRGAN は .png で終わる名前にしか書かないので、.part で終えられない)。"""
         n = 0
-        for p in self.root.rglob("*.part"):
+        for p in (*self.root.rglob("*.part"), *self.root.rglob("*.part.png")):
             try:
                 if p.is_file():
                     p.unlink()

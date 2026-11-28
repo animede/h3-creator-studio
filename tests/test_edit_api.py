@@ -8,9 +8,10 @@ from unittest import mock
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from studio import editclip, main, media
+from studio import editclip, main, media, upscale
 from studio.edit import EditManager
 from studio.ledger import Ledger
+from tests.test_upscale import fake_status
 
 
 def png_bytes() -> bytes:
@@ -188,6 +189,36 @@ class EditApiTest(unittest.TestCase):
         self.assertIn("書き出しの途中", r.json()["detail"])
         self.runner.jobs["job1"].status = "completed"
         self.assertEqual(self.client.post(f"/api/edit/{pid}/export").status_code, 200)
+
+    def test_export_with_upscale(self):
+        pid = self.create(self.state())["id"]
+        with mock.patch.object(upscale, "status", return_value=fake_status(realesrgan=True, rtxvsr=False)):
+            r = self.client.post(f"/api/edit/{pid}/export", json={"upscale": {"method": "auto", "scale": 2}})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["job"]["kind"], "edit.export")
+            self.assertEqual(self.runner.jobs["job1"].params["upscale"], {"method": "realesrgan", "scale": 2, "width": 2560, "height": 1440})
+            self.runner.jobs["job1"].status = "completed"
+            r = self.client.post(f"/api/edit/{pid}/export", json={"upscale": {"method": "rtxvsr", "scale": 2}})
+            self.assertEqual((r.status_code, r.json()["detail"]), (400, "GPU の条件"))                     # 使えない方式は、その理由を日本語で
+            r = self.client.post(f"/api/edit/{pid}/export", json={"upscale": {"method": "realesrgan", "scale": 4}})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(r.json()["detail"], "拡大後の長辺が 3840px を超えます(5120×2880)。大きさを下げてください")
+            r = self.client.post(f"/api/edit/{pid}/export", json={"upscale": {"method": "realesrgan", "scale": 4}}, headers={"Accept-Language": "en"})
+            self.assertEqual(r.json()["detail"], "The long edge after upscaling exceeds 3840px (5120×2880). Choose a smaller size")
+            r = self.client.post(f"/api/edit/{pid}/export", json={"upscale": {"method": "auto", "scale": 1}})     # 倍率 1 は拡大しない
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertNotIn("upscale", self.runner.jobs["job2"].params)
+            self.runner.jobs["job2"].status = "completed"
+            self.assertEqual(self.client.post(f"/api/edit/{pid}/export", json={}).status_code, 200)        # 空の body も、body なしも、前と同じ
+            self.runner.jobs["job3"].status = "completed"
+            self.assertEqual(self.client.post(f"/api/edit/{pid}/export").status_code, 200)
+            self.assertNotIn("upscale", self.runner.jobs["job4"].params)
+        with mock.patch.object(upscale, "status", return_value=fake_status(realesrgan=False, rtxvsr=False)):
+            self.runner.jobs["job4"].status = "completed"
+            r = self.client.post(f"/api/edit/{pid}/export", json={"upscale": {"method": "auto", "scale": 2}})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(r.json()["detail"], "拡大の方式が入っていません。拡大の欄の「入れる」で Real-ESRGAN か RTX Video Super Resolution を入れてください")
+        self.assertEqual(len(self.runner.jobs), 4)
 
     def test_view_shows_stale_preview_and_public_output(self):
         pid = self.create(self.state())["id"]

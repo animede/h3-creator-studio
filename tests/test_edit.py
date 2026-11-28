@@ -12,11 +12,12 @@ from unittest import mock
 
 from PIL import Image
 
-from studio import edit, editclip, media, mv_audio
+from studio import edit, editclip, media, mv_audio, upscale
 from studio.edit import EditManager, ExportBusy
 from studio.handlers import edit as eh
 from studio.jobs import Ctx, Job, JobCancelled, JobFailed
 from studio.ledger import EDIT_HISTORY_MAX, Ledger
+from tests.test_upscale import fake_status
 
 
 def png_bytes() -> bytes:
@@ -321,6 +322,34 @@ class EditManagerTest(EditBase):
         self.mgr.export(pid)                                                                          # 終われば、もう一度書き出せる
         self.assertEqual(len(self.runner.jobs), 2)
 
+    def test_export_with_upscale_resolves_against_the_state_size(self):
+        v = self.create()
+        pid = v["id"]
+        with mock.patch.object(upscale, "status", return_value=fake_status(realesrgan=True, rtxvsr=True)) as st:
+            self.mgr.export(pid, {"method": "auto", "scale": 2})
+        self.assertEqual(self.runner.jobs["job1"].params["upscale"], {"method": "rtxvsr", "scale": 2, "width": 2560, "height": 1440})   # 1280×720 の 2 倍
+        self.assertIs(st.call_args.args[0], self.mgr.settings)
+        self.runner.jobs["job1"].status = "completed"
+        with mock.patch.object(upscale, "status", return_value=fake_status(realesrgan=True, rtxvsr=False)):
+            self.mgr.export(pid, {"method": "auto", "scale": 1})                                   # 倍率 1 は拡大しない
+            self.assertNotIn("upscale", self.runner.jobs["job2"].params)
+            self.runner.jobs["job2"].status = "completed"
+            self.mgr.export(pid, {"scale": 3})                                                     # 方式を省けば auto
+            self.assertEqual(self.runner.jobs["job3"].params["upscale"]["method"], "realesrgan")
+            self.runner.jobs["job3"].status = "completed"
+            with self.assertRaisesRegex(ValueError, "^GPU の条件$"):                                 # 使えない方式は、その理由
+                self.mgr.export(pid, {"method": "rtxvsr", "scale": 2})
+            with self.assertRaisesRegex(ValueError, "3840px を超えます"):
+                self.mgr.export(pid, {"method": "realesrgan", "scale": 4})
+            with self.assertRaisesRegex(ValueError, "upscale は"):
+                self.mgr.export(pid, "x")
+        with mock.patch.object(upscale, "status", return_value=fake_status(realesrgan=False, rtxvsr=False)):
+            with self.assertRaisesRegex(ValueError, "拡大の方式が入っていません"):
+                self.mgr.export(pid, {"method": "auto", "scale": 2})
+        self.assertEqual(len(self.runner.jobs), 3)                                                   # 失敗はジョブを入れない
+        fresh = EditManager(self.runner, self.ledger, self.root, settings=object())
+        self.assertIsInstance(fresh.settings, object)
+
     def test_export_and_preview_run_side_by_side_and_view_prefers_export(self):
         v = self.create()
         pid = v["id"]
@@ -619,6 +648,116 @@ class EditHandlerTest(EditBase):
         self.ledger.delete_edit_project(v["id"])
         with self.assertRaisesRegex(JobFailed, "編集プロジェクトが見つかりません"):
             asyncio.run(eh.run_export(job, self.ctx))
+
+    # ---- 書き出しの AI 拡大 ----
+
+    def upscale_job(self, v, method="realesrgan", scale=2) -> Job:
+        return self.job("edit.export", v["id"], v["state"], upscale={"method": method, "scale": scale})
+
+    def fake_runner(self, record: list, fail=None):
+        """upscale.run_realesrgan / run_rtxvsr の代わり: 引数と、呼ばれた時点の job.message を残し、dst を書く。"""
+        def run(job, tool, src, dst, scale, fps, work, ffmpeg, procs, *rest):
+            record.append({"tool": tool, "src": Path(src), "dst": Path(dst), "scale": scale, "fps": fps, "work": Path(work), "ffmpeg": ffmpeg,
+                           "procs": procs, "message": job.message, "rest": rest})
+            if fail is not None:
+                raise fail
+            Path(dst).write_bytes(b"upscaled")
+            return Path(dst)
+        return run
+
+    def test_normalize_and_record_keep_the_upscale(self):
+        v = self.create()
+        job = self.upscale_job(v, "rtxvsr", 3)
+        self.assertEqual(job.params["upscale"], {"method": "rtxvsr", "scale": 3, "width": 3840, "height": 2160})
+        self.assertEqual(eh.HANDLERS["edit.export"].record(job.params),
+                         {"project_id": v["id"], "state_hash": editclip.state_hash(v["state"]), "upscale": {"method": "rtxvsr", "scale": 3, "width": 3840, "height": 2160}})
+        self.assertNotIn("upscale", eh.normalize("edit.export", {"project_id": v["id"]}, self.ledger))
+        with self.assertRaisesRegex(ValueError, "拡大の方式が不明です"):
+            eh.normalize("edit.export", {"project_id": v["id"], "upscale": {"method": "nope", "scale": 2}}, self.ledger)
+        self.assertNotIn("upscale", eh.normalize("edit.preview", {"project_id": v["id"], "upscale": {"method": "realesrgan", "scale": 2}}, self.ledger))
+
+    def test_export_with_upscale_registers_two_outputs_and_points_the_project_at_the_upscaled_one(self):
+        v = self.create()
+        pid, seen = v["id"], []
+        job = self.upscale_job(v, "realesrgan", 2)
+        with mock.patch.object(upscale, "run_realesrgan", self.fake_runner(seen)), mock.patch.object(upscale, "realesrgan_exe", return_value=Path("/t/exe")):
+            asyncio.run(eh.run_export(job, self.ctx))
+        (call,) = seen
+        dest = self.root / "video" / f"edit_{pid}.mp4"
+        self.assertEqual((call["tool"], call["src"], call["dst"], call["scale"], call["fps"], call["work"], call["ffmpeg"]),
+                         (Path("/t/exe"), dest, self.root / "video" / f"edit_{pid}_x2.mp4", 2, 24, self.root / "edit" / pid / "upscale", "ffmpeg"))
+        self.assertIs(call["procs"], eh._procs)                                                      # 中止は同じ _procs から止める
+        self.assertEqual(len(job.outputs), 2)
+        orig, up = (self.ledger.get_output(oid) for oid in job.outputs)
+        self.assertEqual((orig["filename"], orig["width"], orig["height"], orig["path"]), ("テスト_edit.mp4", 1280, 720, f"video/edit_{pid}.mp4"))
+        self.assertEqual((up["filename"], up["width"], up["height"], up["duration_s"], up["tab"], up["job_id"], up["path"]),
+                         ("テスト_edit_x2.mp4", 2560, 1440, 11.0, "edit", "j1", f"video/edit_{pid}_x2.mp4"))
+        self.assertEqual(up["params"]["upscale"], {"method": "realesrgan", "scale": 2, "source_output_id": orig["id"]})
+        self.assertEqual((up["params"]["project_id"], up["params"]["name"], up["params"]["state"]), (pid, "テスト", v["state"]))
+        self.assertNotIn("upscale", orig["params"])
+        self.assertEqual(self.ledger.get_edit_project(pid)["output_id"], up["id"])
+        self.assertEqual((job.progress, job.message), (0.99, "ギャラリーに登録しています"))
+        # rtxvsr は道具の Python と品質を渡す
+        seen.clear()
+        job2 = self.upscale_job(v, "rtxvsr", 3)
+        with mock.patch.object(upscale, "run_rtxvsr", self.fake_runner(seen)), mock.patch.object(upscale, "rtxvsr_python", return_value=Path("/t/py")):
+            asyncio.run(eh.run_export(job2, self.ctx))
+        self.assertEqual((seen[0]["tool"], seen[0]["dst"].name, seen[0]["rest"]), (Path("/t/py"), f"edit_{pid}_2_x3.mp4", ("ULTRA",)))
+
+    def test_upscale_failure_keeps_the_original_and_says_so(self):
+        v = self.create()
+        job = self.upscale_job(v)
+        boom = JobFailed("拡大に失敗しました(Real-ESRGAN(アニメ向け)): boom", "tail")
+        with mock.patch.object(upscale, "run_realesrgan", self.fake_runner([], fail=boom)), mock.patch.object(upscale, "realesrgan_exe", return_value=Path("/t/exe")):
+            with self.assertRaises(JobFailed) as cm:
+                asyncio.run(eh.run_export(job, self.ctx))
+        self.assertEqual(cm.exception.message, "拡大に失敗しました(Real-ESRGAN(アニメ向け)): boom(元の大きさの動画はギャラリーに入っています)")
+        self.assertEqual(cm.exception.log_tail, "tail")
+        (oid,) = job.outputs
+        self.assertEqual(self.ledger.get_edit_project(v["id"])["output_id"], oid)
+        self.assertEqual(self.ledger.get_output(oid)["filename"], "テスト_edit.mp4")
+
+    def test_upscale_waits_until_the_gpu_engines_are_idle(self):
+        v = self.create()
+        seen, busy = [], {"h3": 1}
+        ctx = Ctx(types.SimpleNamespace(_busy=busy), self.ledger, self.root)
+        job = self.upscale_job(v)
+        messages = []
+        real_setattr = Job.__setattr__
+
+        def spy(self_, name, value):
+            if name == "message":
+                messages.append(value)
+            real_setattr(self_, name, value)
+
+        async def go():
+            asyncio.get_running_loop().call_later(0.05, busy.clear)                                  # 生成が終わる
+            with mock.patch.object(upscale, "run_realesrgan", self.fake_runner(seen)), mock.patch.object(upscale, "realesrgan_exe", return_value=Path("/t/exe")):
+                await eh.run_export(job, ctx)
+        with mock.patch.object(upscale, "GPU_WAIT_POLL_S", 0.01), mock.patch.object(Job, "__setattr__", spy):
+            asyncio.run(go())
+        self.assertEqual(seen[0]["message"], "GPU の生成が終わるのを待っています")                           # 待ってから走った
+        self.assertEqual(messages.count("GPU の生成が終わるのを待っています"), 1)
+        self.assertEqual(len(job.outputs), 2)
+        # 待っている間の中止
+        job2 = self.upscale_job(v)
+        busy["h3"] = 1
+
+        async def cancel_while_waiting():
+            asyncio.get_running_loop().call_later(0.03, lambda: setattr(job2, "cancel_requested", True))
+            with mock.patch.object(upscale, "run_realesrgan", self.fake_runner(seen)):
+                await eh.run_export(job2, ctx)
+        with mock.patch.object(upscale, "GPU_WAIT_POLL_S", 0.01), self.assertRaises(JobCancelled):
+            asyncio.run(cancel_while_waiting())
+        self.assertEqual((len(seen), len(job2.outputs)), (1, 1))                                     # 元の動画は登録済み、拡大は走らない
+
+    def test_export_without_upscale_is_unchanged(self):
+        v = self.create()
+        job = self.job("edit.export", v["id"], v["state"])
+        with mock.patch.object(upscale, "run_realesrgan") as run:
+            asyncio.run(eh.run_export(job, self.ctx))
+        run.assert_not_called()
+        self.assertEqual(len(job.outputs), 1)
 
 
 class RunFfmpegTest(unittest.TestCase):

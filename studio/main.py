@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import angles, editclip, genres, h3cache, h3imgcache, i18n, mv_audio, mvinstall, presets, procman, samples, styles
+from . import angles, editclip, genres, h3cache, h3imgcache, i18n, mv_audio, mvinstall, presets, procman, samples, styles, upscale
 from .components import ComponentNotInstalled, all_specs
 from . import __version__
 from .config import REPO_ROOT, settings
@@ -41,6 +41,7 @@ from .samples import SampleError
 from .scheduler import Scheduler
 from .short import ShortDirector, propose_narration
 from .handlers import ace as ace_handler
+from .handlers import upscale as upscale_handler
 from .songplan import SongPlanError, make_caption, make_plan
 from .tts import Tts, TtsError
 
@@ -50,7 +51,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class _QuietPolling(logging.Filter):
     """画面が 1〜2 秒おきに取りに来る状態・進捗のアクセスログは出さない(端末が埋まって肝心の行が見えなくなる)。"""
     _QUIET = ("/api/status", "/i18n.js", "/api/jobs/", "/api/jobs?", "/api/operations/", "/api/gallery", "/api/llm/status",
-              "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/presets", "/api/samples", "/outputs/", "/samples/", "/app.js", "/style.css", "/gallery.js", "/jobs.js",
+              "/api/components/", "/api/mv", "/api/short", "/api/edit", "/api/upscale", "/api/presets", "/api/samples", "/outputs/", "/samples/", "/app.js", "/style.css", "/gallery.js", "/upscale.js", "/jobs.js",
               "/presets.js", "/samples.js", "/image.js", "/video.js", "/music.js", "/mv.js", "/short.js", "/edit.js", "/dnd.js", "/viz.js", "/help.js", "/api/help", "/docs/img/", "/favicon.ico")
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -76,6 +77,8 @@ async def lifespan(app: FastAPI):
     stale = await asyncio.to_thread(ledger.remove_stale_parts)        # 前回の強制終了で残った作りかけ(*.part)。起動時はまだ何も書いていない
     if stale:
         logging.getLogger("studio.main").info("作りかけのファイル(*.part)を %d 個消しました", stale)
+    # ギャラリーの拡大の作業フォルダ(outputs/upscale/<ジョブの ID>)。ジョブは再起動で消えるので、残っているのは強制終了の残り(コマの PNG)だけ
+    await asyncio.to_thread(shutil.rmtree, OUTPUTS_DIR / upscale.WORK_DIRNAME, True)
     app.state.tts = Tts(sched, ledger, OUTPUTS_DIR)
     app.state.llm = llm = Llm(settings)
     app.state.jobs = runner = JobRunner(Ctx(sched, ledger, OUTPUTS_DIR, llm=llm, tts=app.state.tts,
@@ -85,8 +88,9 @@ async def lifespan(app: FastAPI):
     app.state.short = short_director = ShortDirector(runner, ledger, OUTPUTS_DIR)
     short_director.restore()       # ショート動画も同じ
     app.state.samples = samples.load_samples()      # 同梱のサンプル(samples/*/sample.json)。読めないものは警告を出して飛ばす
-    app.state.edit = EditManager(runner, ledger, OUTPUTS_DIR)      # 編集タブ(ジョブは再起動で消えるので、復元するものは無い)
+    app.state.edit = EditManager(runner, ledger, OUTPUTS_DIR, settings)      # 編集タブ(ジョブは再起動で消えるので、復元するものは無い)
     app.state.mvinstall = installer = mvinstall.ToolsInstaller()     # MV の音声処理の道具を画面から入れる(同時に 1 つ)
+    app.state.installers = {mvinstall.MVTOOLS: installer}            # 画面から入れる道具の導入役(target ごと。拡大の道具は _installer が足す)
     llm.busy = lambda: runner.gpu_pending() or sched.gpu_switching()     # GPU の仕事が走っている(待っている)間、LLM は CUDA を隠して CPU だけで動く
     gpu.configure_devices(settings.gpu_devices)     # 管理する GPU(2 枚以上ある PC。監視とエンジンの CUDA_VISIBLE_DEVICES の両方)
     app.state.monitor = monitor = GpuMonitor(rss_provider=sched.rss_map, generating=runner.is_generating)
@@ -96,7 +100,8 @@ async def lifespan(app: FastAPI):
     runner.start()
     await sched.adopt_running()
     yield
-    await asyncio.to_thread(installer.stop)       # 導入の途中なら、子プロセスごと止める
+    for inst in list(app.state.installers.values()):
+        await asyncio.to_thread(inst.stop)       # 導入の途中なら、子プロセスごと止める
     await runner.stop()
     await llm.stop()
     monitor.stop()
@@ -473,10 +478,20 @@ def _mv_public(view: Optional[dict]) -> Optional[dict]:
     return {**view, "output": _public(view["output"]) if view.get("output") else None} if view else view
 
 
-def _installer() -> mvinstall.ToolsInstaller:
-    inst = getattr(app.state, "mvinstall", None)
+def _installer(target: str = mvinstall.MVTOOLS, extra_args=()) -> mvinstall.ToolsInstaller:
+    """target の導入役(無ければ作る)。mvtools は前からの app.state.mvinstall を使う(テストが差し替える)。"""
+    installers = getattr(app.state, "installers", None)
+    if not isinstance(installers, dict):
+        installers = app.state.installers = {}
+    if target == mvinstall.MVTOOLS:
+        inst = getattr(app.state, "mvinstall", None)
+        if inst is None:
+            inst = app.state.mvinstall = mvinstall.ToolsInstaller()
+        installers[target] = inst
+        return inst
+    inst = installers.get(target)
     if inst is None:
-        inst = app.state.mvinstall = mvinstall.ToolsInstaller()
+        inst = installers[target] = mvinstall.ToolsInstaller(target, extra_args)
     return inst
 
 
@@ -523,6 +538,56 @@ def api_mv_tools_install():
     except OSError as e:
         raise HTTPException(500, inst.error or str(e))
     return {**_mv_tools_check(), **inst.status()}
+
+
+class UpscaleInstallIn(BaseModel):
+    method: str = ""                  # realesrgan / rtxvsr
+    accept_license: bool = False      # rtxvsr は NVIDIA の利用条件(nvidia-vfx)への同意が要る
+
+
+def _upscale_installer(method: str) -> mvinstall.ToolsInstaller:
+    m = upscale.METHODS[method]
+    return _installer(m["target"], m["install_args"])
+
+
+def _upscale_tools_view() -> dict:
+    """拡大の道具の様子(studio/upscale.py の status)と、導入中の方式・進み具合・失敗、拡大後の長辺の上限。"""
+    installing, progress_text, error = None, None, None
+    for mid in upscale.METHODS:
+        st = _upscale_installer(mid).status()
+        if st["installing"]:
+            installing, progress_text = mid, st.get("progress_text")
+        if st.get("error") and error is None:
+            error = st["error"]
+    return {**upscale.status(settings), "installing": installing, "progress_text": progress_text, "error": error, "max_edge": upscale.max_edge(settings)}
+
+
+@app.get("/api/upscale/tools")
+def api_upscale_tools():
+    """編集タブの書き出しの拡大: 方式ごとに入っているか・使えるか(使えなければ hint)、auto で選ばれる方式、導入の進み具合。"""
+    return _upscale_tools_view()
+
+
+@app.post("/api/upscale/tools/install", status_code=202)
+def api_upscale_tools_install(body: UpscaleInstallIn):
+    """拡大の道具を、setup と同じ手順(scripts/setup.py --only upscale-<方式> --no-models)で裏で入れ始める。
+    rtxvsr は accept_license が true でなければ 400(nvidia-vfx は NVIDIA の利用条件に同意して入れる。同梱はしない)。どれかを導入中なら 409。"""
+    method = body.method.strip().lower()
+    if method not in upscale.METHODS:
+        raise HTTPException(400, f"拡大の方式が不明です: {method}")
+    if upscale.METHODS[method]["license_url"] and not body.accept_license:
+        raise HTTPException(400, "NVIDIA の利用条件への同意が必要です")
+    for mid in upscale.METHODS:
+        if _upscale_installer(mid).installing:
+            raise HTTPException(409, mvinstall.BUSY_TEMPLATE.format(mvinstall.label_of(upscale.METHODS[mid]["target"])))
+    inst = _upscale_installer(method)
+    try:
+        inst.start()
+    except mvinstall.InstallBusy as e:
+        raise HTTPException(409, str(e))
+    except OSError as e:
+        raise HTTPException(500, inst.error or str(e))
+    return _upscale_tools_view()
 
 
 def _mv_tools_check() -> dict:
@@ -881,11 +946,15 @@ async def api_edit_frame(pid: str, body: EditFrameIn):
         return _public(await asyncio.to_thread(app.state.edit.extract_frame, pid, body.t))
 
 
+class EditExportIn(BaseModel):
+    upscale: Optional[dict] = None    # {"method": "auto" / "realesrgan" / "rtxvsr", "scale": 1〜4}。無い・倍率 1 なら拡大しない
+
+
 @app.post("/api/edit/{pid}/export")
-async def api_edit_export(pid: str):
-    """書き出しのジョブを入れる。書き出しが走っていれば 409。"""
+async def api_edit_export(pid: str, body: Optional[EditExportIn] = None):
+    """書き出しのジョブを入れる。書き出しが走っていれば 409。body の upscale で AI 拡大(使えない・大きすぎれば 400)。"""
     with _edit_errors():
-        return _edit_public(app.state.edit.export(pid))
+        return _edit_public(app.state.edit.export(pid, body.upscale if body else None))
 
 
 @app.patch("/api/edit/{pid}")
@@ -1124,6 +1193,29 @@ def api_gallery_delete(output_id: str):
     if res["missing"]:
         raise HTTPException(404, "その生成物は見つかりません")
     return {"ok": True}
+
+
+class GalleryUpscaleIn(BaseModel):
+    method: Any = upscale.AUTO          # "auto" / "realesrgan" / "rtxvsr"
+    scale: Any = None                   # 2 / 3 / 4(型は検証で見る。不正は 422 でなく 400 の日本語にする)
+    tab: Any = None                     # ジョブを見せるタブ(image / video。ほかは生成物の種類)
+
+
+@app.post("/api/gallery/{output_id}/upscale", status_code=202)
+def api_gallery_upscale(output_id: str, body: Optional[GalleryUpscaleIn] = None):
+    """ギャラリーの動画・画像を 1 つ AI で拡大するジョブ(upscale.output)を入れる。進み・中止は /api/jobs/{id} の口。
+    使えない方式・倍率・長辺の上限超え・動画と画像以外は 400(handlers/upscale.py の plan)。"""
+    body = body or GalleryUpscaleIn()
+    rec = app.state.ledger.get_output(output_id)
+    if rec is None:
+        raise HTTPException(404, "その生成物は見つかりません")
+    try:
+        params = upscale_handler.plan(app.state.ledger, rec, body.method, body.scale, settings)
+        tab = body.tab if body.tab in upscale_handler.KINDS else rec["kind"]
+        job = app.state.jobs.submit(tab, upscale_handler.KIND, params)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": job.id, "method": params["method"], "scale": params["scale"], "width": params["width"], "height": params["height"]}
 
 
 def _save_upload(f: UploadFile) -> dict:

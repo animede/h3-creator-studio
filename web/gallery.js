@@ -147,6 +147,7 @@ function renderViewer() {
   meta.hidden = !item;
   if (!item) {
     if (v.dataset.id !== "none") { v.dataset.id = "none"; detachVisualizers(v); v.replaceChildren(el("div", "placeholder", t("まだ生成物がありません"))); }
+    renderUpscalePanel(null);
     return;
   }
   if (v.dataset.id !== item.id) {       // 同じものを出し直さない(動画の再生が途切れないように)
@@ -172,7 +173,11 @@ function renderViewer() {
   }
   const sec = item.params && item.params.result && item.params.result.generation_seconds;
   if (sec) info.push(t("生成 {time}", { time: fmtSec(sec) }));
-  $("vinfo").textContent = info.join("  ");
+  const up = p.upscale;          // 拡大して作ったもの: 寸法などの後ろに「×2 Real-ESRGAN(アニメ向け)」の印(編集タブの書き出しと同じ)
+  const tag = up ? el("span", "tag ext edtag", `×${up.scale} ${UPSCALE.label(up.method)}`) : null;
+  if (tag && p.source_filename) tag.title = t("拡大の元: {name}", { name: p.source_filename });
+  if (up && !UPSCALE.tools && !UPSCALE.error) UPSCALE.load();      // 方式の名前は、道具の様子を読んでから(読めたら描き直す)
+  $("vinfo").replaceChildren(info.join("  "), ...(tag ? [tag] : []));
   const save = $("vsave");
   save.href = item.url;
   save.download = item.filename || "";
@@ -183,7 +188,147 @@ function renderViewer() {
     b.onclick = a.run;
     acts.append(b);
   }
+  renderUpscalePanel(item);
 }
+
+// ---- 拡大(AI アップスケール): ビューアの動画・画像を、AI で 2〜4 倍にした新しい生成物にする(POST /api/gallery/{id}/upscale → ジョブ)。元のものは残る ----
+// 道具の様子・方式と倍率の選びは upscale.js(UPSCALE。編集タブの書き出しの拡大と共通)。走っている拡大は、見ている生成物やタブが変わっても追い続ける
+// (進みの行はジョブのもので、拡大している元の名前を出す)。同時に走らせるのは 1 つだけ
+
+const UP_KINDS = ["video", "image"];            // 拡大できるもの(曲は無し)
+const vup = { open: false, job: null, last: null, timer: null, blocked: true };    // open: 欄を開いている、job: 走っている拡大のジョブ({...ジョブ, tab, name})、
+                                                                                   // last: 直近の失敗・中止(次の操作まで残す)、blocked: いまの選びでは拡大できない
+const canUpscale = (item) => !!item && UP_KINDS.includes(item.kind);
+
+// いまの選び(方式・倍率)。倍率は 2〜4(覚えた倍率が 2 未満なら 2)。その方式に無い倍率は、近いもの(同じ近さなら小さいほう)にする
+function upscaleChoice(item) {
+  const U = UPSCALE, sel = $("vup-method");
+  U.fillMethods(sel);
+  sel.value = U.method(U.pref.method) ? U.pref.method : "auto";
+  const want = Math.min(4, Math.max(2, Math.round(Number(U.pref.scale) || 2)));
+  const scales = U.plan(sel.value, want, item.width, item.height, item.kind).scales;
+  const scale = !scales.length || scales.includes(want) ? want : scales.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a));
+  return { method: sel.value, scale, scales, plan: U.plan(sel.value, scale, item.width, item.height, item.kind) };
+}
+
+// 「拡大」のボタンと欄(動画・画像のときだけ)。欄の中身は、見ている生成物の寸法と、道具の様子から
+function renderUpscalePanel(item) {
+  const ok = canUpscale(item), open = ok && vup.open, btn = $("vup");
+  btn.hidden = !ok;
+  btn.classList.toggle("active", open);
+  btn.setAttribute("aria-expanded", String(open));
+  $("vup-panel").hidden = !open;
+  if (!open) { renderUpscaleProgress(); return; }      // 閉じていても、ボタンと進みの行の状態はジョブに合わせておく
+  const U = UPSCALE, tools = U.tools, c = upscaleChoice(item), plan = c.plan, sc = $("vup-scale");
+  for (const o of Array.from(sc.options)) o.disabled = c.scales.length > 0 && !c.scales.includes(Number(o.value));
+  sc.value = String(c.scale);
+  const parts = [];
+  if (U.error) parts.push(U.error);
+  else if (!tools) parts.push(t("拡大の方式を調べています…"));
+  else if (!plan.method && c.method === "auto") parts.push(t("拡大の方式が入っていません。下の「入れる」で入れてください"));
+  else if (plan.method) {
+    const how = c.method === "auto" ? U.label(plan.method) : "";       // おすすめ(自動)のときは、使う方式の名前も
+    parts.push(plan.size && plan.scale > 1 ? `${item.width}×${item.height} → ${plan.size[0]}×${plan.size[1]}` + (how ? `  ${how}` : "") : how);
+    if (plan.tooBig) parts.push(t("拡大後の長辺が {max}px を超えます", { max: tools.max_edge }));
+    if (!plan.usable) parts.push(plan.hint || t("この方式はまだ使えません"));
+    if (plan.method === "rtxvsr" && !(U.method("rtxvsr") || {}).installed) parts.push(t("NVIDIA の利用条件に同意して入れる方式です"));      // 入れる前の案内
+  }
+  $("vup-note").textContent = parts.filter(Boolean).join(" ");
+  U.renderTools($("vup-tools"));        // 入っていない方式ごとに「入れる」。導入中はその進み、失敗の理由も
+  vup.blocked = !plan.method || plan.scale < 2 || plan.tooBig || !plan.usable;
+  renderUpscaleProgress();
+}
+
+// 進みの行(ジョブの進み、または直近の失敗・中止)と、拡大する / 中止 のボタン
+function renderUpscaleProgress() {
+  const j = vup.job || vup.last, box = $("vup-prog");
+  $("vup-go").disabled = !!vup.job || vup.blocked;
+  $("vup-stop").hidden = !(vup.job && vup.job.id);
+  box.hidden = !j;
+  if (!j) return;
+  const failed = j.status === "failed", cancelled = j.status === "cancelled";
+  const pct = j.status === "running" ? Math.round((j.progress || 0) * 100) : 0;
+  box.classList.toggle("err", failed);
+  const bar = box.querySelector(".pbar");
+  bar.hidden = failed || cancelled;
+  bar.classList.toggle("indet", j.status !== "running" || pct === 0);
+  bar.querySelector("i").style.width = j.status === "running" && pct > 0 ? pct + "%" : "";
+  box.querySelector(".vupmsg").textContent = failed ? j.text || t("失敗: {error}", { error: j.error || t("原因不明") }) : cancelled ? t("中止しました")
+    : t("拡大中: {name} {msg}", { name: j.name, msg: (j.status === "queued" && j.wait_reason) || j.message || "" }) + (pct > 0 ? `  ${pct}%` : "");
+  box.title = (failed && j.log_tail) || "";
+}
+
+async function startUpscale() {
+  const item = currentItem();
+  if (!canUpscale(item) || vup.job) return;
+  const c = upscaleChoice(item), tab = studio.tab;
+  vup.last = null;
+  vup.job = { id: null, status: "queued", progress: 0, message: t("順番を待っています"), tab, name: item.filename || item.id };
+  renderUpscaleProgress();
+  try {
+    const r = await fetch(`/api/gallery/${encodeURIComponent(item.id)}/upscale`, { method: "POST", headers: langHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ method: c.method, scale: c.scale, tab }) });
+    const js = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof js.detail === "string" ? js.detail : r.status === 422 ? t("入力を確認してください") : t("通信に失敗しました({status})", { status: r.status }));
+    vup.job = { ...vup.job, id: js.id };
+  } catch (e) {
+    vup.job = null;
+    vup.last = { status: "failed", text: t("拡大を始められませんでした: {error}", { error: e.message || e }) };
+    renderUpscaleProgress();
+    return;
+  }
+  renderUpscaleProgress();
+  clearTimeout(vup.timer);
+  vup.timer = setTimeout(pollUpscale, 300);
+}
+
+async function pollUpscale() {
+  const cur = vup.job;
+  if (!cur || !cur.id) return;
+  try {
+    const r = await fetch(`/api/jobs/${cur.id}`, { headers: langHeaders() });
+    if (r.status === 404) { vup.job = null; renderUpscaleProgress(); return; }      // ジョブが消えた(管理役の再起動など)
+    if (r.ok) {
+      const job = await r.json();
+      if (["completed", "failed", "cancelled"].includes(job.status)) { await finishUpscale(cur, job); return; }
+      vup.job = { ...job, tab: cur.tab, name: cur.name };
+      renderUpscaleProgress();
+    }
+  } catch (e) { /* 一時的な通信失敗は次の周で再試行 */ }
+  vup.timer = setTimeout(pollUpscale, 1000);
+}
+
+// 終わった: できたら一覧を読み直し、始めたタブのビューアで新しい生成物を開いて、欄を閉じる。失敗・中止は、次の操作まで進みの行に残す
+async function finishUpscale(cur, job) {
+  vup.job = null;
+  if (job.status === "completed") {
+    vup.last = null;
+    vup.open = false;
+    await loadGallery();
+    if ((job.outputs || []).length) studio.viewing[cur.tab] = job.outputs[0];
+    renderHistory();
+    renderViewer();
+  } else {
+    vup.last = { ...job, name: cur.name };
+    renderUpscaleProgress();
+  }
+}
+
+$("vup").onclick = () => {
+  vup.open = !vup.open;
+  if (!vup.job) vup.last = null;        // 失敗・中止の知らせは、次の操作まで
+  if (vup.open) UPSCALE.load();          // 道具の様子を読み直す(別の画面やコマンドで入れたかもしれない)
+  renderUpscalePanel(currentItem());
+};
+$("vup-go").onclick = startUpscale;
+$("vup-stop").onclick = async () => {
+  const j = vup.job;
+  if (!j || !j.id) return;
+  try { await fetch(`/api/jobs/${j.id}/cancel`, { method: "POST", headers: langHeaders() }); } catch (e) { /* 次の周で状態が分かる */ }
+};
+$("vup-scale").onchange = () => { UPSCALE.pref.scale = Number($("vup-scale").value) || 2; UPSCALE.remember(); renderUpscalePanel(currentItem()); };
+$("vup-method").onchange = () => { UPSCALE.pref.method = $("vup-method").value || "auto"; UPSCALE.remember(); renderUpscalePanel(currentItem()); };
+UPSCALE.onChange(() => { if (!studio.own[studio.tab]) renderViewer(); });      // 道具の様子が変わった(読めた・導入が進んだ): 欄と、拡大の印の方式の名前を描き直す
 
 // ---- ギャラリー(右側 2 枚を 1 枚に切り替える) ----
 

@@ -3,7 +3,7 @@
 
 (The repository is still named `h3-creator-studio`.)
 
-**Latest: v1.2.1 (2026-11-28 JST)** — On PCs with little RAM (under 32GB) the studio now stops the previous engine when it switches engines, giving its RAM back (on a 16GB PC a music video made right after an image crashed while the video engine was loading; `[gpu] stop_on_switch`). When the bundled LLM is downloaded on first use (about 5GB, e.g. the first prompt enhancement), the progress shows next to the Enhance button and in the engine panel. A music video now completes on an RTX 3060 Laptop 6GB with 16GB of RAM (448×448, 3-5 minutes per scene). v1.2.0 (2026-11-28) added comparing and choosing scene takes and fixed Windows setup messages being wiped; v1.0.0 (2026-11-26) was the first public release. [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
+**Latest: v1.3.0 (2026-11-29 JST)** — **AI upscaling** (2–4×) at export in the Edit tab. Two methods, both optional installs: Real-ESRGAN (anime) and RTX Video Super Resolution (NVIDIA RTX 20 series or newer; installed after agreeing to NVIDIA's terms), via the **Install** button in the field or `setup --only upscale-realesrgan` / `upscale-rtxvsr --accept-nvidia-license`. The original-size video stays in the gallery too. Videos and images in the gallery can be upscaled too (**Upscale** in the output viewer). The higher-quality SeedVR2 comes in the next version. v1.2.1 (2026-11-28): on PCs with under 32GB of RAM the previous engine is stopped when switching engines to give its RAM back (`[gpu] stop_on_switch`), LLM download progress is shown, and a music video completes on an RTX 3060 Laptop 6GB with 16GB of RAM. v1.2.0 (2026-11-28) added comparing and choosing scene takes and fixed Windows setup messages being wiped; v1.0.0 (2026-11-26) was the first public release. [GitHub commits](https://github.com/animede/h3-creator-studio/commits/main).
 
 The UI language can be switched between **日本語 / English** next to the Help button at the top right (the choice is remembered in the browser; by default it follows the browser language). Progress, error and engine-status messages from the server follow the chosen language too (a few untranslated messages and the engines' own logs stay as they are).
 
@@ -20,7 +20,7 @@ A creative studio for everyone that brings the ideas of the author's earlier cre
 - **Text-to-speech**: turn text into a voice to use as audio material for videos (AivisSpeech)
 - **Music Video**: from one character image and one song, make a lip-sync music video or an image MV with no singing
 - **Short Video**: from a story, a song, narration and reference images, make a short video with a narrative (no length limit; above 5 minutes, it warns you that generation will take a while). Narration is spoken by TTS with matching lip movement, and captions can be burned in
-- **Edit**: join, cut and insert your videos, images and songs; color tones, zoom, pan, fades, replacing the music. Join the videos you made into one long video. Undo / redo, with a preview (no GPU needed)
+- **Edit**: join, cut and insert your videos, images and songs; color tones, zoom, pan, fades, replacing the music. Join the videos you made into one long video. Undo / redo, with a preview (no GPU needed). **AI upscaling** at export (2–4×; Real-ESRGAN / RTX Video Super Resolution, optional installs)
 - **Prompt enhancement, lyrics and story writing**: the bundled LLM (Gemma 4) helps. It looks at an image to describe the character, and listens to a song to describe it
 - **Gallery and presets**: everything you make stays in the gallery and can be reused across tabs by drag and drop. Input values can be saved as presets
 
@@ -155,7 +155,7 @@ cd h3-creator-studio
 | Option | Meaning |
 |---|---|
 | `--no-models` | Create the environments only. Models come later (run setup again to download them) |
-| `--only h3,ace` | Only the given engines (`h3` `h3image` `ace` `aivis`; the Music Video audio tools are `mvtools`). With `--only`, only what you list is handled, so the tools are skipped too unless `mvtools` is listed |
+| `--only h3,ace` | Only the given engines (`h3` `h3image` `ace` `aivis`; the Music Video audio tools are `mvtools`, the Edit tab's upscaling tools are `upscale-realesrgan` / `upscale-rtxvsr`, the latter also needing `--accept-nvidia-license` to agree to NVIDIA's terms). With `--only`, only what you list is handled, so the tools are skipped too unless `mvtools` is listed |
 | `--llm` | Also download the bundled LLM (about 5GB) and the projector file that reads images and audio (about 0.56GB; used by "From image" and "From song" in Music Video) up front. Without it, they are downloaded on first use |
 | `--no-mv` | Skip the Music Video tab's audio processing (Demucs, librosa, CPU torch; about 0.3–0.4GB download, about 1.3GB on disk), which is installed into `components/mvtools/` by default. `--only mvtools` installs just this. `--mv` is still accepted but does nothing |
 | `--ace-xl` | Also install the XL models for music (about 45GB; the default is 2B only, about 15GB) |
@@ -215,6 +215,7 @@ Open **http://127.0.0.1:8700** in your browser. With `.\run.bat --open` (Linux: 
 - The **Gallery** (ギャラリー) button in history switches the right side to the **gallery** (all outputs, filterable by All / Image / Video / Music). **Back** (戻る) returns to history.
 - **Drag and drop**: input fields accept files from your PC and outputs from the gallery or history **the same way**. Use what you made as the next input.
 - **Delete**: the "×" on thumbnails in history and gallery, **Delete** (削除) in the output viewer, or pick several with **Select** (選択) and delete them together. The files are removed too, and this cannot be undone. Outputs used by running or queued jobs, or by a Music Video project that can still continue, cannot be deleted. When deleting a Music Video or Short Video project, you can choose whether to delete the finished video as well.
+- **Upscale** (拡大): while a video or image is shown in the output viewer of the Image or Video tab, **Upscale** makes a new output upscaled 2–4× with AI (videos become MP4, images PNG; the original stays; methods and installs are shared with the Edit tab's upscaling).
 
 ![Screen (Music Video tab: controls on the left, outputs and scenes top right, history bottom right)](docs/img/screen-mv.png)
 
@@ -389,6 +390,7 @@ Simple editing of gallery videos, images and songs: **join, cut ranges, insert i
 - Every action rebuilds the **preview** (a light MP4, 480 on the short side). While it's building, the video is blurred and progress shows. If you keep editing, the half-built one is cancelled and a new one starts. If it says the preview is out of date ("プレビューは古い版です"), press **Rebuild** (作り直す).
 - **Export** makes an MP4 at the source resolution (`outputs/video/edit_<ID>.mp4`; `_2`… from the second time) and adds it to the gallery. It can take a few minutes (progress shows). Save it from "Last exported video" under the preview, or drop it into other tabs' input fields.
 - Output size and frame rate follow **the first clip** (1024×576 at 24fps if there are only images). Videos of different sizes are scaled down and letterboxed with black.
+- **Upscale (AI)** (拡大(AI アップスケール)): at the bottom of the left pane, choose a **Size** (original / 2× / 3× / 4×) and a **Method**, and the resolution is raised with AI at export only (not in the preview). Methods: **Real-ESRGAN (anime)** (any GPU; crisp lines, best for anime and illustration styles) and **RTX Video Super Resolution** (NVIDIA RTX 20 series or newer with driver 570+; faithful to the source, good for realistic footage; proprietary NVIDIA license, so it isn't bundled: you agree to NVIDIA's terms and install it). Both are optional installs: the **Install** (入れる) button in the field, or `.\setup.bat --only upscale-realesrgan` / `.\setup.bat --only upscale-rtxvsr --accept-nvidia-license` (Linux: `./setup.sh --only ...`). The long edge is limited to 3840px. The original-size video stays in the gallery too. Making several small versions and upscaling only the good take is the fast way. See "Upscale (AI)" in docs/USAGE.en.md.
 
 **Undo / redo**: one action is one step (up to 100 steps). It still works after a supervisor restart.
 
@@ -505,6 +507,7 @@ AI agents such as Claude can also drive the studio with plain-language instructi
 | `tools_python` in `[mv]` | Python that runs the Music Video audio processing (Demucs, librosa). Empty means `components/mvtools/.venv` created by setup |
 | `device` in `[mv]` | Where vocal separation runs. Default `cpu` (runs in parallel with GPU generation) |
 | `subtitle_font` in `[mv]` | Font for Short Video narration captions. Empty means Noto Sans CJK JP (if missing, libass substitutes a font with the same glyphs; on Windows, `"Meiryo"` etc.) |
+| `tools_dir` / `max_edge` / `rtxvsr_quality` in `[upscale]` | Where the Edit tab's upscaling tools live (default `components/upscale`) / upper limit of the long edge after upscaling (default 3840px) / RTX Video Super Resolution quality (default `ULTRA`) |
 
 Engine names are `h3` / `h3image` / `ace` / `aivis`.
 
@@ -566,7 +569,7 @@ h3-creator-studio/
 ├── studio.local.toml.example  Example of your settings
 ├── pyproject.toml / requirements.txt  Python dependencies of the supervisor
 ├── LICENSE / NOTICE       Apache-2.0, and the record of ported files and third-party software used
-├── components/            Cloned engines (each an independent git repository; not tracked by git), llm (the bundled LLM) and mvtools (the audio-processing environment)
+├── components/            Cloned engines (each an independent git repository; not tracked by git), llm (the bundled LLM), mvtools (the audio-processing environment) and upscale (the Edit tab's upscaling tools)
 ├── outputs/               Outputs and the ledger (studio.db) (not tracked by git)
 ├── logs/                  Engine logs (not tracked by git)
 ├── tests/                 Tests (`python -m unittest discover -s tests -t .`)

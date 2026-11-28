@@ -455,6 +455,11 @@ EN = {
     "MV の音声処理の道具を入れられませんでした(終了コード {})。logs/mvtools-install.log を見てください":
         "Could not install the MV audio tools (exit code {0}). See logs/mvtools-install.log",
     "MV の音声処理の道具の導入を始められません: {}": "Cannot start installing the MV audio tools: {0}",
+    # 道具の導入の型(mvinstall.py の target ごとの名前が {} に入る。mvtools は上の決まった文が先に当たる)
+    "{}を入れている最中です。終わるまでお待ちください": "Installing {0}. Please wait until it finishes",
+    "{}を入れられませんでした(終了コード {})。logs/{}-install.log を見てください": "Could not install {0} (exit code {1}). See logs/{2}-install.log",
+    "{}の導入を始められません: {}": "Cannot start installing {0}: {1}",
+    "拡大の道具({})": "the upscaling tool ({0})",
     # 参照モード用の H3 のキャッシュ(h3cache.py。{} は作るコマンドで、訳さずにそのまま入る)
     "MiniMax-H3 の参照モード用のキャッシュ(transformer_ref_int8、約 32GB)がありません。MV・参照画像を使うショート動画・"
     "動画タブの参照モードに要ります。スタジオを止めてから、次を実行して作ってください(数時間。途中で止めると、作りかけの分は"
@@ -649,6 +654,50 @@ EN = {
     "編集プロジェクトに無い項目です: {}": "Fields not in an edit project: {0}",
     "これ以上戻せません": "Nothing more to undo",
     "これ以上やり直せません": "Nothing more to redo",
+
+    # ---- 書き出しの AI 拡大(upscale.py・handlers/edit.py・main.py の /api/upscale) ----
+    "Real-ESRGAN(アニメ向け)": "Real-ESRGAN (anime)",
+    "upscale は {{method, scale}} の辞書で指定してください": "upscale must be an object of the form {{method, scale}}",
+    "拡大の倍率は 2 / 3 / 4 のいずれかです": "The upscale factor must be 2 / 3 / 4",
+    "拡大の方式が不明です: {}": "Unknown upscale method: {0}",
+    "拡大の方式が入っていません。拡大の欄の「入れる」で Real-ESRGAN か RTX Video Super Resolution を入れてください":
+        "No upscale method is installed. Install Real-ESRGAN or RTX Video Super Resolution with the Install button in the upscale panel",
+    "{}は使えません": "{0} cannot be used",
+    "{}の倍率は {} のいずれかです": "The factor for {0} must be one of {1}",
+    "拡大後の長辺が {}px を超えます({}×{})。大きさを下げてください": "The long edge after upscaling exceeds {0}px ({1}×{2}). Choose a smaller size",
+    "{} の実行ファイル(Vulkan)が見つかりません: {}。「入れる」でもう一度入れてください":
+        "The {0} executable (Vulkan) was not found: {1}. Install it again with the Install button",
+    "{}が入っていません。拡大の欄の「入れる」で入れてください": "{0} is not installed. Install it with the Install button in the upscale panel",
+    "{}が入っていません。拡大の欄の「入れる」で入れてください(NVIDIA の利用条件への同意が要ります)":
+        "{0} is not installed. Install it with the Install button in the upscale panel (you must accept NVIDIA's license terms)",
+    "NVIDIA の利用条件への同意が必要です": "You must accept NVIDIA's license terms",
+    "NVIDIA の GPU の情報を読めません(nvidia-smi が無いか古い)。RTX Video Super Resolution は NVIDIA の RTX だけで使えます":
+        "Cannot read the NVIDIA GPU information (nvidia-smi is missing or too old). RTX Video Super Resolution works only on NVIDIA RTX GPUs",
+    "GPU の世代(compute capability)を読めません: {}": "Cannot read the GPU generation (compute capability): {0}",
+    "{} は RTX Video Super Resolution に対応していません(Tensor コアのある RTX 20 以降が要ります)":
+        "{0} does not support RTX Video Super Resolution (an RTX 20 or newer GPU with Tensor cores is required)",
+    "NVIDIA のドライバが古いです({})。RTX Video Super Resolution には {} 以降が要ります":
+        "The NVIDIA driver is too old ({0}). RTX Video Super Resolution needs {1} or newer",
+    "GPU の生成が終わるのを待っています": "Waiting for the GPU generation to finish",
+    "拡大の準備をしています({} ×{})": "Preparing the upscale ({0} ×{1})",
+    "拡大しています({} ×{}) {}%": "Upscaling ({0} ×{1}) {2}%",
+    "拡大した動画を作っています {}%": "Encoding the upscaled video {0}%",
+    "拡大した動画に音声を付けています": "Adding the audio to the upscaled video",
+    "拡大に失敗しました: {} を起動できません({})": "Upscaling failed: cannot start {0} ({1})",
+    "拡大に失敗しました({}): {}": "Upscaling failed ({0}): {1}",
+    "拡大に失敗しました: 動画からコマを取り出せませんでした": "Upscaling failed: no frames could be extracted from the video",
+    "拡大に失敗しました({}): 拡大できたコマが足りません({}/{})": "Upscaling failed ({0}): not enough frames were upscaled ({1}/{2})",
+    "拡大が {} 分以上進まないので止めました({})": "Stopped the upscale because it made no progress for {0}+ minutes ({1})",
+    "コマの取り出し、ffmpeg": "extracting frames, ffmpeg",
+    "動画の作成、ffmpeg": "encoding the video, ffmpeg",
+    "音声の結合、ffmpeg": "muxing the audio, ffmpeg",
+    "{}(元の大きさの動画はギャラリーに入っています)": "{0} (the original-size video is in the Gallery)",
+    # ギャラリーの動画・画像の拡大(handlers/upscale.py・main.py の /api/gallery/{id}/upscale)
+    "拡大できるのは動画と画像だけです": "Only videos and images can be upscaled",
+    "生成物のファイルが見つかりません(ギャラリーから削除されたかもしれません)": "The output's file was not found (it may have been deleted from the Gallery)",
+    "生成物の大きさ(幅・高さ)が分かりません": "The output's size (width and height) is unknown",
+    "拡大後の幅・高さを正の整数で指定してください": "The upscaled width and height must be positive integers",
+    "拡大しています({} ×{})": "Upscaling ({0} ×{1})",
 
     # ---- プリセット・サンプル(presets.py・samples.py) ----
     "同梱のプリセットは変更できません。複製してから編集してください": "Built-in presets cannot be changed. Duplicate it, then edit",
